@@ -6,7 +6,7 @@
  *
  * Bumerán (ida y vuelta), agarre (de pie, contra el que salta, contra el que se cubre), sismo
  * (imbloqueable, se salta), nube (no se apila, lento, daño de a poco), cura (completa, tope de vida,
- * interrumpida), estados sin cadena infinita, ráfaga contra la guardia y limpia, onda (arrastra a la
+ * la corta un golpe fuerte y no uno leve), estados sin cadena infinita, ráfaga contra la guardia y limpia, onda (arrastra a la
  * pared, se pasa con la esquiva), graffiti (estalla tarde, no pega de cerca), chorro cortado,
  * navajazo crítico, chilena contra el que salta, las pasivas y el determinismo.
  */
@@ -140,7 +140,8 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
     if (q.luchadores[0].estado === 'atacando') recup++
     return [{ especial1: t < 2 }, {}]
   })
-  ok(recup >= 50, 'agarre al aire: queda regalado (recuperación larga)', `${recup} ticks atacando`)
+  // 46 ticks (se estira 24 px al arrancar; eran 52 sin estirarse: revisión del 30/oct, segunda tanda).
+  ok(recup >= 44, 'agarre al aire: queda regalado (recuperación larga)', `${recup} ticks atacando`)
 }
 
 // ─── Sismo: imbloqueable de pie, se salta ───
@@ -253,16 +254,25 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
   p2.luchadores[0].vida = 980
   correr(p2, 140, (t) => [{ especial1: t < 2 }, {}])
   ok(p2.luchadores[0].vida === p2.luchadores[0].vidaMax, 'cura: nunca pasa de vidaMax', String(p2.luchadores[0].vida))
+  // Un golpe fuerte (la MÁQUINA de Simón) la corta.
   const p3 = nueva(['fabri', 'simon'], 330, 440)
   p3.luchadores[0].carga = 10
   p3.luchadores[0].vida = 500
   let curandoDespues = -1
   const evs3 = correr(p3, 140, (t, q) => {
     if (curandoDespues < 0 && q.luchadores[0].estado === 'aturdido') curandoDespues = q.luchadores[0].efectos.curando
-    return [{ especial1: t < 2 }, { golpe: t === 50 || t === 51 }]
+    return [{ especial1: t < 2 }, { herramienta: t === 40 || t === 41 }]
   })
   const c3 = de(evs3, 'curacion')
-  ok(c3.length >= 1 && c3.length < 6 && curandoDespues === 0, 'cura: si le pegan, se corta', `${c3.length} pedacitos, curando=${curandoDespues}`)
+  ok(c3.length >= 1 && c3.length < 6 && curandoDespues === 0, 'cura: un golpe fuerte la corta', `${c3.length} pedacitos, curando=${curandoDespues}`)
+  // Los leves y medios no (su armadura, revisión del 30/oct, segunda tanda): pegan, pero la cura sigue.
+  const p4 = nueva(['fabri', 'simon'], 330, 440)
+  p4.luchadores[0].carga = 10
+  p4.luchadores[0].vida = 500
+  const evs4 = correr(p4, 140, (t) => [{ especial1: t < 2 }, { golpe: t === 50 || t === 51 }])
+  const c4 = de(evs4, 'curacion')
+  const pegoLeve = de(evs4, 'golpe').some((g) => g.victima === 0 && g.fuerza === 'leve' && !g.bloqueado)
+  ok(pegoLeve && c4.length === 6, 'cura: un golpe leve pega pero no la corta (armadura)', `${c4.length} pedacitos, pegó ${pegoLeve}`)
 }
 
 // ─── Ráfaga de la Pistola ───

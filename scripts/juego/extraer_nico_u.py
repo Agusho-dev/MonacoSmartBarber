@@ -59,6 +59,10 @@ Formato del JSON (rutas relativas al JSON; coordenadas SIEMPRE en px de la hoja)
       fondoLiso      true | {"std", "azul", "lumMax"} | [varias pasadas]: saca el fondo liso y azulado
                      que el modelo se tragó (la «sombra» entre las piernas), inundando desde el fondo
                      verdadero
+      quitarLiso     [{"zona", "std": 6, "azul": 4, "lumMax": 90}]: lo mismo pero SÓLO dentro de la
+                     zona y sembrando también desde sus dos filas de abajo: el fondo encerrado entre
+                     las piernas que fondoLiso no alcanza (la franja del piso tiene textura y corta
+                     la inundación). Va después de fondoLiso y antes de incluir
       incluir        formas que se agregan enteras
       agregar        formas: se agrega lo que la máscara del PANEL tiene ahí (un pie que la
                      separación le dio al vecino)
@@ -71,7 +75,11 @@ Formato del JSON (rutas relativas al JSON; coordenadas SIEMPRE en px de la hoja)
       sinFondo       {"oscuro", "cierre", "margen"} (CH.quitar_fondo)
       rellenar       tapa huecos internos de menos de N px;  cerrar: radio de un cierre
       anclaZona      formas: el apoyo X sale sólo de esa parte (sin la moto, sin el bombo)
-    sumar          [["danio", 4], ...]: suma al final cuadros de otra animación (mismos rectángulos)
+    sumar          [["danio", 4], ...]: suma al final cuadros de otra animación (mismos rectángulos).
+                   La otra puede ser una animación AUXILIAR con nombre «_algo» (no está en CLAVES):
+                   sus cuadros entran al atlas pero su nombre no va al atlas.json. Sirve para un
+                   cuadro que necesita su propio panel (Fabri: el cierre de la Curación tiene la
+                   cabeza arriba del panel de su fila).
     alias          {"de": "combo", "usar": [5, 6, 7], "impactos": [2]}: la animación usa LOS MISMOS
                    rectángulos del atlas que otra (hojas de 18 paneles: herramienta1 = remate del
                    combo, herramienta2 = la patada). No duplica píxeles.
@@ -167,6 +175,22 @@ def quitar_fondo_liso(rgb, Mi, M, std=2.5, azul=4, lumMax=70, abrir=1):
     return out
 
 
+def quitar_liso_en_zona(rgb, Mi, zona, q):
+    """El fondo liso y azulado que quedó encerrado entre las piernas (la «sombra» del piso) y que
+    «fondoLiso» no alcanza porque la franja del piso del panel tiene textura y corta la inundación:
+    DENTRO de la zona se saca lo liso (desvío 5x5 < std), azulado (B-R >= azul) y oscuro (máx RGB <
+    lumMax) que se alcanza desde el afuera de la máscara o desde las dos filas de abajo de la zona.
+    La ropa negra tiene textura y no es azulada: frena la inundación."""
+    f = rgb.astype(np.float32)
+    liso = zona & (std_local(f) < float(q.get('std', 6))) & ((f[..., 2] - f[..., 0]) >= float(q.get('azul', 4))) \
+        & (f.max(axis=2) < float(q.get('lumMax', 90)))
+    semillas = liso & ~Mi
+    filas = np.nonzero(zona.any(axis=1))[0]
+    if len(filas):
+        semillas[filas.max() - 1:filas.max() + 1] |= liso[filas.max() - 1:filas.max() + 1]
+    return Mi & ~ndimage.binary_propagation(semillas, structure=np.ones((3, 3)), mask=liso)
+
+
 def editar(Mi, M, o, origen, tam, rgb):
     """Aplica las ediciones de un cuadro (formas en px de la hoja) sobre su máscara local."""
     def R(formas):
@@ -185,6 +209,8 @@ def editar(Mi, M, o, origen, tam, rgb):
     for paso in (fl if isinstance(fl, list) else [fl] if fl else []):
         # una lista = varias pasadas (p. ej. el fondo oscuro y la sombra del piso, más clara y azulada)
         Mi = quitar_fondo_liso(rgb, Mi, M, **(paso if isinstance(paso, dict) else {}))
+    for q in o.get('quitarLiso') or []:
+        Mi = quitar_liso_en_zona(rgb, Mi, R([q['zona']]), q)
     if o.get('incluir'):
         Mi |= R(o['incluir'])
     if o.get('sinFondo'):

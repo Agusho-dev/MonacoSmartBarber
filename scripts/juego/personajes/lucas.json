@@ -3,16 +3,38 @@
   "personaje": "lucas",
   "hoja": "../../../../juego-fuentes/lucas_anim.jpg",
   "salida": "../../../public/juego/personajes/lucas",
-  "retrato": { "anim": "levantarse", "cuadro": 3, "alto": 720, "cara": [16, -2, 50] },
+  "retrato": { "anim": "levantarse", "cuadro": 3, "alto": 720, "cara": [22, -3, 40], "_nota": "revisión 31/oct: la cara más cerrada y centrada en la cabeza (con [16, -2, 50] ocupaba un 10 % del cuadro, contra 21-26 % en Simón y Chipi)" },
   "animaciones": {
     "quieto": { "region": [11, 33, 350, 162], "cuadros": 5 },
-    "caminar": { "region": [362, 33, 718, 162], "cuadros": 5 },
+    "caminar": {
+      "region": [362, 33, 718, 162],
+      "cuadros": 5,
+      "porCuadro": {
+        "4": {
+          "_nota": "revisión 31/oct: el fondo entre las piernas quedaba opaco (una pollera negra); sale por tinte: la ropa negra es neutra y el fondo de la hoja tira a azul",
+          "quitar": [{ "zona": [655, 118, 700, 162], "bMenosRMin": 8, "lumMax": 60 }]
+        }
+      }
+    },
     "correr": {
       "region": [729, 33, 1084, 162],
       "cuadros": 4,
+      "_nota": "revisión 31/oct: la separación por manchas le daba a cada corredor la zapatilla de atrás del siguiente (el 3 se quedaba con un rectángulo de fondo en lugar de la suya): cada una vuelve a su dueño con agregar/excluir, y el fondo azulado que el modelo se traga entre los pies sale por tinte (la ropa negra es neutra y el fondo de la hoja tira a azul), sin los rectángulos de antes.",
       "porCuadro": {
-        "1": { "excluir": [[[840, 162], [840, 146], [850, 138], [858, 140], [858, 152], [894, 152], [894, 162]]] },
-        "3": { "excluir": [[1002, 146, 1050, 162], [[1006, 146], [1012, 138], [1022, 134], [1028, 146]]] }
+        "0": { "quitar": [{ "zona": [745, 118, 778, 162], "bMenosRMin": 8, "lumMax": 60 }] },
+        "1": {
+          "excluir": [[[892, 112], [910, 112], [931, 127], [931, 162], [897, 162], [895, 146], [893, 138], [884, 134], [883, 118], [888, 116]]],
+          "quitar": [{ "zona": [829, 110, 895, 162], "bMenosRMin": 8, "lumMax": 60 }]
+        },
+        "2": {
+          "agregar": [[[892, 112], [910, 112], [931, 127], [931, 162], [897, 162], [895, 146], [893, 138], [884, 134], [883, 118], [888, 116]]],
+          "excluir": [[975, 138, 996, 162]],
+          "quitar": [{ "zona": [884, 118, 952, 162], "bMenosRMin": 8, "lumMax": 60 }]
+        },
+        "3": {
+          "agregar": [[975, 138, 996, 162]],
+          "quitar": [{ "zona": [972, 118, 1040, 162], "bMenosRMin": 8, "lumMax": 60 }]
+        }
       }
     },
     "dash": { "region": [1096, 33, 1525, 162], "cuadros": 3, "usar": [1, 2, 2] },
@@ -30,7 +52,13 @@
       "cortes": [[78, 92], [158, 166], [232, 250], [330, 346]],
       "usar": [0, 1, 2, 3],
       "impactos": [3],
-      "porCuadro": { "2": { "excluir": [[148, 380, 164, 416]] } }
+      "porCuadro": {
+        "2": { "excluir": [[148, 380, 164, 416]] },
+        "3": {
+          "_nota": "revisión 31/oct (golpe[3], el impacto): la costura le daba la zapatilla de atrás del cuadro siguiente, pegada a la de adelante (dos zapatillas en el pie que pisa)",
+          "excluir": [[[326, 450], [348, 445], [348, 472], [331, 472], [330, 466], [328, 465], [327, 458]]]
+        }
+      }
     },
     "patada": {
       "inferencia": "caja",
@@ -41,12 +69,30 @@
     },
     "combo": {
       "region": [828, 352, 1525, 474],
-      "cortes": [[896, 904], [976, 986], [1044, 1054], [1128, 1140], [1230, 1240], [1294, 1303], [1386, 1396]],
+      "cortes": [[896, 904], [976, 986], [1044, 1054], [1128, 1140], [1206, 1214], [1294, 1303], [1386, 1396]],
       "usar": [0, 1, 2, 3, 5, 6],
       "impactos": [3, 5],
       "porCuadro": {
-        "2": { "excluir": [[[996, 474], [996, 463], [1008, 458], [1024, 458], [1024, 474]], [1024, 462, 1048, 474]] },
-        "6": { "quitar": [{ "zona": [1340, 370, 1390, 430], "bMenosRMin": 25, "lumMin": 100 }], "excluir": [[1379, 446, 1400, 478]] }
+        "1": { "_nota": "revisión 31/oct: el agujero entre el bebé y el brazo (el modelo lo dejaba afuera y se veía el fondo a través del portabebé)", "incluir": [[930, 388, 946, 406]] },
+        "2": {
+          "_nota": "revisión 31/oct: además, el fondo entre las piernas sale por tinte (la ropa negra es neutra y el fondo tira a azul)",
+          "excluir": [[[996, 474], [996, 463], [1008, 458], [1024, 458], [1024, 474]], [1024, 462, 1048, 474]],
+          "quitar": [{ "zona": [992, 425, 1050, 474], "bMenosRMin": 8, "lumMax": 60 }]
+        },
+        "3": { "quitar": [{ "zona": [1060, 425, 1135, 474], "bMenosRMin": 8, "lumMax": 60 }] },
+        "5": {
+          "_nota": "revisión 31/oct: el fondo entre las piernas quedaba opaco (sale por tinte) y la zapatilla de atrás, que el modelo perdía sobre el destello (la costura con el cuadro 4, que no se usa, pasa a 1206-1214 para que entre), se suma con incluir",
+          "incluir": [[[1226, 453], [1234, 452], [1237, 458], [1237, 465], [1234, 471], [1219, 471], [1219, 463], [1222, 458]]],
+          "quitar": [{ "zona": [1238, 425, 1300, 474], "bMenosRMin": 8, "lumMax": 60 }]
+        },
+        "6": {
+          "quitar": [
+            { "zona": [1340, 370, 1390, 430], "bMenosRMin": 25, "lumMin": 100 },
+            { "zona": [1300, 425, 1392, 474], "bMenosRMin": 25, "lumMin": 100 },
+            { "zona": [1300, 425, 1392, 474], "bMenosRMin": 8, "lumMax": 60 }
+          ],
+          "excluir": [[1379, 446, 1400, 478]]
+        }
       },
       "_nota": "revisión 30/oct: el zapato del cuadro de al lado quedaba flotando abajo a la derecha del remate (combo 5 = herramienta1 2)"
     },
@@ -64,11 +110,35 @@
     },
     "danio": {
       "region": [13, 832, 361, 988],
-      "cajas": [[16, 850, 92, 988], [92, 850, 152, 988], [252, 850, 358, 988]],
+      "cajas": [[16, 850, 98, 988], [92, 850, 152, 988], [252, 850, 358, 988]],
       "inferencia": "caja",
-      "escala": 0.88
+      "escala": 0.88,
+      "porCuadro": {
+        "0": {
+          "_nota": "revisión 31/oct: el fondo entre las piernas (sale por tinte) y la sombra del piso entre los pies quedaban opacos; la caja llega a 98 (la cabeza y la espalda terminaban en una recta en 92) sin el bebé del cuadro siguiente",
+          "quitar": [{ "zona": [16, 850, 98, 988], "bMenosRMin": 8, "lumMax": 60 }],
+          "excluir": [[35, 979, 67, 988], [93, 886, 98, 988]]
+        },
+        "1": {
+          "_nota": "revisión 31/oct (danio[1], el cuadro que queda fijo con el congelado): la caja arranca en 92 y se traía una franja de fondo azulado y la punta de la zapatilla del cuadro 0 (una recta a la izquierda, de la cintura al piso)",
+          "quitar": [{ "zona": [92, 940, 99, 975], "bMenosRMin": 6, "lumMax": 60 }],
+          "excluir": [[92, 973, 96, 988]]
+        }
+      }
     },
-    "ko": { "region": [374, 832, 666, 988], "cortes": [[452, 470], [530, 548]], "escala": 0.88 },
+    "ko": {
+      "region": [374, 832, 666, 988],
+      "cortes": [[452, 470], [530, 548]],
+      "escala": 0.88,
+      "_nota": "revisión 31/oct: la costura entre los cuadros 1 y 2 era una recta en x 530 (los dos lados son ropa negra) que le dejaba al 2 (el que queda quieto en el KO) un pedazo de la cadera y la rodilla del 1 con un borde recto; ahora sigue el contorno claro de la cadera del 1; en el 1 sale además por tinte el fondo encerrado entre los brazos y las zapatillas (una cuña negra)",
+      "porCuadro": {
+        "1": {
+          "agregar": [[[529, 926], [530, 933], [533, 941], [534, 947], [537, 950], [540, 952], [542, 956], [544, 960], [546, 966], [547, 975], [547, 988], [529, 988]]],
+          "quitar": [{ "zona": [452, 940, 530, 984], "bMenosRMin": 8, "lumMax": 60 }]
+        },
+        "2": { "excluir": [[[515, 915], [523, 926], [530, 933], [533, 941], [534, 947], [537, 950], [540, 952], [542, 956], [544, 960], [546, 966], [547, 975], [547, 988], [515, 988]]] }
+      }
+    },
     "levantarse": { "region": [678, 832, 941, 988], "cuadros": 4, "escala": 0.88 },
     "victoria": { "region": [954, 832, 1205, 988], "cuadros": 3, "escala": 0.88 },
     "burla": { "region": [1218, 832, 1525, 988], "cuadros": 4, "escala": 0.88 }

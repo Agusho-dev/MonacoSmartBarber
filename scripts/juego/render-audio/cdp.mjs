@@ -7,6 +7,19 @@ import { SALIDA } from './empaquetar.mjs'
 export const DIR = SALIDA
 export const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * El servidor a probar, de URL_BASE (sin barra final), p. ej. URL_BASE=http://localhost:3210.
+ * Obligatoria: el :3100 es el servidor de desarrollo del dueño; una prueba no le pega sin querer.
+ */
+export function urlBase() {
+  const u = (process.env.URL_BASE || '').trim().replace(/\/+$/, '')
+  if (!u) {
+    console.error('Falta URL_BASE: el servidor de desarrollo a probar (p. ej. URL_BASE=http://localhost:3210). El :3100 es el del dueño: usalo sólo a propósito.')
+    process.exit(2)
+  }
+  return u
+}
+
 export async function abrirChrome({ ancho = 844, alto = 390, movil = true, prefs = { tutorialVisto: true }, flags = [], puerto = 9373 } = {}) {
   const PERFIL = `${DIR}/perfil-${process.pid}`
   rmSync(PERFIL, { recursive: true, force: true })
@@ -68,15 +81,19 @@ export async function abrirChrome({ ancho = 844, alto = 390, movil = true, prefs
     return false
   }
   const centro = async (sel) => evaluar(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2] })()`)
-  // Toques: mantiene el conjunto de dedos activos (CDP quiere todos en cada evento).
+  // Dedos. En Chrome (CDP), touchStart y touchMove generan un evento por cada punto que CAMBIÓ,
+  // pero touchEnd suelta los puntos que LISTA (y con [] los suelta todos): mandar los que quedan
+  // apoyados, como antes, soltaba el stick y dejaba el botón apretado, y los toques siguientes con
+  // ese id ya no llegaban. Se manda siempre SÓLO el punto que cambia (Chrome 156; ver
+  // v3-verif/confirmar-movil-emulado/multitouch.mjs).
   const activos = new Map()
-  const lista2 = () => [...activos.entries()].map(([id, p]) => ({ x: p.x, y: p.y, id, radiusX: 8, radiusY: 8, force: 1 }))
+  const punto = (id) => { const q = activos.get(id); return { x: q.x, y: q.y, id, radiusX: 8, radiusY: 8, force: 1 } }
   const dedo = {
-    async bajar(id, x, y) { activos.set(id, { x, y }); await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: lista2() }) },
-    async mover(id, x, y) { activos.set(id, { x, y }); await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: lista2() }) },
+    async bajar(id, x, y) { activos.set(id, { x, y }); await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [punto(id)] }) },
+    async mover(id, x, y) { activos.set(id, { x, y }); await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [punto(id)] }) },
     /** Sin esperar la respuesta: para mandar movimientos a 60 Hz de verdad. */
-    moverYa(id, x, y) { activos.set(id, { x, y }); cdpYa('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: lista2() }) },
-    async subir(id) { activos.delete(id); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: lista2() }) },
+    moverYa(id, x, y) { activos.set(id, { x, y }); cdpYa('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [punto(id)] }) },
+    async subir(id) { if (!activos.has(id)) return; const q = punto(id); activos.delete(id); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [q] }) },
   }
   const tocar = async (sel) => {
     const c = await centro(sel)

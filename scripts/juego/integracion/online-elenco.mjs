@@ -4,7 +4,8 @@
 // final. Compara el hash de CADA tick de los dos celulares (lockstep), el ganador, los eventos que vio
 // cada uno, los pedidos con error y la consola.
 //   node scripts/juego/integracion/online-elenco.mjs [barberoAna] [barberoBeto]   (por defecto Lucas y Brian)
-//   URL_BASE (por defecto http://localhost:3100/juego?s=pueyrredon) · SALIDA (capturas e informe)
+//   URL_BASE (obligatoria: el servidor, p. ej. http://localhost:3210; o la URL entera con /juego?s=…)
+//   · SALA (la sucursal, por defecto pueyrredon) · SALIDA (capturas e informe)
 // OJO: entra a la presencia REAL de esa sala en el Realtime de producción (ver «Sala online» en
 // .claude/rules/juego.md): usar una sucursal sin clientes jugando o fuera de horario. Las peleas online
 // no escriben en la base. No editar archivos del juego mientras corre (el Fast Refresh los saca de la
@@ -18,7 +19,15 @@ const DIR = process.env.SALIDA || join(tmpdir(), 'corte-final-integracion')
 mkdirSync(DIR, { recursive: true })
 const PERFIL = join(tmpdir(), `corte-final-perfil-online-${process.pid}`)
 const PUERTO = 9391
-const BASE = process.env.URL_BASE || 'http://localhost:3100/juego?s=pueyrredon'
+/** URL_BASE es obligatoria: el :3100 es el servidor de desarrollo del dueño. */
+const BASE = (() => {
+  const u = (process.env.URL_BASE || '').trim().replace(/\/+$/, '')
+  if (!u) {
+    console.error('Falta URL_BASE: el servidor de desarrollo a probar (p. ej. URL_BASE=http://localhost:3210). El :3100 es el del dueño: usalo sólo a propósito.')
+    process.exit(2)
+  }
+  return u.includes('/juego') ? u : `${u}/juego?s=${process.env.SALA || 'pueyrredon'}`
+})()
 const TAM = { Ana: [844, 390], Beto: [390, 844] }
 rmSync(PERFIL, { recursive: true, force: true })
 mkdirSync(PERFIL, { recursive: true })
@@ -122,13 +131,17 @@ async function nuevaPagina(nombre, apodo) {
     }
     return false
   }
-  // Dedos: CDP quiere TODOS los puntos activos en cada evento.
+  // Dedos. En Chrome (CDP), touchStart y touchMove generan un evento por cada punto que CAMBIÓ,
+  // pero touchEnd suelta los puntos que LISTA (y con [] los suelta todos): mandar los que quedan
+  // apoyados, como antes, soltaba el stick y dejaba el botón apretado, y los toques siguientes con
+  // ese id ya no llegaban. Se manda siempre SÓLO el punto que cambia (Chrome 156; ver
+  // v3-verif/confirmar-movil-emulado/multitouch.mjs).
   const activos = new Map()
-  const puntos = () => [...activos.entries()].map(([id, q]) => ({ x: q.x, y: q.y, id, radiusX: 8, radiusY: 8, force: 1 }))
+  const punto = (id) => { const q = activos.get(id); return { x: q.x, y: q.y, id, radiusX: 8, radiusY: 8, force: 1 } }
   p.dedo = {
-    async bajar(id, x, y) { activos.set(id, { x, y }); await c('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: puntos() }) },
-    async mover(id, x, y) { activos.set(id, { x, y }); await c('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: puntos() }) },
-    async subir(id) { activos.delete(id); await c('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: puntos() }) },
+    async bajar(id, x, y) { activos.set(id, { x, y }); await c('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [punto(id)] }) },
+    async mover(id, x, y) { activos.set(id, { x, y }); await c('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [punto(id)] }) },
+    async subir(id) { if (!activos.has(id)) return; const q = punto(id); activos.delete(id); await c('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [q] }) },
   }
   p.tocar = async (sel, texto) => {
     // La cortina entre pantallas (≈ 0,7 s) se come los toques a propósito: se espera a que se vaya.

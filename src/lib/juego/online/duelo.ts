@@ -18,15 +18,19 @@
  *      · el «estado» del resultado lleva cómo terminó (ResumenFinal) y se repite cada segundo:
  *        el que todavía está peleando lo adopta si el otro ya cerró la pelea (o si él quedó
  *        trabado), y los dos lo concilian: anulada > motor > abandono; dos abandonos que no
- *        coinciden (se cortó la red de los dos) anulan la pelea;
+ *        coinciden (se cortó la red de los dos) anulan la pelea, y dos finales del motor que no
+ *        coinciden (se desincronizaron sin que el hash lo viera) también;
  *      · el abandono por silencio lo reclama sólo el que tiene red (y hace un rato): el que se
  *        quedó sin conexión 10 s, o tuvo la página oculta 10 s, pierde (`rendirsePorAusencia`).
+ *        «Tener red» es una ida y vuelta REAL por el socket (`sondear` del transporte): con el
+ *        4G trabado sin que se cierre la conexión el canal sigue unido, y antes los dos
+ *        reclamaban (ver `vigilarRed`).
  *
  * Sin React ni Supabase: recibe un transporte (enviar/cerrar) y le pasan lo que llega con
  * `recibir`. Sin `@/`: se prueba con Node.
  */
 import type { EstadisticasLuchador, EntradaJugador, IdArena, IdPersonaje, Lado } from '../tipos'
-import { ABANDONO_MS, Lockstep, demoraParaRtt, type LoteEntradas } from './lockstep'
+import { ABANDONO_MS, LENTA_MS, Lockstep, demoraParaRtt, type LoteEntradas } from './lockstep'
 import {
   leerMensajePelea,
   type MensajePelea,
@@ -58,6 +62,17 @@ const MAX_GUARDADOS = 400
 const RECONEXION_MS = 3000
 /** Trabado esperando entradas y el otro ya terminó la misma pelea: se adopta su resultado. */
 const ADOPTAR_MS = 1500
+/**
+ * Esperando las entradas del rival desde esto, se sondea la red propia (`vigilarRed`): es cuando
+ * aparece «Conexión lenta…». Con SONDEO_MS de 2 s, el trabado ya sabe que no tiene red antes de
+ * que el cartel empiece a contar (a los 3 s): nunca ve una cuenta hacia una victoria que no va a tener.
+ */
+const SONDEO_DESDE_MS = LENTA_MS
+/** Entre un sondeo y el siguiente de la misma espera (más seguido sin red, para ver cuándo vuelve). */
+const SONDEO_CADA_MS = 2500
+const SONDEO_CADA_SIN_RED_MS = 1000
+/** Ya cumplida la espera, el sondeo que decide el abandono sale enseguida (sólo esta pausa). */
+const SONDEO_DECIDE_MS = 500
 
 export interface JugadorDuelo {
   id: string
@@ -127,6 +142,21 @@ export interface TransporteDuelo {
   cerrar(): void
   /** ¿El canal está unido? (sin esto, el duelo lo da por conectado siempre). */
   conectado?(): boolean
+  /**
+   * Ida y vuelta REAL por el socket: true = este celular tiene red. Con la red trabada sin que se
+   * cierre la conexión el canal sigue unido y sólo esto lo nota. Sin esto, el canal unido alcanza
+   * para reclamar un abandono (lo de antes del 30/oct).
+   */
+  sondear?(): Promise<boolean>
+}
+
+/** Un sondeo de la red propia en vuelo: de qué pelea, de qué espera del lockstep y de qué conexión es. */
+interface SondeoRed {
+  k: number
+  espera: number
+  desde: number
+  /** `conexionDesde` al salir: si el canal se cayó o volvió mientras tanto, la respuesta ya no dice nada. */
+  conexion: number
 }
 
 export interface OpcionesDuelo {
@@ -210,6 +240,16 @@ export class Duelo {
   private conectado: boolean
   /** Desde cuándo vale `conectado` (reloj de `ahora`). */
   private conexionDesde: number
+  /** Sondeo de la red propia en vuelo (ver vigilarRed). */
+  private sondeo: SondeoRed | null = null
+  /** La espera del lockstep (su número, `stats.esperas`) a la que pertenecen redOk y sinRedDesde. */
+  private esperaVigilada = -1
+  /** Lo que dijo el último sondeo de esta espera (null = todavía nada). La pantalla lo muestra. */
+  private redOk: boolean | null = null
+  /** Desde cuándo este celular está sin red en esta espera (cuando salió el primer sondeo que falló). */
+  private sinRedDesde: number | null = null
+  /** Cuándo volvió el último sondeo de esta espera. */
+  private finSondeo = -Infinity
   private rival: JugadorDuelo
   private ultimoDelRival: number
   private lockstep: Lockstep | null = null
@@ -364,19 +404,30 @@ export class Duelo {
     if (c !== this.conectado) {
       this.conectado = c
       this.conexionDesde = this.ahora()
+      // Volvió el canal (el join hizo ida y vuelta con el servidor): la red anda.
+      if (c) {
+        this.redOk = null
+        this.sinRedDesde = null
+      }
     }
   }
 
-  /** Para la pantalla de pelea: «Sin conexión» en vez de «Esperando a Juan». */
+  /**
+   * Para la pantalla de pelea, en cada cuadro: «Sin conexión / Reconectando…» en vez de la cuenta
+   * hacia el abandono del rival cuando el que no tiene red es ESTE celular (el canal caído o, con
+   * el canal unido, el último sondeo sin respuesta). De paso vigila la red mientras espera.
+   */
   estaConectado(): boolean {
     this.revisarConexion()
-    return this.conectado
+    this.vigilarRed()
+    return this.conectado && this.redOk !== false
   }
 
   /** Cada segundo: el estado (salvo en plena pelea con lotes yendo y viniendo) y el silencio del rival. */
   private latido(): void {
     if (this.fase === 'cerrado') return
     this.revisarConexion()
+    if (this.fase === 'peleando') this.vigilarRed()
     const peleandoConLotes = this.fase === 'peleando' && this.recibioLoteDelRival
     if (!peleandoConLotes) this.mandarEstado()
     if (this.fase !== 'peleando' && this.ahora() - this.ultimoDelRival > SILENCIO_MS) {
@@ -545,6 +596,14 @@ export class Duelo {
     }
     if (mio.m === 'abandono' && suyo.m === 'abandono' && mio.g !== suyo.g) {
       this.reemplazarResultado(null, 'corte', this.resultado?.rondas ?? [0, 0])
+      return
+    }
+    // Los dos motores terminaron la pelea y no dicen lo mismo: se desincronizaron sin que el hash
+    // (cada CADA_HASH ticks) lo viera. No cuenta para nadie, como un hash distinto; el otro lo
+    // adopta al recibir este «estado» (anulada pesa más que el motor).
+    if (mio.m === 'pelea' && suyo.m === 'pelea' && (mio.g !== suyo.g || mio.r[0] !== suyo.r[0] || mio.r[1] !== suyo.r[1])) {
+      console.error('[juego] los dos celulares terminaron la pelea online distinto', { mio, suyo })
+      this.reemplazarResultado(null, 'desync', this.resultado?.rondas ?? [0, 0])
     }
   }
 
@@ -623,6 +682,11 @@ export class Duelo {
     this.guardados = []
     this.finMotor = null
     this.resRival = null
+    this.sondeo = null
+    this.esperaVigilada = -1
+    this.redOk = null
+    this.sinRedDesde = null
+    this.finSondeo = -Infinity
     const k = this.k
     if (this.lado === 0) this.medirRtt()
     this.despues(ARRANQUE_MS, () => {
@@ -809,23 +873,126 @@ export class Duelo {
 
   /**
    * La pantalla lo llama en cada cuadro mientras lleva ABANDONO_MS esperando entradas del rival.
-   * Gana el que queda, pero sólo si el que espera tiene red: sin conexión no se reclama nada (el
-   * que se fue es él) y con ABANDONO_MS sin conexión pierde; recién reconectado, espera
-   * RECONEXION_MS por si llega lo que el otro ya decidió.
+   * Gana el que queda, pero sólo si el que espera tiene red DE VERDAD (una ida y vuelta por el
+   * socket, no el canal «unido»): el que lleva ABANDONO_MS sin red pierde, sin red no se reclama
+   * nada, y recién reconectado espera RECONEXION_MS por si llega lo que el otro ya decidió.
    */
   abandonoDelRival(): void {
     if (this.fase !== 'peleando' || this.finMotor) return
     this.revisarConexion()
+    this.vigilarRed()
+    this.decidirAbandono(null)
+  }
+
+  /**
+   * Con ABANDONO_MS de espera: ¿pierdo (el que no tiene red soy yo), gano (tengo red y el otro no
+   * manda nada) o todavía no se sabe? `sondeo`: lo que acaba de contestar un sondeo de esta
+   * espera; null = nada nuevo (si hace falta, sale uno y se decide cuando vuelva).
+   */
+  private decidirAbandono(sondeo: boolean | null): void {
+    const l = this.lockstep
+    if (this.fase !== 'peleando' || this.finMotor || !l || l.msEsperando() < ABANDONO_MS) return
     const t = this.ahora()
-    if (!this.conectado) {
-      if (t - this.conexionDesde >= ABANDONO_MS) this.fijarResultado('rival', 'abandone', null)
+    // Sin red desde hace ABANDONO_MS (el canal caído o, con el canal unido, desde el primer sondeo
+    // que falló): el que se fue es este celular. El otro, con red, reclama lo mismo.
+    const caido = this.conectado ? null : this.conexionDesde
+    const sinRed =
+      caido === null ? this.sinRedDesde : this.sinRedDesde === null ? caido : Math.min(caido, this.sinRedDesde)
+    if (sinRed !== null && t - sinRed >= ABANDONO_MS) {
+      this.fijarResultado('rival', 'abandone', null)
       return
     }
-    if (t - this.conexionDesde < RECONEXION_MS) return
+    if (!this.conectado || t - this.conexionDesde < RECONEXION_MS) return
+    const sondear = this.o.transporte.sondear
+    if (!sondear || sondeo === true) {
+      this.reclamarAbandono()
+      return
+    }
+    // Sin un sondeo que diga que hay red AHORA no se reclama: sale uno y decide al volver.
+    if (sondeo === null && !this.sondeo) {
+      const pausa = this.redOk === false ? SONDEO_CADA_SIN_RED_MS : SONDEO_DECIDE_MS
+      if (t - this.finSondeo >= pausa) this.sondearRed()
+    }
+  }
+
+  /** Gana el que queda: se lo avisa al otro (si todavía está) y cierra la pelea. */
+  private reclamarAbandono(): void {
     this.enviar({ t: 'fin', de: this.o.yo.id, k: this.k, m: 'abandono' })
     this.rivalPresente = false
     this.rivalSeFue = 'sin_conexion'
     this.fijarResultado('yo', 'abandono_rival', null)
+  }
+
+  /**
+   * Mientras espera las entradas del rival: ¿el que no tiene red es este celular? Con el 4G
+   * trabado sin que se cierre la conexión, el canal sigue «unido» y los dos celulares esperan lo
+   * mismo: antes los dos reclamaban el abandono a los 10 s (la pelea quedaba anulada aunque sólo
+   * uno hubiera perdido la red), el trabado veía «¡Ganaste por abandono!» y, si la traba duraba
+   * más que el latido de realtime-js, los dos se anotaban la victoria. Cada espera del lockstep
+   * tiene lo suyo: qué dijo el último sondeo (`redOk`, lo muestra la pantalla) y desde cuándo
+   * falta la red (`sinRedDesde`, lo usa decidirAbandono). Lo llaman la pantalla en cada cuadro
+   * (estaConectado, abandonoDelRival) y el latido de cada segundo.
+   */
+  private vigilarRed(): void {
+    const l = this.lockstep
+    if (this.fase !== 'peleando' || this.finMotor || !l || this.lockstepK !== this.k) return
+    const espera = l.msEsperando()
+    const id = l.stats.esperas
+    if (espera === 0 || id !== this.esperaVigilada) {
+      // Terminó la espera (o empezó otra): lo que se midió antes no cuenta.
+      this.esperaVigilada = espera === 0 ? -1 : id
+      this.redOk = null
+      this.sinRedDesde = null
+      this.finSondeo = -Infinity
+      if (espera === 0) return
+    }
+    if (espera < SONDEO_DESDE_MS || !this.conectado || this.sondeo || !this.o.transporte.sondear) return
+    const pausa = this.redOk === false ? SONDEO_CADA_SIN_RED_MS : SONDEO_CADA_MS
+    if (this.ahora() - this.finSondeo >= pausa) this.sondearRed()
+  }
+
+  private sondearRed(): void {
+    const sondear = this.o.transporte.sondear
+    const l = this.lockstep
+    if (!sondear || !l || this.sondeo) return
+    const s: SondeoRed = { k: this.k, espera: l.stats.esperas, desde: this.ahora(), conexion: this.conexionDesde }
+    this.sondeo = s
+    let respuesta: Promise<boolean>
+    try {
+      respuesta = sondear.call(this.o.transporte)
+    } catch {
+      respuesta = Promise.resolve(false)
+    }
+    void respuesta.then(
+      (ok) => this.alSondeo(s, ok),
+      () => this.alSondeo(s, false),
+    )
+  }
+
+  private alSondeo(s: SondeoRed, ok: boolean): void {
+    if (this.sondeo === s) this.sondeo = null
+    this.revisarConexion()
+    const l = this.lockstep
+    // De otra pelea, de otra espera, la espera ya terminó o el canal se cayó (o volvió) mientras
+    // tanto: no dice nada de ahora (si no, un «sin red» de antes de reconectar contaba como de ahora).
+    if (
+      this.fase !== 'peleando' ||
+      this.finMotor ||
+      this.k !== s.k ||
+      !l ||
+      l.stats.esperas !== s.espera ||
+      l.msEsperando() === 0 ||
+      this.conexionDesde !== s.conexion
+    ) {
+      return
+    }
+    this.finSondeo = this.ahora()
+    this.redOk = ok
+    if (ok) this.sinRedDesde = null
+    else if (this.sinRedDesde === null) this.sinRedDesde = s.desde
+    // Llegó algo del rival mientras tanto: sigue ahí (si la espera no se resuelve sola, lo decide él).
+    if (this.ultimoDelRival >= s.desde) return
+    this.decidirAbandono(ok)
   }
 
   /**

@@ -14,7 +14,7 @@ import { animar, normalizarMeta } from './animacion'
 import { azar, crearAzar } from './azar'
 import { aplicarImpacto, contactosCuerpoACuerpo } from './combate'
 import { CARGA, EFECTO, ESCALA_KO, FASE, HITSTOP_KO } from './constantes'
-import { enCombo, interrumpir, puedeActuar } from './cuerpo'
+import { enCombo, inmuneAlControl, interrumpir, puedeActuar } from './cuerpo'
 import { crearCerebro, entradaCpu, reiniciarCerebro } from './cpu'
 import type { EstadoInterno, InternoLuchador } from './interno'
 import { emitir, guardarInterno, internoDe } from './interno'
@@ -32,6 +32,7 @@ import {
   resolverEmpuje,
   vaciarBuffer,
 } from './luchador'
+import type { KitPersonaje } from './movimientos'
 import { MOVIMIENTOS } from './movimientos'
 import { actualizarProyectiles, desactivarProyectiles } from './proyectiles'
 
@@ -63,6 +64,20 @@ function limpiarEfectos(l: LuchadorEstado, li: InternoLuchador): void {
   li.caidaDerribo = 0
   li.derribo = 0
   li.levantar = 0
+}
+
+/**
+ * La pericia con la que juega la CPU del `lado` (EstiloCpu en movimientos.ts). Contra otra CPU,
+ * la `pericia` de su barbero (la que empareja los kits CPU contra CPU). Contra una persona,
+ * `periciaHumano` (si el barbero la tiene) menos la `asistencia` del barbero que eligió la
+ * persona: así cada barbero de la CPU cuesta lo mismo y con cada barbero se le puede ganar. Dos
+ * personas (online) no tienen CPU: nada de esto las toca.
+ */
+function periciaCpu(config: ConfigPartida, kits: readonly [KitPersonaje, KitPersonaje], lado: Lado): number {
+  const dif = config.dificultad
+  const yo = kits[lado].cpu
+  if (config.cpu?.[otro(lado)]) return yo.pericia?.[dif] ?? 0
+  return (yo.periciaHumano?.[dif] ?? yo.pericia?.[dif] ?? 0) - (kits[otro(lado)].cpu.asistencia?.[dif] ?? 0)
 }
 
 export function crearPartida(config: ConfigPartida): Partida {
@@ -98,8 +113,8 @@ export function crearPartida(config: ConfigPartida): Partida {
     azar: crearAzar(semilla, 1),
     luchadores: [crearInternoLuchador(p.luchadores[0].vida), crearInternoLuchador(p.luchadores[1].vida)],
     cerebros: [
-      config.cpu?.[0] ? crearCerebro(0, config.dificultad, semilla, kit0.cpu.pericia?.[config.dificultad] ?? 0) : null,
-      config.cpu?.[1] ? crearCerebro(1, config.dificultad, semilla, kit1.cpu.pericia?.[config.dificultad] ?? 0) : null,
+      config.cpu?.[0] ? crearCerebro(0, config.dificultad, semilla, periciaCpu(config, [kit0, kit1], 0), !config.cpu?.[1]) : null,
+      config.cpu?.[1] ? crearCerebro(1, config.dificultad, semilla, periciaCpu(config, [kit0, kit1], 1), !config.cpu?.[0]) : null,
     ],
     proyectiles: [],
     sigIdProyectil: 0,
@@ -127,7 +142,8 @@ export function crearPartida(config: ConfigPartida): Partida {
 
 /**
  * Un agarrado cuyo agarre ya no existe (al que agarraba le pegaron o terminó el round) se suelta
- * y cae. Así nadie queda colgado en el aire.
+ * y cae. Así nadie queda colgado en el aire. Si ya llevaba demasiado encerrado (TOPE_ENCIERRO),
+ * cae parado.
  */
 function soltarAgarresHuerfanos(p: Partida, I: EstadoInterno): void {
   for (const lado of LADOS) {
@@ -139,7 +155,7 @@ function soltarAgarresHuerfanos(p: Partida, I: EstadoInterno): void {
     const l = p.luchadores[lado]
     if (!l.enSuelo) {
       l.vy = Math.min(l.vy, 0)
-      li.caidaDerribo = Math.max(li.caidaDerribo, EFECTO.derriboAereo)
+      if (!inmuneAlControl(li)) li.caidaDerribo = Math.max(li.caidaDerribo, EFECTO.derriboAereo)
     }
   }
 }
@@ -204,7 +220,16 @@ function noquear(p: Partida, I: EstadoInterno, g: Lado, d: Lado, perfecto: boole
   emitir(p, { tipo: 'ko', ganador: g, perdedor: d, perfecto })
 }
 
+/**
+ * Terminó la pelea del round (KO o tiempo): nadie se sigue curando. La Curación sigue su animación
+ * hasta el final, pero ya no cura (acciones.ts) y el «curándose» del HUD se apaga en el mismo tick.
+ */
+function cortarCuras(p: Partida): void {
+  for (const lado of LADOS) p.luchadores[lado].efectos.curando = 0
+}
+
 function iniciarKO(p: Partida, I: EstadoInterno, g: Lado, d: Lado): void {
+  cortarCuras(p)
   p.rondasGanadas[g]++
   p.ganadorRound = g
   I.duracionesRound.push(I.ticksPelea)
@@ -262,6 +287,7 @@ function iniciarTiempo(p: Partida, I: EstadoInterno): void {
     const db = I.luchadores[1].danioHechoRound
     g = da !== db ? (da > db ? 0 : 1) : azar(I.azar) < 0.5 ? 0 : 1
   }
+  cortarCuras(p)
   p.rondasGanadas[g]++
   p.ganadorRound = g
   I.duracionesRound.push(I.ticksPelea)

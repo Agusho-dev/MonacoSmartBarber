@@ -74,7 +74,14 @@
         "0": [[[815, 132], [866, 124], [866, 154], [815, 154]], [866, 120, 878, 154]],
         "1": [[[930, 136], [983, 128], [983, 154], [930, 154]], [983, 100, 1000, 154]]
       },
-      "sombra": {"zona": [761, 112, 1131, 154], "lumMax": 20, "recuperar": 2}
+      "sombra": {"zona": [761, 112, 1131, 154], "lumMax": 20, "recuperar": 2},
+      "_nota": "revisión 31/oct: debajo del pie de atrás del cuadro 0 quedaba una losa azul marino de bordes rectos (el humo que el excluir cortaba en x=815): se saca por color",
+      "quitarColor": {
+        "0": [
+          {"zona": [764, 144, 816, 156], "suavizar": 5, "bMenosRMin": 9, "lumMax": 110},
+          {"zona": [764, 144, 816, 156], "bMenosRMin": 25, "bMenosGMin": 18, "lumMin": 18}
+        ]
+      }
     },
     "dash": {
       "inferencia": "ancho&panel",
@@ -121,7 +128,8 @@
       "sombra": {
         "2": {"zona": [1222, 276, 1318, 294], "lumMax": 18, "recuperar": 1}
       },
-      "excluir": {"2": [[[1301, 246], [1320, 246], [1320, 294], [1307, 294], [1307, 272], [1301, 266]]]}
+      "_nota": "revisión 31/oct: el excluir del humo del cuadro 2 (caer[3]) arrancaba en y=246 y le cortaba la parte de abajo al puño derecho: arranca en y=253",
+      "excluir": {"2": [[[1301, 253], [1320, 253], [1320, 294], [1307, 294], [1307, 272], [1301, 266]]]}
     },
     "golpe": {
       "inferencia": "ancho&panel",
@@ -143,7 +151,9 @@
       "cajas": [[453, 324, 535, 436], [533, 324, 617, 436], [617, 324, 733, 436], [730, 324, 842, 436]],
       "usar": [0, 1, 2, 0],
       "impactos": [2],
-      "sombra": {"zona": [453, 395, 842, 436], "lumMax": 18, "recuperar": 2}
+      "sombra": {"zona": [453, 395, 842, 436], "lumMax": 18, "recuperar": 2},
+      "_nota": "revisión 31/oct: en el impacto (cuadro 2) la hoja dibuja la patada con imagen doble: quedaban DOS zapatillas en la punta de la pierna y un pedacito del antebrazo del vecino; se queda la propia (la rosada, x < 711)",
+      "excluir": {"2": [[711, 344, 736, 378]]}
     },
     "combo": {
       "inferencia": "ancho",
@@ -194,14 +204,22 @@
             ],
             "rMenosGMin": 40,
             "bMenosGMin": 40
+          },
+          {
+            "nota": "revisión 31/oct: la sombra azul marino debajo y a la derecha del pie de apoyo",
+            "zona": [1380, 400, 1425, 437],
+            "suavizar": 5,
+            "bMenosRMin": 9,
+            "lumMax": 110
           }
         ]
       },
+      "_nota": "revisión 31/oct: en el 6 (combo[5] = herramienta1[2], impacto) los excluir del vecino y del remolino arrancaban en x=1400/1405 y le hacían una muesca recta al muslo de apoyo (llega a x≈1407): arrancan en x=1408",
       "usar": [0, 1, 2, 3, 5, 6],
       "excluir": {
         "3": [[1158, 418, 1180, 437]],
         "5": [[1258, 330, 1276, 410], [1337, 340, 1349, 400]],
-        "6": [[1348, 335, 1362, 410], [1405, 395, 1450, 437], [[1400, 382], [1440, 378], [1440, 400], [1400, 400]]]
+        "6": [[1348, 335, 1362, 410], [1408, 395, 1450, 437], [[1408, 381], [1440, 378], [1440, 400], [1408, 400]]]
       },
       "sombra": {
         "5": {"zona": [1318, 330, 1350, 405], "lumMax": 24, "recuperar": 1}
@@ -258,6 +276,7 @@
       "impactos": [2, 4, 6],
       "escala": 1.12,
       "excluir": {
+        "1": [[174, 668, 200, 700]],
         "2": [[294, 620, 310, 717], [240, 703, 284, 717]],
         "8": [
           [[1290, 662], [1322, 662], [1322, 717], [1302, 717], [1300, 700], [1290, 698]],
@@ -274,11 +293,21 @@
             "zona": [[172, 660], [194, 660], [194, 700], [181, 700], [172, 688]],
             "suavizar": 3,
             "bMenosRMin": 16
-          }
+          },
+          {"zona": [160, 700, 200, 717], "suavizar": 5, "bMenosRMin": 9, "lumMax": 110}
+        ],
+        "6": [
+          {"zona": [915, 653, 960, 667], "bMenosRMin": 25, "bMenosGMin": 18, "lumMin": 18},
+          {"zona": [915, 653, 960, 667], "lumMin": 160, "bMenosRMin": 10}
         ]
       },
-      "sombra": {"2": {"zona": [212, 696, 296, 717], "lumMax": 26, "recuperar": 1}},
-      "incluir": {"4": [[[478, 694], [494, 690], [497, 704], [492, 714], [477, 714]]]}
+      "_nota": "revisión 31/oct: en el 1 (especial2[1]) la cuña azul marino a la derecha de la pierna y al costado de la zapatilla (x >= 174); en el 6 (especial2[4], impacto) la estela azul y blanca que cruzaba la cintura; en el 8 (especial2[6], último impacto) la botella de la mano izquierda quedaba cortada en recta por la caja (x=1210): «incluirFinal» la completa con su contorno (con una caja más ancha el modelo se tragaba el remolino azul de al lado) y «sombra» saca la cuña oscura del piso entre las piernas",
+      "sombra": {
+        "2": {"zona": [212, 696, 296, 717], "lumMax": 26, "recuperar": 1},
+        "8": {"zona": [1238, 697, 1303, 717], "lumMax": 45, "recuperar": 1}
+      },
+      "incluir": {"4": [[[478, 694], [494, 690], [497, 704], [492, 714], [477, 714]]]},
+      "incluirFinal": {"8": [[[1181, 641], [1183, 630], [1192, 622], [1200, 615], [1208, 610], [1214, 612], [1212, 620], [1204, 628], [1198, 636], [1196, 643], [1190, 648], [1184, 646]]]}
     },
     "danio": {
       "inferencia": "ancho&panel",
@@ -307,6 +336,8 @@
       "sombra": {"zona": [982, 830, 1259, 873], "lumMax": 18, "recuperar": 2}
     },
     "burla": {
+      "_nota": "revisión 31/oct: el tercer cuadro de la hoja (sentado sobre los cajones de botellas) hacía aparecer y desaparecer un cajón grande en la presentación: la burla son los dos de pie (tomar y señalar al rival). Las claves del cuadro 2 quedan por si se vuelve a usar",
+      "usar": [0, 1],
       "inferencia": "ancho&panel",
       "region": [1271, 748, 1590, 873],
       "cajas": [[1271, 748, 1356, 873], [1350, 748, 1440, 873], [1440, 748, 1590, 873]],

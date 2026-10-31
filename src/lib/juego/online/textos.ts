@@ -2,8 +2,31 @@
  * Textos de la sala y de las peleas online. Todo en español rioplatense.
  */
 import type { EstadoDuelo, ResultadoDuelo } from './duelo'
+import { ABANDONO_MS, LENTA_MS } from './lockstep'
 import type { EstadoJugador } from './protocolo'
 import type { EstadoSaliente, JugadorSala } from './sala'
+
+/** Desde cuánto de espera el cartel cuenta los segundos que faltan para ganar por abandono. */
+const CUENTA_DESDE_MS = 3000
+
+export interface CartelEspera {
+  /** «Conexión lenta…» (con la cuenta hacia el abandono del rival) o «Sin conexión». */
+  texto: string
+  /** true: abajo va «Reconectando…» (el que no tiene red es este celular); false: «Esperando a Juan». */
+  reconectando: boolean
+}
+
+/**
+ * El cartel de la espera en plena pelea online (null = no se muestra). Sin red de este lado no
+ * hay cuenta: el que se va a quedar sin la pelea es este celular, no el otro.
+ */
+export function cartelEspera(esperaMs: number, conectado: boolean): CartelEspera | null {
+  if (esperaMs < LENTA_MS) return null
+  if (!conectado) return { texto: 'Sin conexión', reconectando: true }
+  if (esperaMs <= CUENTA_DESDE_MS) return { texto: 'Conexión lenta…', reconectando: false }
+  const faltan = Math.max(0, Math.ceil((ABANDONO_MS - esperaMs) / 1000))
+  return { texto: `Conexión lenta… ${faltan}`, reconectando: false }
+}
 
 export function textoEstadoJugador(j: JugadorSala): string {
   if (!j.compatible) return 'Con otra versión'
@@ -84,4 +107,28 @@ export function bajadaResultado(r: ResultadoDuelo, rival: string, seFue: EstadoD
     default:
       return null
   }
+}
+
+/**
+ * El pie del resultado cuando el rival ya no está (va en lugar de REVANCHA): dónde quedó, sin
+ * repetir lo que ya dice la bajada. El que abandona por el menú vuelve a la sala (se lo puede
+ * desafiar de nuevo): antes decía «Sin revancha: Juan ya no está».
+ */
+export function textoRivalAusente(r: ResultadoDuelo, rival: string, seFue: EstadoDuelo['rivalSeFue']): string {
+  let texto: string
+  switch (seFue) {
+    case 'turno':
+      texto = `${rival} fue llamado a cortarse`
+      break
+    case 'salir':
+    case 'abandono':
+      texto = `${rival} volvió a la sala`
+      break
+    case 'cerro':
+      texto = `${rival} cerró el juego`
+      break
+    default:
+      texto = `Sin revancha: ${rival} ya no está`
+  }
+  return texto === bajadaResultado(r, rival, seFue) ? 'Sin revancha' : texto
 }

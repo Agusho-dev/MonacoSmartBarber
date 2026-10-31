@@ -153,7 +153,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
         costo: 5,
         icono: 'cura',
         efecto: 'cura',
-        descripcion: 'Se toma la bebida verde y se cura de a poco. Si le pegan mientras toma, se le corta.',
+        descripcion: 'Se toma la bebida verde y se cura de a poco. Los golpes leves no la cortan; un golpe fuerte o un especial, sí.',
       },
       {
         nombre: 'Modo Boxeador',
@@ -293,7 +293,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
         costo: 5,
         icono: 'baile',
         efecto: 'empuja',
-        descripcion: 'Avanza bailando (los tiros lo atraviesan) y remata con un golpe que te manda lejos.',
+        descripcion: 'Avanza bailando (los tiros lo atraviesan) y, cuando te alcanza, te manda lejos.',
       },
       {
         nombre: 'Grito',

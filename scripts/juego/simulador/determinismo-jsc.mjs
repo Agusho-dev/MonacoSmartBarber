@@ -8,9 +8,14 @@
 // Empaqueta el motor (motor/**, tipos, personajes, online/hash) en UN script clásico con el
 // typescript del repo, lo corre en Node y en el `jsc` de macOS
 // (/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc) y compara,
-// partida por partida, un resumen de los hashes de TODOS los ticks. Cada partida: CPU contra CPU
-// en las 3 dificultades y además un «humano» de entradas al azar (semilla fija) contra la CPU,
-// así pasan todos los especiales, estados y proyectiles. Sólo para la Mac (fuera de la Mac, salta).
+// partida por partida, un resumen de los hashes de TODOS los ticks. Cada cruce va en uno de tres
+// modos: CPU contra CPU (en las 3 dificultades), un «humano» de entradas al azar (semilla fija)
+// contra la CPU, y dos humanos de entradas al azar sin CPU (lo que pasa online), así pasan todos
+// los especiales, estados y proyectiles. Sólo para la Mac (fuera de la Mac, salta).
+//
+// Hasta el 30/oct el «humano al azar» nunca jugaba: el lado 0 era CPU justo cuando recibía las
+// entradas del bot (la CPU las ignora) y, cuando era humano, recibía entradas vacías. Ahora cada
+// partida con humanos dice cuánto daño hicieron y la prueba falla si los bots no pelearon.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -103,21 +108,26 @@ function botAzar(semilla) {
 }
 var ids = CF.personajes.IDS_PERSONAJES;
 var difs = ['facil', 'normal', 'dificil'];
+// c = CPU contra CPU; h = humano al azar (lado 0) contra la CPU; hh = dos humanos al azar, sin CPU.
+var modos = ['c', 'h', 'hh'];
 var lineas = [];
 for (var i = 0; i < ids.length; i++) for (var j = 0; j < ids.length; j++) for (var k = 0; k < PARTIDAS; k++) {
   var dif = difs[(i + j + k) % 3];
-  var humano = (i + j + k) % 2;
+  var modo = modos[(i + 2 * j + k) % 3];
   var semilla = 1 + i * 7919 + j * 104729 + k * 31337;
-  var p = CF.motor.crearPartida({ personajes: [ids[i], ids[j]], cpu: [humano !== 0, true], dificultad: dif, arena: 'parana', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [META[ids[i]], META[ids[j]]], semilla: semilla });
-  var bot = botAzar(semilla * 3 + 1);
+  var cpu = modo === 'c' ? [true, true] : modo === 'h' ? [false, true] : [false, false];
+  var p = CF.motor.crearPartida({ personajes: [ids[i], ids[j]], cpu: cpu, dificultad: dif, arena: 'parana', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [META[ids[i]], META[ids[j]]], semilla: semilla });
+  var bot0 = botAzar(semilla * 3 + 1);
+  var bot1 = botAzar(semilla * 5 + 7);
   var h = 0x811c9dc5, eventos = 0;
   while (p.fase !== 'terminada' && p.tick < 6 * 3600) {
-    CF.motor.avanzar(p, [humano === 1 ? bot() : VACIA, VACIA]);
+    CF.motor.avanzar(p, [modo === 'c' ? VACIA : bot0(), modo === 'hh' ? bot1() : VACIA]);
     eventos += p.eventos.length;
     p.eventos.length = 0;
     h = Math.imul(h ^ CF.hash.hashPartida(p), 0x01000193) >>> 0;
   }
-  lineas.push(ids[i] + '-' + ids[j] + '/' + dif + '/' + (humano ? 'h' : 'c') + ' ' + p.tick + ' ' + h.toString(16) + ' ' + p.ganadorPartida + ' ' + eventos);
+  var d = p.estadisticas;
+  lineas.push(ids[i] + '-' + ids[j] + '/' + dif + '/' + modo + ' ' + p.tick + ' ' + h.toString(16) + ' ' + p.ganadorPartida + ' ' + eventos + ' ' + d[0].danioHecho + ' ' + d[1].danioHecho + ' ' + d[0].especialesUsados + ' ' + d[1].especialesUsados);
 }
 log(lineas.join('\\n'));
 `
@@ -154,15 +164,26 @@ function main() {
   const tJsc = performance.now() - t1
   let distintas = 0
   let ticks = 0
+  // Cobertura: que los humanos al azar de verdad jueguen (que peguen y tiren especiales).
+  const conHumano = { n: 0, pegaron: 0, especiales: 0 }
   for (let i = 0; i < v8.length; i++) {
-    ticks += Number(v8[i].split(' ')[1])
+    const [clave, t, , , , d0, d1, e0, e1] = v8[i].split(' ')
+    ticks += Number(t)
+    const modo = clave.split('/')[2]
+    if (modo !== 'c') {
+      conHumano.n++
+      if (Number(d0) > 0 && (modo === 'h' || Number(d1) > 0)) conHumano.pegaron++
+      if (Number(e0) > 0 && (modo === 'h' || Number(e1) > 0)) conHumano.especiales++
+    }
     if (v8[i] !== jsc[i]) {
       distintas++
       if (distintas <= 5) console.log(`DISTINTA: V8 «${v8[i]}» / JSC «${jsc[i]}»`)
     }
   }
+  const juegan = conHumano.n > 0 && conHumano.pegaron >= conHumano.n * 0.9 && conHumano.especiales >= conHumano.n * 0.5
   console.log(`${v8.length} partidas (${ticks} ticks) en V8 (${(tV8 / 1000).toFixed(1)} s) y en JavaScriptCore (${(tJsc / 1000).toFixed(1)} s): ${distintas === 0 && v8.length === jsc.length ? 'IDÉNTICAS tick a tick' : `${distintas} distintas`}`)
-  process.exit(distintas === 0 && v8.length === jsc.length ? 0 : 1)
+  console.log(`humanos al azar: ${conHumano.n} partidas con humanos; pegaron en ${conHumano.pegaron} y tiraron especiales en ${conHumano.especiales}${juegan ? '' : ' (¡los bots no juegan!)'}`)
+  process.exit(distintas === 0 && v8.length === jsc.length && juegan ? 0 : 1)
 }
 
 main()

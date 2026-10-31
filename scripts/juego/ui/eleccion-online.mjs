@@ -7,17 +7,17 @@
 //     sucursal: caseros (por defecto). OJO: entra a la presencia REAL de esa sala en el Realtime de
 //               producción (ver «Sala online» en .claude/rules/juego.md): usar una sucursal sin
 //               clientes jugando o hacerlo fuera de horario. Las peleas online no escriben en la base.
-//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (http://localhost:3100)
+//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (obligatoria, p. ej. http://localhost:3210)
 //
 // No editar archivos del juego mientras corre: el Fast Refresh del servidor de desarrollo saca a los
 // dos de la sala.
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { abrirChrome, esperar } from './cdp.mjs'
+import { abrirChrome, esperar, urlBase } from './cdp.mjs'
 
 const SALIDA = process.env.SALIDA || join(tmpdir(), 'corte-final-capturas')
-const BASE = process.env.URL_BASE || 'http://localhost:3100'
+const BASE = urlBase()
 const [slug = 'caseros', pjA = 'nico u.', pjB = 'chipi'] = process.argv.slice(2)
 mkdirSync(SALIDA, { recursive: true })
 const t0 = Date.now()

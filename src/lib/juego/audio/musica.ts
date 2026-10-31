@@ -8,7 +8,8 @@
  *    anterior con un fundido corto.
  *      · Una pelea nueva (pelea pedida viniendo de otra cosa) arranca la canción desde el principio;
  *        la pausa, el tutorial o el «¡te toca!» la callan y al volver sigue donde estaba.
- *      · Se baja en segundo plano: si todavía no está, el pedido queda y arranca apenas está lista.
+ *      · Se baja en segundo plano (con el primer gesto, si va a sonar): si todavía no está, el
+ *        pedido queda y arranca apenas está lista.
  *      · Si no se pudo bajar o decodificar, menú y pelea vuelven a los temas sintetizados (temas.ts).
  *  - Victoria y derrota: los jingles sintetizados de siempre. La canción baja mientras suenan y
  *    vuelve sola cuando terminan (agendado en el reloj de audio, sin timers).
@@ -112,9 +113,20 @@ export class Musica {
   /** Fuentes de la canción que todavía no terminaron (la que suena más las que se están despidiendo). */
   private fuentesVivas = 0
   private reserva: ReturnType<typeof setTimeout> | null = null
+  /** Ya está esperando la canción (cargarPista en curso). */
+  private esperandoPista = false
 
   constructor(m: Mesa) {
     this.m = m
+    // La canción se baja sólo si alguien la pidió (audio/index.ts: después de un gesto, con el
+    // sonido y la música prendidos). Si ya se pidió, esta música la espera; si no, la espera
+    // cuando se pida (quererPista).
+    if (estadoPista() !== 'sin-pedir') this.cargarPista()
+  }
+
+  /** Se pidió la canción (pista.ts la baja): esta música la espera para sonar. */
+  quererPista(): void {
+    if (this.destruida || this.buffer || this.esperandoPista) return
     this.cargarPista()
   }
 
@@ -242,8 +254,10 @@ export class Musica {
   }
 
   private cargarPista(): void {
+    this.esperandoPista = true
     obtenerPista(this.m.ctx).then(
       (buffer) => {
+        this.esperandoPista = false
         if (this.destruida) return
         const ahora = this.m.ctx.currentTime
         if (!buffer) {
@@ -266,7 +280,9 @@ export class Musica {
           this.bajarPistaPorJingle(ahora)
         }
       },
-      () => undefined,
+      () => {
+        this.esperandoPista = false
+      },
     )
   }
 

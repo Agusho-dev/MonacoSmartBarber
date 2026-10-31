@@ -326,9 +326,20 @@ export function crearAudio(): AudioJuego {
     return mesa
   }
 
+  /**
+   * La canción se pide sólo si va a sonar (sonido y música prendidos) y después de un gesto (el
+   * contexto ya existe o se está creando). Silenciado o con la música apagada no se baja: se pide
+   * cuando se prenden (volumen).
+   */
+  function pedirPista(): void {
+    if (destruido || silencio || volMusica <= 0) return
+    bajarPista()
+    musica?.quererPista()
+  }
+
   async function desbloquear(): Promise<void> {
     if (destruido) return
-    if (!silencio && volMusica > 0) bajarPista()
+    pedirPista()
     fijarSesion()
     const m = crear()
     if (!m || !ctx) return
@@ -369,6 +380,12 @@ export function crearAudio(): AudioJuego {
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     const alGesto = (e: Event): void => {
       if (e.type === 'pointerdown' && (e as PointerEvent).pointerType !== 'mouse') return
+      // Un control que maneja el audio por su cuenta (el botón «Sonido» del inicio) destraba en su
+      // propio click, ya con la preferencia nueva puesta. Si lo hiciera este oyente (en captura,
+      // antes del click), con el primer toque en «Sonido» para SILENCIAR, en iOS 17+ la sesión
+      // pasaba ≈ 100 ms por 'playback' (y cortaba la música de otra app) antes de 'ambient'.
+      const objetivo = e.target as Element | null
+      if (typeof objetivo?.closest === 'function' && objetivo.closest('[data-audio-propio]')) return
       if (faltaDesbloquear()) void desbloquear()
     }
     for (const g of GESTOS) window.addEventListener(g, alGesto, { capture: true, passive: true })
@@ -397,11 +414,9 @@ export function crearAudio(): AudioJuego {
       window.removeEventListener('pageshow', alMostrar)
       window.removeEventListener('focus', alMostrar)
     })
-    // La canción se empieza a bajar en segundo plano, sin pelearle el arranque a la página.
-    const temprano = setTimeout(() => {
-      if (!destruido && !silencio && volMusica > 0) bajarPista()
-    }, 1500)
-    limpiezas.push(() => clearTimeout(temprano))
+    // La canción NO se baja al abrir la página (antes, a los 1,5 s: 1 MB para alguien que abría
+    // el link y se iba, y en 3G le peleaba la red a los atlas). Se pide con el primer gesto
+    // (desbloquear) y le cede la red a la carga de una pelea (pista.ts, retenerPista).
   }
 
   function procesar(eventos: readonly EventoJuego[], p: Partida): void {
@@ -450,7 +465,7 @@ export function crearAudio(): AudioJuego {
   function volumen(efectos: number, musicaVol: number): void {
     volEfectos = limitar(Number.isFinite(efectos) ? efectos : VOLUMEN_EFECTOS_POR_DEFECTO, 0, 1)
     volMusica = limitar(Number.isFinite(musicaVol) ? musicaVol : VOLUMEN_MUSICA_POR_DEFECTO, 0, 1)
-    if (volMusica > 0 && !silencio && ctx) bajarPista()
+    if (ctx) pedirPista()
     if (!mesa || !ctx) return
     const a = ctx.currentTime
     suavizar(mesa.efectos.gain, volEfectos, a, 0.03)

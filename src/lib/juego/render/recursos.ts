@@ -10,10 +10,18 @@
  * - Las imágenes quedan en una caché del módulo: la revancha arranca al instante.
  * - Si está el atlas de efectos compartidos (public/juego/efectos/), también se baja y viaja como
  *   `efectosComunes` (propiedad extra, fuera del contrato): sin él, los efectos se dibujan a mano.
- * - Lo mismo con los sprites «rapados» de cada luchador (rapado.json + rapado.png, de
+ * - Lo mismo con los sprites «rapados» de cada luchador (rapado.json + la imagen que nombra, de
  *   scripts/juego/generar_rapado.py): viajan como `rapados` y el remate ¡AL CERO! deja pelado al
  *   que lo recibe. Sin ellos, el remate sólo hace volar el pelo.
  * - Un pedido que falla por la red (o un 5xx) se reintenta una vez: el 4G de un local es inestable.
+ * - Ningún pedido espera para siempre: si pasan INACTIVIDAD_MS sin que llegue nada (ni los
+ *   encabezados ni un trozo) o TOPE_MS en total, se corta y cuenta como una falla de red (un
+ *   reintento y después el error de la carga, con «Reintentar» y «Volver»). Antes, una conexión
+ *   que dejaba de traer bytes sin cortar dejaba «Calentando la máquina» fija para siempre.
+ * - Lo opcional (caras, efectos, rapado) no frena la pelea: listos los atlas y la arena, tiene
+ *   ESPERA_OPCIONALES_MS más; lo que no llegó, la pelea lo hace sin eso.
+ * - La arena y las caras se piden con el `?dpl=` de Vercel, igual que las <img> de next/image que
+ *   las muestran fuera de la pelea: una sola bajada (ver `conDespliegue`).
  */
 import { ARENAS } from '../arenas'
 import { PERSONAJES } from '../personajes'
@@ -30,6 +38,12 @@ interface Tarea {
 
 const MAX_CACHE = 10
 const RUTA_EFECTOS = '/juego/efectos/efectos.json'
+/** Sin que llegue nada (encabezados o un trozo) en este tiempo, el pedido se corta. */
+const INACTIVIDAD_MS = 15_000
+/** Tope de un intento aunque siga llegando de a gotas. */
+const TOPE_MS = 60_000
+/** Listos los atlas y la arena, cuánto más se espera a lo opcional (caras, efectos, rapado). */
+const ESPERA_OPCIONALES_MS = 8_000
 
 /**
  * public/juego/personajes/<id>/rapado.json: los cuadros de `danio` y `ko` con la cabeza pelada,
@@ -60,6 +74,38 @@ const cacheAtlas = new Map<string, Promise<AtlasPersonaje>>()
 
 function urlBase(): string {
   return typeof location !== 'undefined' && location.href ? location.href : 'http://localhost/'
+}
+
+/**
+ * Skew Protection de Vercel: con un deployment en producción, next/image (con `unoptimized`) le
+ * agrega `?dpl=<deployment>` a las imágenes de public/ (get-img-props de Next, lo saca de
+ * `process.env.NEXT_DEPLOYMENT_ID`). La arena y las caras se ven con <img> en la portada, la
+ * selección y el HUD, y el render las volvía a pedir SIN el parámetro: para el navegador eran otra
+ * URL y cada pelea las bajaba dos veces (≈ 170–190 KB). Esas dos se piden con el mismo parámetro:
+ * comparten la entrada del caché (que revalida por ETag). Los atlas, los efectos y el rapado NO lo
+ * llevan a propósito: ninguna <img> los pide y, sin el parámetro, entre un deploy y otro un atlas
+ * que no cambió revalida con un 304 en vez de bajarse de nuevo. Fuera de Vercel no hay id: la URL
+ * queda igual.
+ */
+function conDespliegue(url: string): string {
+  // Next reemplaza `process.env.NEXT_DEPLOYMENT_ID` por el texto del id al compilar (no queda
+  // ninguna referencia a `process`). El try cuida el render empaquetado sin Next
+  // (scripts/juego/render-audio/empaquetar.mjs), donde `process` no existe.
+  let id: string | undefined
+  try {
+    id = process.env.NEXT_DEPLOYMENT_ID
+  } catch {
+    id = undefined
+  }
+  if (!id) return url
+  try {
+    const u = new URL(url)
+    if (typeof location !== 'undefined' && u.origin !== location.origin) return url
+    u.searchParams.set('dpl', id)
+    return u.href
+  } catch {
+    return url
+  }
 }
 
 function absoluta(ruta: string, base?: string): string {
@@ -124,45 +170,84 @@ function crearProgreso(alProgresar?: (fraccion: number) => void) {
   }
 }
 
-async function pedir(url: string): Promise<Response> {
-  for (let intento = 0; ; intento++) {
-    try {
-      const res = await fetch(url, { credentials: 'same-origin' })
-      if (res.status >= 500 && intento === 0) throw new Error(`HTTP ${res.status}`)
-      return res
-    } catch (e) {
-      if (intento >= 1) throw e
-      await new Promise((r) => setTimeout(r, 450))
-    }
+/** Un 4xx: el archivo no está (o no se puede pedir). No se reintenta. */
+class ErrorHttp extends Error {
+  readonly estado: number
+  constructor(estado: number) {
+    super(`HTTP ${estado}`)
+    this.estado = estado
   }
 }
 
-/** Baja un archivo informando el avance (0..0,9 de la tarea: el resto es decodificar). */
-async function bajar(url: string, tarea: Tarea): Promise<Blob> {
-  const res = await pedir(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length')) || 0
-  const tipo = res.headers.get('content-type') ?? ''
-  if (!res.body || total <= 0) {
-    const blob = await res.blob()
-    tarea.avanzar(0.9)
-    return blob
+/**
+ * Un intento de bajar `url`, con vigía: se corta si pasan INACTIVIDAD_MS sin que llegue nada (los
+ * encabezados o un trozo del cuerpo) o TOPE_MS en total. Informa el avance (0..0,9 de la tarea:
+ * el resto es decodificar).
+ */
+async function bajarUnaVez(url: string, tarea: Tarea): Promise<Blob> {
+  const control = new AbortController()
+  /** Por qué lo cortó el vigía (null: no lo cortó). En un objeto: lo escribe un timer. */
+  const vigilado: { corte: string | null } = { corte: null }
+  const cortar = (motivoCorte: string) => {
+    vigilado.corte = motivoCorte
+    control.abort()
   }
-  const lector = res.body.getReader()
-  const partes: BlobPart[] = []
-  let recibido = 0
-  for (;;) {
-    const { done, value } = await lector.read()
-    if (done) break
-    if (value) {
-      partes.push(value)
-      recibido += value.byteLength
-      // con compresión el Content-Length es del cuerpo comprimido: se acota
-      tarea.avanzar(0.9 * Math.min(1, recibido / total))
+  let vigia: ReturnType<typeof setTimeout> | undefined
+  const rearmar = () => {
+    clearTimeout(vigia)
+    vigia = setTimeout(() => cortar(`${INACTIVIDAD_MS / 1000} s sin datos`), INACTIVIDAD_MS)
+  }
+  const tope = setTimeout(() => cortar(`más de ${TOPE_MS / 1000} s`), TOPE_MS)
+  rearmar()
+  try {
+    const res = await fetch(url, { credentials: 'same-origin', signal: control.signal })
+    rearmar()
+    if (!res.ok) throw new ErrorHttp(res.status)
+    const total = Number(res.headers.get('content-length')) || 0
+    const tipo = res.headers.get('content-type') ?? ''
+    if (!res.body) {
+      const blob = await res.blob()
+      tarea.avanzar(0.9)
+      return blob
+    }
+    const lector = res.body.getReader()
+    const partes: BlobPart[] = []
+    let recibido = 0
+    for (;;) {
+      const { done, value } = await lector.read()
+      if (done) break
+      if (value) {
+        rearmar()
+        partes.push(value)
+        recibido += value.byteLength
+        // con compresión el Content-Length es del cuerpo comprimido: se acota (sin él, se avisa al final)
+        if (total > 0) tarea.avanzar(0.9 * Math.min(1, recibido / total))
+      }
+    }
+    tarea.avanzar(0.9)
+    return new Blob(partes, { type: tipo })
+  } catch (e) {
+    if (vigilado.corte) throw new Error(`se colgó (${vigilado.corte})`)
+    throw e
+  } finally {
+    clearTimeout(vigia)
+    clearTimeout(tope)
+  }
+}
+
+/**
+ * Baja un archivo: un corte de red, un 5xx o un pedido colgado se reintentan una vez (el 4G de un
+ * local es inestable); un 4xx no.
+ */
+async function bajar(url: string, tarea: Tarea): Promise<Blob> {
+  for (let intento = 0; ; intento++) {
+    try {
+      return await bajarUnaVez(url, tarea)
+    } catch (e) {
+      if (intento >= 1 || (e instanceof ErrorHttp && e.estado < 500)) throw e
+      await new Promise((r) => setTimeout(r, 450))
     }
   }
-  tarea.avanzar(0.9)
-  return new Blob(partes, { type: tipo })
 }
 
 async function decodificar(blob: Blob): Promise<Decodificada> {
@@ -276,7 +361,7 @@ async function cargarCara(id: IdPersonaje, tarea: Tarea): Promise<Decodificada |
     return null
   }
   try {
-    return await cargarImagen(absoluta(ficha.rutas.cara), tarea)
+    return await cargarImagen(conDespliegue(absoluta(ficha.rutas.cara)), tarea)
   } catch (e) {
     console.warn(`[juego] sin cara de ${ficha.nombre}: ${motivo(e)}`)
     tarea.avanzar(1)
@@ -335,7 +420,7 @@ async function cargarArena(arena: IdArena, tarea: Tarea): Promise<{ def: ArenaDe
   const def = ARENAS[arena] ?? ARENAS.rondeau
   if (def.imagen) {
     try {
-      const imagen = await cargarImagen(absoluta(def.imagen), tarea)
+      const imagen = await cargarImagen(conDespliegue(absoluta(def.imagen)), tarea)
       return { def, imagen }
     } catch (e) {
       console.warn(`[juego] no se pudo cargar la arena ${def.nombre} (${motivo(e)}): se dibuja una de respaldo`)
@@ -452,27 +537,49 @@ export async function cargarRecursosImpl(
   const progreso = crearProgreso(alProgresar)
   // las tareas se registran todas antes del primer await: el total se conoce de entrada
   const atlas = unicos.map((id) => cargarAtlas(id, progreso.tarea(1), progreso.tarea(10)))
-  const caras = unicos.map((id) => cargarCara(id, progreso.tarea(1)))
+  const caras = unicos.map((id) => opcional(cargarCara(id, progreso.tarea(1))))
   const fondo = cargarArena(arena, progreso.tarea(8))
-  const efectos = cargarEfectos(progreso.tarea(0.5), progreso.tarea(1.5))
-  const rapados = unicos.map((id) => cargarRapado(id, progreso.tarea(0.2), progreso.tarea(0.8)))
+  const efectos = opcional(cargarEfectos(progreso.tarea(0.5), progreso.tarea(1.5)))
+  const rapados = unicos.map((id) => opcional(cargarRapado(id, progreso.tarea(0.2), progreso.tarea(0.8))))
   progreso.inicio()
-  const [listos, carasListas, arenaLista, efectosListos, rapadosListos] = await Promise.all([
-    Promise.all(atlas),
-    Promise.all(caras),
-    fondo,
-    efectos,
-    Promise.all(rapados),
+  const [listos, arenaLista] = await Promise.all([Promise.all(atlas), fondo])
+  // Lo opcional nunca frena la pelea: tiene ESPERA_OPCIONALES_MS más y lo que no llegó se hace
+  // sin eso (la banda del especial sin cara, los efectos a mano, el remate sin pelar).
+  let espera: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    Promise.all([...caras, efectos, ...rapados].map((o) => o.listo)),
+    new Promise<void>((r) => {
+      espera = setTimeout(r, ESPERA_OPCIONALES_MS)
+    }),
   ])
+  clearTimeout(espera)
 
-  const recursos: RecursosConEfectos = { atlas: {}, caras: {}, arena: arenaLista, efectosComunes: efectosListos, rapados: {} }
+  const recursos: RecursosConEfectos = { atlas: {}, caras: {}, arena: arenaLista, efectosComunes: efectos.valor, rapados: {} }
   for (const a of listos) recursos.atlas[a.id] = { datos: a.datos, imagen: a.imagen }
   unicos.forEach((id, i) => {
-    const cara = carasListas[i]
+    const cara = caras[i].valor
     if (cara) recursos.caras[id] = cara
-    const rapado = rapadosListos[i]
+    const rapado = rapados[i].valor
     if (rapado && recursos.rapados) recursos.rapados[id] = rapado
   })
   progreso.fin()
   return recursos
+}
+
+/** Un recurso opcional: `valor` es lo que haya llegado (null si todavía no, o si falló). */
+interface Opcional<T> {
+  valor: T | null
+  /** Se cumple cuando llegó o falló (nunca se rechaza). */
+  listo: Promise<void>
+}
+
+function opcional<T>(p: Promise<T | null>): Opcional<T> {
+  const o: Opcional<T> = { valor: null, listo: Promise.resolve() }
+  o.listo = p.then(
+    (v) => {
+      o.valor = v
+    },
+    () => undefined,
+  )
+  return o
 }

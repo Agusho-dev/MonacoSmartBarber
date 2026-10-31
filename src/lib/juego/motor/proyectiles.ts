@@ -12,7 +12,7 @@
 import type { EfectoEspecial, Herramienta, Lado, Partida, ProyectilEstado, TipoProyectil } from '../tipos'
 import { HITSTUN, X_MAX, X_MIN } from './constantes'
 import { aplicarImpacto, contarAcierto, danioContinuo, efectoDe, efectoNormalizado, ponerEstado } from './combate'
-import { cajaCuerpo, contraPared, golpeable, interseccion, limitar } from './cuerpo'
+import { cajaCuerpo, contraPared, golpeable, inmuneAlControl, interseccion, limitar } from './cuerpo'
 import type { EstadoInterno, ProyectilInterno } from './interno'
 import { emitir } from './interno'
 import type { Caja, DefEspecial, DefNube, DefProyectil } from './movimientos'
@@ -158,6 +158,18 @@ export function crearRayo(p: Partida, I: EstadoInterno, lado: Lado, selloAccion:
   pi.cosmetico = true
   agregar(p, I, pi)
   emitir(p, { tipo: 'proyectil', quien: lado, proyectil: 'rayo' })
+}
+
+/**
+ * Dónde quedó el pañal después de crearNube. crearNube saca la nube vieja del mismo dueño y, si
+ * estaba antes en la lista, todo se corre un lugar: con el índice viejo se borraba OTRO proyectil
+ * (cualquiera, de los dos lados, o la nube recién creada) y el pañal se procesaba dos veces
+ * (revisión del 30/oct, segunda tanda). crearNube sólo saca nubes, así que el pañal sigue en la
+ * lista; como el recorrido va de atrás para adelante, con su índice nuevo se procesa bien lo que
+ * queda debajo.
+ */
+function indiceDespuesDeNube(I: EstadoInterno, pi: ProyectilInterno): number {
+  return I.proyectiles.indexOf(pi)
 }
 
 /** La nube del pañal: una sola por dueño (la nueva reemplaza a la vieja). */
@@ -315,7 +327,7 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
       // Mientras tiene a alguien aturdido, el tornado frena y lo chupa hacia su frente (así entran
       // los seis cortes); contra la pared se queda moliendo en el lugar.
       if (pi.arrastrando && d.arrastre !== undefined) {
-        if (vi.stun > 0 || v.efectos.guardiaRota > 0) {
+        if ((vi.stun > 0 || v.efectos.guardiaRota > 0) && !inmuneAlControl(vi)) {
           q.vx = q.mira * d.arrastre
           const objetivo = q.x + q.vx + q.mira * 16
           const tope = Math.abs(q.vx) + 4
@@ -335,9 +347,13 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
       if (d.rastrero) q.y = q.alto / 2
     }
 
-    // La onda lleva delante al que tocó, hasta la pared; ahí le pega otra vez y lo aturde.
+    // La onda lleva delante al que tocó, hasta la pared; ahí le pega otra vez y lo aturde. Sólo en
+    // la pelea (con `pegan` y golpes por dar): si Rodrigo caía mientras la onda llevaba al rival, la
+    // onda lo seguía arrastrando y aturdiendo en la fase final y el ganador no podía rematar. Tampoco
+    // arrastra al que ya está inmune al control (TOPE_ENCIERRO).
     if (d.onda && pi.arrastrando) {
-      const enLaOnda = vi.stun > 0 && vi.agarradoPor === null && v.enSuelo && !vi.dash
+      const enLaOnda =
+        pegan && q.golpesRestantes > 0 && vi.stun > 0 && vi.agarradoPor === null && v.enSuelo && !vi.dash && !inmuneAlControl(vi)
       if (!enLaOnda) pi.arrastrando = false
       else {
         const frente = q.x + q.mira * (q.ancho / 2 + 26)
@@ -394,7 +410,10 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
           continue
         }
       } else {
-        if (d.nube && pegan && q.golpesRestantes > 0) crearNube(p, I, q.duenio, q.x, d.nube, pi.especial, pi.selloAccion)
+        if (d.nube && pegan && q.golpesRestantes > 0) {
+          crearNube(p, I, q.duenio, q.x, d.nube, pi.especial, pi.selloAccion)
+          i = indiceDespuesDeNube(I, pi)
+        }
         quitar(p, I, i)
         continue
       }
@@ -464,6 +483,7 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
     if (d.onda && resultado !== 'armadura' && q.golpesRestantes > 0) pi.arrastrando = true
     if (d.nube) {
       crearNube(p, I, q.duenio, v.x, d.nube, pi.especial, pi.selloAccion)
+      i = indiceDespuesDeNube(I, pi)
       quitar(p, I, i)
       continue
     }

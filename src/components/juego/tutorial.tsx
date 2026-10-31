@@ -65,8 +65,9 @@ export function Tutorial({
           <span className="cf-rotulo">
             Cómo se juega · {paso + 1} de {PASOS.length}
           </span>
-          <button type="button" className="cf-enlace" onClick={onCerrar}>
-            Saltar
+          {/* «Omitir» y no «Saltar»: «Saltar» es el rótulo del salto en el dibujo del stick. */}
+          <button type="button" className="cf-enlace" onClick={onCerrar} aria-label="Omitir el tutorial">
+            Omitir
           </button>
         </div>
 

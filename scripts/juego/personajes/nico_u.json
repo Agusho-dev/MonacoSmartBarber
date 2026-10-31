@@ -27,8 +27,16 @@
   },
   "animaciones": {
     "quieto": {
+      "_nota": "revisión 31/oct: con el apoyo en el torso los pies patinaban (el de atrás saltaba 14 u del mundo entre los cuadros 2 y 3); apoyoX deja quieto el punto medio de los pies (≤ 4,3 u), con el mismo apoyo promedio",
       "panel": [10, 34, 353, 158],
-      "cuadros": 5
+      "cuadros": 5,
+      "porCuadro": {
+        "0": {"apoyoX": 45.0},
+        "1": {"apoyoX": 112.0},
+        "2": {"apoyoX": 179.5},
+        "3": {"apoyoX": 245.0},
+        "4": {"apoyoX": 309.5}
+      }
     },
     "caminar": {
       "panel": [361, 34, 720, 158],
@@ -174,11 +182,16 @@
           ]
         },
         "7": {
+          "_nota": "revisión 31/oct: flecos del remolino a la derecha de la rodilla, abajo y a la izquierda de la zapatilla de adelante y a la izquierda de la pierna de atrás",
           "excluir": [
             [1500, 352, 1527, 474],
             [[1474, 356], [1500, 356], [1500, 410], [1486, 410], [1486, 384], [1474, 380]],
             [1390, 360, 1416, 400],
-            [1436, 467, 1500, 474]
+            [1436, 467, 1500, 474],
+            [[1473, 410], [1490, 410], [1490, 449], [1471, 449], [1470, 440], [1471, 430], [1473, 424]],
+            [1430, 460, 1478, 472],
+            [1428, 444, 1439, 460],
+            [1378, 418, 1390, 446]
           ]
         },
         "4": {
@@ -313,11 +326,22 @@
       "cuadros": 4,
       "usar": [1, 2, 3],
       "impactos": [1],
+      "_nota": "revisión 31/oct: en el impacto (cuadro 2 de la hoja) la limpieza del fondo liso se comía el ruedo del short y la pierna de adelante quedaba suelta: «incluir» vuelve a pegarla; en el 3, el fondo entre los puños y la rodilla quedaba como una mancha negra delante del pecho",
       "porCuadro": {
         "0": {
           "excluir": [
             [[81, 509], [118, 509], [118, 545], [81, 545]],
             [110, 543, 118, 634]
+          ]
+        },
+        "2": {
+          "incluir": [
+            [[288, 593], [295, 589], [300, 592], [304, 596], [306, 599], [303, 602], [296, 602], [290, 598]]
+          ]
+        },
+        "3": {
+          "excluir": [
+            [[399, 583], [400, 581], [417, 579], [431, 579], [431, 601], [415, 601], [413, 596], [410, 592], [406, 588], [402, 585]]
           ]
         }
       },
@@ -370,14 +394,18 @@
           "incluir": [
             [[1064, 588], [1062, 601], [1058, 612], [1051, 621], [1043, 627], [1033, 629], [1023, 627], [1015, 621], [1008, 612], [1004, 601], [1002, 588], [1004, 575], [1008, 564], [1015, 555], [1023, 549], [1033, 547], [1043, 549], [1051, 555], [1058, 564], [1062, 575]]
           ],
+          "_nota": "revisión 31/oct: el límite recto en x=1004 cortaba la cabeza y el torso donde empieza el bombo; por encima del bombo llega hasta el mentón (x=1024, antes del platillo)",
           "limite": [
-            [948, 512, 1004, 634],
+            [[948, 512], [1024, 512], [1024, 549], [1012, 552], [1004, 556], [1004, 634], [948, 634]],
             [[1003, 560], [1010, 548], [1025, 543], [1045, 540], [1080, 540], [1090, 545], [1094, 580], [1092, 615], [1080, 628], [1050, 632], [1020, 630], [1006, 615], [1001, 590]]
           ],
           "anclaZona": [[948, 512, 1002, 634]]
         },
         "2": {
-          "excluir": [[1093, 548, 1106, 606]]
+          "_nota": "revisión 31/oct: el fondo liso al costado de la cadera (x 1106-1113) quedaba como un bloque negro",
+          "excluir": [
+            [[1093, 548], [1106, 548], [1106, 579], [1112, 580], [1113, 594], [1114, 598], [1112, 601], [1111, 604], [1110, 607], [1093, 607]]
+          ]
         }
       }
     },
@@ -387,7 +415,9 @@
       "cortes": [[112, 124], [283, 300], [446, 458]],
       "porCuadro": {
         "0": {
-          "agregar": [[106, 668, 152, 724]]
+          "_nota": "revisión 31/oct: sin la franja oscura del piso entre los pies y a la derecha de la zapatilla",
+          "agregar": [[106, 668, 152, 724]],
+          "excluir": [[52, 792, 88, 797], [116, 791, 126, 797]]
         },
         "1": {
           "excluir": [
@@ -440,7 +470,8 @@
           "agregar": [[1128, 770, 1145, 797]]
         },
         "4": {
-          "excluir": [[1128, 770, 1145, 797]]
+          "_nota": "revisión 31/oct: sin el bloque de fondo oscuro arriba a la derecha de la cabeza",
+          "excluir": [[1128, 770, 1145, 797], [[1166, 698], [1190, 698], [1190, 709], [1167, 709], [1166, 705]]]
         }
       }
     },
@@ -459,9 +490,18 @@
       "escala": 0.84
     },
     "burla": {
+      "_nota": "revisión 31/oct: el último cuadro de la hoja es de espaldas y quedaba fijo al arrancar la pelea (el lado 1 termina la burla justo cuando empieza): la burla termina en el 5, mirando al rival. En el 5, sin la mano del cuadro anterior apoyada en el hombro",
       "panel": [954, 833, 1527, 985],
       "cuadros": 7,
-      "escala": 0.84
+      "escala": 0.84,
+      "usar": [0, 1, 2, 3, 4, 5],
+      "porCuadro": {
+        "5": {
+          "excluir": [
+            [[1350, 868], [1377, 868], [1376, 878], [1372, 882], [1371, 893], [1350, 893]]
+          ]
+        }
+      }
     }
   },
   "efectos": {

@@ -30,15 +30,24 @@
  * Integración (30/oct): en fácil y en difícil cada barbero tiene su `pericia` (EstiloCpu, en
  * movimientos.ts), que corre los parámetros de la dificultad un poco hacia arriba o hacia abajo
  * (`paramsConPericia`) para que todos los rivales de una misma dificultad cuesten lo mismo.
+ *
+ * Contra una persona (revisión del 30/oct, segunda tanda: medido con los dos «humanos» de
+ * balance.mts, el que sólo aprieta GOLPE y el que además usa la MÁQUINA y los especiales): la tabla
+ * de la dificultad lleva encima CONTRA_PERSONA (en normal recibe menos al que se acerca caminando) y
+ * la pericia es `periciaHumano` del barbero de la CPU menos la `asistencia` del barbero de la persona
+ * (periciaCpu en partida.ts). CPU contra CPU y el online no pasan por ahí. En la misma tanda: no se
+ * cubre del Sillonazo en normal, ve en el super flash lo que TIRA y rompe la guardia y se va,
+ * salta el molino hacia adelante, sabe que la herramienta de Brian aguanta los leves y la cura con
+ * armadura se toma más cerca.
  */
-import type { Dificultad, EntradaJugador, Lado, Partida, ProyectilEstado } from '../tipos'
+import type { Dificultad, EntradaJugador, Lado, LuchadorEstado, Partida, ProyectilEstado } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import type { Azar } from './azar'
 import { azar, chance, crearAzar, entero } from './azar'
 import { ATERRIZAJE_TICKS, DASH, GRAVEDAD, X_MAX, X_MIN } from './constantes'
 import { alcanceDe, finVentanas, primeraVentana, puedeActuar } from './cuerpo'
 import type { EstadoInterno } from './interno'
-import type { DefEspecial, KitPersonaje } from './movimientos'
+import type { DefEspecial, DefMovimiento, KitPersonaje } from './movimientos'
 
 export interface ParamsCpu {
   /** Ticks de retraso con los que ve al rival. */
@@ -117,7 +126,7 @@ export const PARAMS_CPU: Readonly<Record<Dificultad, ParamsCpu>> = {
 type BotonCpu = 'golpe' | 'herramienta' | 'especial1' | 'especial2' | 'arriba' | 'dash'
 const BOTONES_CPU: readonly BotonCpu[] = ['golpe', 'herramienta', 'especial1', 'especial2', 'arriba', 'dash']
 type Ataque = 'golpe' | 'herramienta'
-type Plan = 'neutral' | 'acercarse' | 'alejarse' | 'tantear' | 'esperar' | 'guardia' | 'presionar' | 'mantener'
+type Plan = 'neutral' | 'acercarse' | 'alejarse' | 'tantear' | 'esperar' | 'guardia' | 'presionar' | 'mantener' | 'rango'
 type ModoEsquiva = 'saltar' | 'dash' | 'guardia' | 'salir'
 
 interface Observacion {
@@ -212,6 +221,17 @@ export interface Cerebro {
   enfriaEspecial: number
   /** Ticks que lleva esperando para tirar el especial que le toca. */
   esperaProximo: number
+  /** El último especial que tiró y cuántas veces seguidas (ver `repiteDeMas`). */
+  ultimoEspecial: 0 | 1 | 2
+  seguidos: number
+  /** Especiales que tiró en la partida, de cada uno (para no quedarse con uno solo). */
+  usos: [number, number]
+  /** Busca la distancia del especial que le toca (plan 'rango'; 0 = no busca). */
+  rango: 0 | 1 | 2
+  /** Ataques con la herramienta que empezó el rival en los últimos ~4 s (promedio móvil). */
+  pesadosRival: number
+  /** Ya decidió qué hace con el derribo del rival (una vez por derribo). */
+  tiradoVisto: boolean
 }
 
 function observacionVacia(): Observacion {
@@ -269,13 +289,13 @@ const PROBABILIDADES = [
  * conductas enteras (cubrirse del que se acerca, cuidar la guardia baja) y prenderlas con una
  * pericia mínima era un salto, no un ajuste fino (medido: +0,026 en fácil movía 16 puntos).
  */
-export function paramsConPericia(dificultad: Dificultad, pericia: number): ParamsCpu {
-  const base = PARAMS_CPU[dificultad] ?? PARAMS_CPU.normal
+export function paramsConPericia(dificultad: Dificultad, pericia: number, tabla: Readonly<Record<Dificultad, ParamsCpu>> = PARAMS_CPU): ParamsCpu {
+  const base = tabla[dificultad] ?? tabla.normal
   const t = Math.max(-1, Math.min(1, Number(pericia) || 0))
   if (t === 0) return base
   const i = Math.max(0, ESCALERA.indexOf(dificultad))
-  const arriba = PARAMS_CPU[ESCALERA[Math.min(ESCALERA.length - 1, i + 1)]]
-  const abajo = PARAMS_CPU[ESCALERA[Math.max(0, i - 1)]]
+  const arriba = tabla[ESCALERA[Math.min(ESCALERA.length - 1, i + 1)]]
+  const abajo = tabla[ESCALERA[Math.max(0, i - 1)]]
   // hacia dónde se corre cada número: hacia el vecino, o lejos del otro vecino en las puntas
   const destino = t > 0 ? (arriba !== base ? arriba : null) : abajo !== base ? abajo : null
   const opuesto = t > 0 ? abajo : arriba
@@ -293,9 +313,37 @@ export function paramsConPericia(dificultad: Dificultad, pericia: number): Param
   return r
 }
 
-/** `pericia`: la de EstiloCpu.pericia del barbero en esta dificultad (0 = la tabla tal cual). */
-export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number, pericia = 0): Cerebro {
-  const base = paramsConPericia(dificultad, pericia)
+/**
+ * Contra una PERSONA (el otro lado es humano), lo que cambia de PARAMS_CPU en cada dificultad; CPU
+ * contra CPU (la que mide el balance de los kits) y el online (dos personas, sin CPU) no lo ven.
+ *
+ * Normal: `recibir` 0,8 → 0,6 (revisión del 30/oct, segunda tanda). Recibir con un golpe al que se
+ * acerca caminando es la defensa que más le cuesta a quien recién empieza, y castigaba al barbero
+ * que camina lento, no a cómo se juega: con 0,8, el «humano simple» de balance.mts ganaba 4 % con
+ * Fabri, 9 % con Lucas y 20 % con Brian (caminan 3,0–3,4) contra 64 % con Luciano (4,4), y el que
+ * además usa la MÁQUINA y los especiales («novato»), al revés. Con 0,6 los dos humanos quedan
+ * cerca con cada barbero (medido de 0,4 a 0,8: lo que separa a los dos se achica de 1,3–2,2 a
+ * menos de 1 en logit en casi todos); lo demás lo emparejan `asistencia` y `periciaHumano`
+ * (movimientos.ts).
+ */
+export const CONTRA_PERSONA: Partial<Record<Dificultad, Partial<ParamsCpu>>> = { normal: { recibir: 0.6 } }
+
+/** La tabla de parámetros de la CPU contra una persona (PARAMS_CPU con CONTRA_PERSONA encima). */
+function tablaContraPersona(): Readonly<Record<Dificultad, ParamsCpu>> {
+  return {
+    facil: { ...PARAMS_CPU.facil, ...CONTRA_PERSONA.facil },
+    normal: { ...PARAMS_CPU.normal, ...CONTRA_PERSONA.normal },
+    dificil: { ...PARAMS_CPU.dificil, ...CONTRA_PERSONA.dificil },
+  }
+}
+
+/**
+ * `pericia`: la de EstiloCpu.pericia del barbero en esta dificultad (0 = la tabla tal cual; contra una
+ * persona, periciaHumano − asistencia: ver periciaCpu en partida.ts). `contraPersona`: el otro lado es
+ * humano (usa CONTRA_PERSONA).
+ */
+export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number, pericia = 0, contraPersona = false): Cerebro {
+  const base = paramsConPericia(dificultad, pericia, contraPersona ? tablaContraPersona() : PARAMS_CPU)
   const historial: Observacion[] = []
   for (let i = 0; i < LARGO_HISTORIAL; i++) historial.push(observacionVacia())
   return {
@@ -339,6 +387,12 @@ export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number
     proximoEspecial: 1,
     enfriaEspecial: 0,
     esperaProximo: 0,
+    ultimoEspecial: 0,
+    seguidos: 0,
+    usos: [0, 0],
+    rango: 0,
+    pesadosRival: 0,
+    tiradoVisto: false,
   }
 }
 
@@ -358,6 +412,7 @@ export function reiniciarCerebro(c: Cerebro): void {
   c.bloqueando = false
   c.llenos = 0
   c.enfriaEspecial = 0
+  c.rango = 0
   for (const b of BOTONES_CPU) c.btn[b] = 0
 }
 
@@ -377,9 +432,11 @@ function observar(c: Cerebro, p: Partida, I: EstadoInterno, otro: Lado): void {
   o.atacando = !!a && !a.remate
   o.sello = a ? a.sello : 0
   c.presionRival *= 1 - 1 / 120
+  c.pesadosRival *= 1 - 1 / 240
   if (o.atacando && o.sello !== c.selloVisto) {
     c.selloVisto = o.sello
     c.presionRival += 1
+    if (a && a.especial === 0 && a.mov.boton === 'herramienta') c.pesadosRival += 1
   }
   if (a) {
     const ini = primeraVentana(a.mov)
@@ -517,9 +574,27 @@ function castigoLlega(k: KitPersonaje, ataque: Ataque, ob: Observacion, reaccion
   return ob.restante - reaccion + arranqueAtaque(rival, 'golpe') >= arranqueAtaque(k, ataque) + 1
 }
 
-/** A uno o dos golpes pesados de que le rompan la guardia. */
+/**
+ * A uno o dos golpes pesados de que le rompan la guardia, o a una cadena de la MÁQUINA (el remate
+ * y el golpe que sigue entran los dos: bloqueado el primero, el segundo llega en blockstun).
+ * Mirando sólo el golpe más fuerte (×1,3), la CPU se cubría con 56 de guardia de una cadena que
+ * saca 63 y se la rompían (la MÁQUINA machacada le rompía la guardia a Brian 4 veces por pelea).
+ */
 function guardiaBajaDe(guardia: number, rival: KitPersonaje, yo: KitPersonaje): boolean {
-  return guardia <= Math.max(35, golpeGuardiaRival(rival, yo) * 1.3)
+  return guardia <= Math.max(35, golpeGuardiaRival(rival, yo) * 1.3, cadenaGuardiaRival(rival, yo) + 3)
+}
+
+/** Lo que le saca a la guardia la cadena de la herramienta entera, bloqueada (con su pasiva). */
+function cadenaGuardiaRival(rival: KitPersonaje, yo: KitPersonaje): number {
+  let total = 0
+  let id: string | undefined = rival.inicio.herramienta
+  for (let i = 0; id && i < 4; i++) {
+    const m: DefMovimiento | undefined = rival.movimientos[id]
+    if (!m) break
+    for (const v of m.ventanas) total += v.danioGuardia * (v.golpes ?? 1)
+    id = m.siguiente
+  }
+  return total * (yo.pasiva?.multDanioGuardia ?? 1)
 }
 
 /** El golpe normal que más guardia le saca (con su pasiva de guardia). */
@@ -527,6 +602,16 @@ function golpeGuardiaRival(rival: KitPersonaje, yo: KitPersonaje): number {
   let max = 0
   for (const m of Object.values(rival.movimientos)) for (const v of m.ventanas) max = Math.max(max, v.danioGuardia)
   return max * (yo.pasiva?.multDanioGuardia ?? 1)
+}
+
+/**
+ * ¿Su herramienta aguanta los golpes leves al arrancar? La de Chipi por su armadura y la de Brian
+ * por su pasiva (los leves no lo frenan en ningún ataque). Antes sólo se miraba la armadura del
+ * movimiento y la CPU de Brian recibía y cambiaba golpes con el puño, que no la tiene (revisión del
+ * 30/oct, segunda tanda).
+ */
+function herramientaArmada(k: KitPersonaje): boolean {
+  return !!k.pasiva?.armaduraAtaques?.includes('leve') || !!k.movimientos[k.inicio.herramienta]?.armadura?.contra.includes('leve')
 }
 
 function elegirAtaque(c: Cerebro, k: KitPersonaje, ob: Observacion, rival?: KitPersonaje): Ataque {
@@ -539,21 +624,76 @@ function elegirAtaque(c: Cerebro, k: KitPersonaje, ob: Observacion, rival?: KitP
   // Contra alguien que está atacando: si la herramienta aguanta golpes leves (Chipi), la herramienta;
   // si no, lo más rápido (la herramienta es lenta y la cortan).
   if ((ob.atacando || c.presionRival > 2) && !ob.bloqueando && chance(c.azar, 0.3 + c.efectivos.adapta * 0.7)) {
-    const armada = k.movimientos[k.inicio.herramienta]?.armadura?.contra.includes('leve')
-    return armada ? 'herramienta' : 'golpe'
+    return herramientaArmada(k) ? 'herramienta' : 'golpe'
   }
   if (ob.bloqueando && chance(c.azar, 0.55)) return 'herramienta'
   return chance(c.azar, k.cpu.herramienta) ? 'herramienta' : 'golpe'
 }
 
-/** El especial más barato que le alcanza la carga (0 = ninguno). */
-function especialMasBarato(carga: number, especiales: readonly { costo: number }[]): 0 | 1 | 2 {
+/**
+ * Un especial que AGUANTA mientras arranca: su armadura (o lo intocable) cubre hasta que pega o
+ * tira lo que tira. Es el que sirve de revés contra la MÁQUINA machacada: el agarre de Brian o la
+ * Curación de Fabri, sin nada que los cubra, salían y se comían el golpe (medido el 30/oct).
+ */
+function aguantaAlArrancar(esp: DefEspecial): boolean {
+  const pega = Math.min(primeraVentana(esp), esp.embestida?.desde ?? Number.MAX_SAFE_INTEGER)
+  if (esp.embestida?.invulnerableHasta !== undefined && esp.embestida.invulnerableHasta >= pega) return true
+  const ar = esp.armadura
+  return !!ar && ar.contra.includes('fuerte') && ar.hasta >= pega
+}
+
+/** El revés más barato que le alcanza la carga (0 = ninguno). */
+function especialDeReves(k: KitPersonaje, carga: number, especiales: readonly { costo: number }[]): 0 | 1 | 2 {
   let mejor: 0 | 1 | 2 = 0
   for (const n of [1, 2] as const) {
-    const costo = especiales[n - 1].costo
-    if (carga + 1e-9 >= costo && (mejor === 0 || costo < especiales[mejor - 1].costo)) mejor = n
+    if (!aguantaAlArrancar(k.especiales[n - 1]) || carga + 1e-9 < especiales[n - 1].costo) continue
+    if (mejor === 0 || especiales[n - 1].costo < especiales[mejor - 1].costo) mejor = n
   }
   return mejor
+}
+
+/** Cuánta guardia le saca ese especial si se lo cubre entero (todas las ventanas, golpes y tiros). */
+function guardiaDelEspecial(esp: DefEspecial, victima: KitPersonaje): number {
+  let g = 0
+  for (const v of esp.ventanas) g += v.danioGuardia * (v.golpes ?? 1)
+  const pr = esp.proyectil
+  if (pr) g += pr.danioGuardia * pr.golpes * (esp.rafaga?.cantidad ?? 1)
+  return g * (victima.pasiva?.multDanioGuardia ?? 1)
+}
+
+/**
+ * Tirar `n` otra vez sería la tercera seguida y le dejaría sin carga para el otro: no (revisión
+ * del 30/oct, segunda tanda). Rematando los golpes que entran «sin esperar el turno», la CPU de
+ * Stefano tiraba 26 Termos por 1 Lluvia y la de Gabriel casi nunca el Graffiti.
+ */
+function repiteDeMas(c: Cerebro, k: KitPersonaje, n: 1 | 2, yo: LuchadorEstado, ob: Observacion, dist: number): boolean {
+  if (c.ultimoEspecial !== n || c.seguidos < 2) return false
+  const otro = n === 1 ? 2 : 1
+  const especiales = PERSONAJES[yo.id].especiales
+  // Si el otro no sirve ahora (la cura sin dónde tomarla) o ya esperó por él (o fue a buscar su
+  // distancia y no la consiguió), se conforma con éste.
+  if (!especialSirve(k.especiales[otro - 1], yo, ob, dist)) return false
+  if (c.esperaProximo >= esperaMaxima(especiales[otro - 1].costo)) return false
+  return yo.carga - especiales[n - 1].costo + 1e-9 < especiales[otro - 1].costo
+}
+
+/**
+ * ¿Tiene sentido ese especial ahora, en general? La cura sólo con la vida bajando y cuando se la
+ * puede tomar tranquila (el rival en el piso o lejos): si no, ni se la espera ni se la busca. Antes
+ * la CPU de Fabri se quedaba esperando una cura imposible y no tiraba nada.
+ */
+function especialSirve(esp: DefEspecial, yo: { vida: number; vidaMax: number }, ob?: Observacion, dist = 0): boolean {
+  if (!esp.cura) return true
+  return yo.vida < yo.vidaMax * 0.8 && (!ob || ob.tirado || dist > distanciaCura(esp))
+}
+
+/**
+ * Desde qué distancia la cura se puede tomar tranquila: si los golpes medios no la cortan (su
+ * armadura, revisión del 30/oct, segunda tanda), alcanza con estar fuera del alcance del golpe y
+ * de la MÁQUINA; si no, bien lejos.
+ */
+function distanciaCura(esp: DefEspecial): number {
+  return esp.armadura?.contra.includes('medio') ? 200 : 300
 }
 
 /** ¿La embestida llega antes de que el rival termine su movimiento (o mientras está a merced)? */
@@ -624,6 +764,7 @@ function conveniencia(
   dentro: boolean,
   ob: Observacion,
   prm: ParamsCpu,
+  leFalta = false,
 ): number {
   const yo = p.luchadores[lado]
   const libre = ob.enSuelo && !ob.tirado && !ob.invulnerable
@@ -632,7 +773,9 @@ function conveniencia(
     case 'cura': {
       const falta = yo.vidaMax - yo.vida
       if (falta < yo.vidaMax * 0.2) return 0
-      const lejos = dist > 300 || ob.tirado || (ob.vulnerable && dist > 160)
+      // Si viene usando poco la cura (ver `leFalta`), se anima también a media distancia, con el
+      // rival que no está atacando: le pegan antes de terminarla, pero algo se cura.
+      const lejos = dist > distanciaCura(esp) || ob.tirado || (ob.vulnerable && dist > 160) || (leFalta && dist > 220 && !ob.atacando)
       return lejos ? (yo.vida < yo.vidaMax * 0.5 ? 0.85 : 0.45) : 0
     }
     case 'agarre':
@@ -692,27 +835,32 @@ function quiereEspecial(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, pr
   const ficha = PERSONAJES[yo.id]
   const k = I.kits[lado]
   const lleno = yo.carga >= 9
+  // Si el que le toca no sirve ahora (la cura con la vida llena), no lo espera.
+  const proximoSirve = especialSirve(k.especiales[c.proximoEspecial - 1], yo, ob, dist)
   for (const n of [c.proximoEspecial, c.proximoEspecial === 1 ? 2 : 1] as const) {
     const esp = ficha.especiales[n - 1]
     if (yo.carga + 1e-9 < esp.costo) continue
+    if (repiteDeMas(c, k, n, yo, ob, dist)) continue
     const [rmin, rmax] = k.cpu.rangoEspecial[n - 1]
     const dentro = dist >= rmin && dist <= rmax
     let pr = 0
     if (prm.especiales === 'torpe') {
       // Lento y mal apuntado: la misma lectura que las otras dificultades pero con pocas ganas,
-      // y a veces lo tira desde más lejos de lo que llega (se queda corto).
+      // y a veces lo tira desde más lejos de lo que llega (se queda corto). También alterna: si
+      // no, contra alguien pegado sólo salía el especial de cerca.
       const def = k.especiales[n - 1]
-      const s = conveniencia(usoDe(def), def, k, n, p, lado, dist, dentro, ob, prm)
+      const s = conveniencia(usoDe(def), def, k, n, p, lado, dist, dentro, ob, prm, leFaltaUsar(c, n))
       if (c.enfriaEspecial > 0) continue
+      if (n !== c.proximoEspecial && s < 0.6 && !lleno && proximoSirve && c.esperaProximo < esperaMaxima(ficha.especiales[c.proximoEspecial - 1].costo)) continue
       pr = dist > rmax + 40 ? 0.03 : s * 0.22
     } else {
       const def = k.especiales[n - 1]
-      const s = conveniencia(usoDe(def), def, k, n, p, lado, dist, dentro, ob, prm)
+      const s = conveniencia(usoDe(def), def, k, n, p, lado, dist, dentro, ob, prm, leFaltaUsar(c, n))
       // Un castigo seguro sale siempre; lo demás espera el enfriamiento.
       if (s < 0.6 && c.enfriaEspecial > 0) continue
       // Junta carga para el que toca ahora: el otro sólo sale en una oportunidad clara, con la carga
       // llena o si hace mucho que espera (así usa los dos y no gasta todo en el barato).
-      if (n !== c.proximoEspecial && s < 0.6 && !lleno && c.esperaProximo < esperaMaxima(ficha.especiales[c.proximoEspecial - 1].costo)) continue
+      if (n !== c.proximoEspecial && s < 0.6 && !lleno && proximoSirve && c.esperaProximo < esperaMaxima(ficha.especiales[c.proximoEspecial - 1].costo)) continue
       pr = (prm.especiales === 'castiga' ? s : s * 0.55) * k.cpu.preferencia[n - 1]
     }
     if (lleno && pr > 0) pr = Math.min(1, pr * 1.8 + 0.04)
@@ -731,7 +879,64 @@ function tiroEspecial(c: Cerebro, n: 1 | 2, prm: ParamsCpu): void {
   c.proximoEspecial = n === 1 ? 2 : 1
   c.esperaProximo = 0
   c.enfriaEspecial = prm.especiales === 'castiga' ? 50 : prm.especiales === 'alcance' ? 110 : 200
+  c.seguidos = c.ultimoEspecial === n ? c.seguidos + 1 : 1
+  c.ultimoEspecial = n
+  c.usos[n - 1]++
+  c.rango = 0
 }
+
+/**
+ * El especial que le toca necesita distancia (el arco, el chorro largo, el graffiti, la cura) y
+ * está demasiado cerca: ¿se va a buscarla? Sólo si tiene la carga, hay lugar atrás y, o el rival
+ * quedó tirado (tiempo regalado para acomodarse), o hace rato que espera tirarlo. Contra alguien
+ * que pelea pegado, sin esto el especial de distancia no salía nunca (la Lluvia de Stefano, 1 %;
+ * el Graffiti de Gabriel, 4 %; la Curación de Fabri, 8 %).
+ */
+function quiereBuscarRango(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, dist: number, ob: Observacion): boolean {
+  const yo = p.luchadores[lado]
+  const k = I.kits[lado]
+  const n = c.proximoEspecial
+  const esp = PERSONAJES[yo.id].especiales[n - 1]
+  if (yo.carga + 1e-9 < esp.costo) return false
+  const [rmin] = k.cpu.rangoEspecial[n - 1]
+  const def = k.especiales[n - 1]
+  // Sólo si viene usando poco ese especial (menos de un tercio de los que tiró): con eso alcanza
+  // para que salgan los dos, sin cambiar a la CPU que ya los usaba parejos.
+  if (!leFaltaUsar(c, n)) return false
+  // Lugar atrás para alejarse hasta el rango.
+  const atras = ob.x >= yo.x ? yo.x - X_MIN : X_MAX - yo.x
+  // La cura, sólo con la vida bajando: con el rival en el piso se toma ahí mismo (el plan la tira);
+  // si no, se aleja a media distancia y se la toma ahí (ver la cura en `conveniencia`).
+  if (def.cura) return yo.vida < yo.vidaMax * 0.8 && (ob.tirado || (dist < 240 && atras >= 260 - dist + 30))
+  if (rmin <= 0 || dist >= rmin) return false
+  if (atras < rmin - dist + 30) return false
+  return ob.tirado || c.esperaProximo >= ESPERA_RANGO || yo.carga >= 9
+}
+
+/**
+ * Desde cuántos ataques con la herramienta en los últimos ≈ 4 s (Cerebro.pesadosRival) la CPU
+ * entiende que el rival está machacando la MÁQUINA (una CPU la usa ≈ 1 vez en ese lapso).
+ */
+const MACHACA_PESADOS = 2
+/**
+ * Desde cuántos ataques con la herramienta en ≈ 4 s cuenta su alcance para recibirlo (ver 3b). Más
+ * bajo (0,5), las CPU recibían con la herramienta a cualquiera que la usara de vez en cuando y los
+ * lentos que viven de ella (Brian, Chipi, Rodrigo) perdían 6 a 9 puntos contra la CPU.
+ */
+const USA_PESADOS = 1.5
+
+/** Viene usando poco el especial `n` en la partida (menos de PARTE_MINIMA de los que tiró). */
+function leFaltaUsar(c: Cerebro, n: 1 | 2): boolean {
+  const total = c.usos[0] + c.usos[1]
+  return total < 2 || c.usos[n - 1] < total * PARTE_MINIMA
+}
+
+/** Desde cuándo (ticks esperando el especial que le toca) sale a buscar su distancia. */
+const ESPERA_RANGO = 240
+/** La parte de los especiales de la partida por debajo de la cual va a buscar el que le toca. */
+const PARTE_MINIMA = 1 / 3
+/** Ganas de ir a buscar esa distancia cada vez que piensa el plan, según la dificultad. */
+const PROB_RANGO: Readonly<Record<ParamsCpu['especiales'], number>> = { torpe: 0.25, alcance: 0.35, castiga: 0.5 }
 
 /** El plan de fondo cuando no hay nada urgente (se vuelve a pensar cada `cadencia` ticks). */
 function decidirPlan(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, prm: ParamsCpu, dist: number, ob: Observacion): void {
@@ -744,6 +949,14 @@ function decidirPlan(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, prm: 
   const alcRival = alcanceAtaque(I.kits[(1 - lado) as Lado], 'golpe')
   c.pensar = entero(c.azar, prm.cadencia[0], prm.cadencia[1])
   c.objetivo = k.cpu.distancia + entero(c.azar, -25, 25)
+
+  // El especial que le toca es de distancia y está muy cerca: a buscarla (ver quiereBuscarRango).
+  if (c.rango === 0 && quiereBuscarRango(c, p, I, lado, dist, ob) && chance(c.azar, PROB_RANGO[prm.especiales])) {
+    c.rango = c.proximoEspecial
+    c.motivo = 'busca rango'
+    ponerPlan(c, 'rango', 70)
+    return
+  }
 
   if (dist > 330) {
     // Lejos: se acerca (a veces con dash o saltando).
@@ -826,7 +1039,11 @@ function reaccionA(q: ProyectilEstado, prm: ParamsCpu, r: number): ModoEsquiva |
   const cubre = Math.max(prm.bloquear, 0.45)
   switch (q.tipo) {
     case 'sillon':
+      // Rompe la guardia: cubrirse es lo peor (guardia rota y la cadena entera atrás). En normal se
+      // cubría 4 de cada 10 y el que tira el Sillonazo apenas puede le ganaba 3 de 4 a la CPU con
+      // Chipi (revisión del 30/oct, segunda tanda); ahora, como la difícil, se va o lo salta.
       if (nivel === 2) return r < 0.55 ? 'dash' : r < 0.85 ? 'saltar' : 'guardia'
+      if (nivel === 1) return r < 0.35 ? 'dash' : r < 0.6 ? 'saltar' : r < 0.7 ? 'guardia' : null
       if (r < prm.bloquear * 0.7) return 'guardia'
       return r < prm.bloquear * 0.7 + 0.2 ? 'saltar' : null
     case 'tornado':
@@ -893,6 +1110,7 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
         nc !== 0 &&
         prm.especiales !== 'torpe' &&
         yo.carga + 1e-9 >= ficha.especiales[nc - 1].costo &&
+        !repiteDeMas(c, k, nc, yo, ob, dist) &&
         // Cerrar un golpe que entró con el especial es lo mejor que se puede hacer con la carga (la
         // persona que machaca GOLPE y el especial lo hace sin pensar): sin esperar el turno de ese
         // especial. Con 0,2 y alternando, la CPU normal jugaba peor a Gabriel que un bot.
@@ -954,6 +1172,7 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
       embestida !== 0 &&
       prm.especiales !== 'torpe' &&
       yo.carga + 1e-9 >= ficha.especiales[embestida - 1].costo &&
+      !repiteDeMas(c, k, embestida, yo, ob, dist) &&
       embestidaLlega(k, embestida, dist, ob, prm.reaccion) &&
       chance(c.azar, prm.castigo * 0.8)
     ) {
@@ -968,6 +1187,75 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
   // corta. Antes miraba sólo «menos de 35» y la CPU normal se cubría de la MÁQUINA hasta que se la
   // rompían (machacar la herramienta de cerca le ganaba 3 de 4).
   const guardiaBaja = prm.adapta > 0 && guardiaBajaDe(yo.guardia, I.kits[(1 - lado) as Lado], k)
+
+  // 2') Una embestida que se ve venir en el super flash (normal y difícil). Medido respuesta por
+  //     respuesta y a cada distancia (revisión del 30/oct, segunda tanda):
+  //     - La que arranca intocable (el Break Dance): cubrirse cuesta 40 de vida y 40 de guardia y
+  //       no se castiga; saltando pega a lo sumo un golpe y, de 260 px para afuera, la esquiva
+  //       para atrás no la toca y deja castigarla.
+  //     - La que derriba o pega fuerte (la Moto, la Patada del Dragón, el Corte Relámpago):
+  //       cubrirse es lo mejor (≈ 40 de vida y queda para castigarla); saltarla o esquivarla sólo
+  //       sale de 300 px para afuera y al tick justo. Así que se cubre casi siempre, salvo que la
+  //       guardia no aguante el especial entero: ahí salta (o se va, si está lejos).
+  //     La que rompe la guardia y el agarre siguen en (2).
+  if (ob.especial !== 0 && !ob.lanza && ob.fase === 1 && c.selloFlash !== ob.sello && prm.especiales !== 'torpe') {
+    const er = I.kits[(1 - lado) as Lado].especiales[ob.especial - 1]
+    const emb = er.embestida
+    if (emb && !ob.agarre && !ob.rompe && dist <= ob.alcance + 40) {
+      c.selloFlash = ob.sello
+      c.selloDefensa = ob.sello
+      // El flash avisa 24 ticks con el nombre del especial: reacciona más que a un golpe cualquiera
+      // (al menos 3 de 4) y, sobre todo, hace lo que conviene (antes se cubría, aunque fuera lo peor).
+      const reacciona = chance(c.azar, Math.max(prm.bloquear, 0.75))
+      const noAguanta = yo.guardia <= guardiaDelEspecial(er, k) + 5
+      if (reacciona && (emb.invulnerableHasta !== undefined || noAguanta)) {
+        if (dist >= 260 && li.dashEspera === 0) {
+          c.dir = (-hacia) as -1 | 1
+          apretar(c, 'dash')
+          c.motivo = 'esquiva la embestida'
+        } else {
+          // Por encima y hacia adelante: cae detrás del que embiste, que sigue de largo. Saltando
+          // para atrás caía en el camino del molino, que avanza 240 px (revisión del 30/oct,
+          // segunda tanda).
+          c.dir = hacia
+          apretar(c, 'arriba')
+          c.pateaEnSalto = false
+          c.motivo = 'salta la embestida'
+        }
+        // Lo que queda del flash: el salto o la esquiva salen apenas termina, para atrás.
+        ponerPlan(c, 'mantener', 24 - prm.reaccion + 4)
+        return
+      }
+      if (reacciona) {
+        ponerPlan(c, 'guardia', ob.restante + entero(c.azar, 6, 12))
+        c.abajo = false
+        c.motivo = 'se cubre de la embestida'
+      }
+    }
+  }
+
+  // 2'') Un especial que TIRA algo que rompe la guardia (el Sillonazo, el Modo Boxeador), visto en el
+  //      super flash y de cerca: cubrirse es lo peor y, cuando el proyectil se ve, ya está encima.
+  //      Se va para atrás con la esquiva (o salta) apenas termina el flash. Antes no reaccionaba al
+  //      flash de lo que tira (sólo al proyectil, tarde) y el que tiraba el Sillonazo apenas se
+  //      encendía le ganaba 2 de 3 a la CPU normal con Chipi (revisión del 30/oct, segunda tanda).
+  if (ob.especial !== 0 && ob.lanza && ob.rompe && ob.fase === 1 && c.selloFlash !== ob.sello && prm.especiales !== 'torpe' && dist < 260) {
+    c.selloFlash = ob.sello
+    c.selloDefensa = ob.sello
+    if (chance(c.azar, Math.max(prm.bloquear, 0.6))) {
+      c.dir = (-hacia) as -1 | 1
+      if (li.dashEspera === 0) {
+        apretar(c, 'dash')
+        c.motivo = 'esquiva lo que rompe (flash)'
+      } else {
+        apretar(c, 'arriba')
+        c.pateaEnSalto = false
+        c.motivo = 'salta lo que rompe (flash)'
+      }
+      ponerPlan(c, 'mantener', 24 - prm.reaccion + 4)
+      return
+    }
+  }
 
   // 2) Un ataque cuerpo a cuerpo (o la embestida) que viene. Si ya se venía cubriendo, sigue.
   //    Contra un agarre o algo que rompe la guardia, cubrirse no sirve: salta o se va.
@@ -993,7 +1281,21 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
   if (ob.atacando && !ob.lanza && (ob.fase === 1 || ob.fase === 2) && c.selloDefensa !== ob.sello && dist <= ob.alcance + 25) {
     c.selloDefensa = ob.sello
     const yaCubierto = c.plan === 'guardia' && c.planT > 0
-    // Un golpe pesado se ve venir: dejarlo pasar con la esquiva para atrás y castigar la vuelta.
+    // Un golpe pesado se ve venir: si tiene un especial que aguanta al arrancar, se lo come y le
+    // pega en la vuelta (revisión del 30/oct, segunda tanda: machacando la MÁQUINA le ganaban 94 %
+    // a la CPU de Brian y 87 % a la de Stefano); si no, dejarlo pasar con la esquiva para atrás.
+    const revesPesado = ob.pesado && ob.fase === 1 && c.pesadosRival > MACHACA_PESADOS && prm.especiales !== 'torpe' ? especialDeReves(k, yo.carga, ficha.especiales) : 0
+    if (
+      revesPesado &&
+      !repiteDeMas(c, k, revesPesado, yo, ob, dist) &&
+      chance(c.azar, prm.adapta)
+    ) {
+      apretar(c, revesPesado === 1 ? 'especial1' : 'especial2')
+      tiroEspecial(c, revesPesado, prm)
+      c.motivo = 'reves al pesado'
+      ponerPlan(c, 'esperar', 6)
+      return
+    }
     if (ob.pesado && ob.fase === 1 && li.dashEspera === 0 && chance(c.azar, prm.adapta * 0.5)) {
       c.dir = (-hacia) as -1 | 1
       apretar(c, 'dash')
@@ -1002,9 +1304,10 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
       return
     }
     // Con la guardia por romperse: un especial de revés (aguanta los golpes normales al arrancar)
-    // si tiene carga; si no, dash para atrás.
-    const reves = guardiaBaja && prm.especiales !== 'torpe' ? especialMasBarato(yo.carga, ficha.especiales) : 0
-    if (reves && chance(c.azar, prm.adapta)) {
+    // si tiene carga; si no, dash para atrás. Antes era el más barato, aunque no aguantara nada
+    // (el agarre de Brian y la Curación de Fabri se comían la MÁQUINA).
+    const reves = guardiaBaja && prm.especiales !== 'torpe' ? especialDeReves(k, yo.carga, ficha.especiales) : 0
+    if (reves && !repiteDeMas(c, k, reves, yo, ob, dist) && chance(c.azar, prm.adapta)) {
       apretar(c, reves === 1 ? 'especial1' : 'especial2')
       tiroEspecial(c, reves, prm)
       c.motivo = 'reves guardia baja'
@@ -1104,27 +1407,40 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
 
   // 3b) Recibir al que se viene acercando caminando, justo cuando entra en el alcance: con la
   //     herramienta si aguanta golpes leves (Chipi); si no, con el puño, que es lo que sale antes.
+  //     Contra uno que viene usando la herramienta, sólo con lo que alcance tanto como ESA (si no,
+  //     entre los dos alcances la MÁQUINA llega y el puño no): recibiendo con el puño a 150 px, la
+  //     CPU de Brian se comía la MÁQUINA (revisión del 30/oct). Con la herramienta propia, el que
+  //     llega primero es el que pega.
   const acercandose = ob.enSuelo && !ob.atacando && ob.vx * hacia < -0.8
   if (acercandose && !c.recibio) {
-    const herr = k.movimientos[k.inicio.herramienta]
-    const armada = herr?.armadura?.contra.includes('leve') ?? false
-    const atq: Ataque = armada ? 'herramienta' : 'golpe'
-    const mov = k.movimientos[atq === 'golpe' ? k.inicio.golpe : k.inicio.herramienta]
-    const arranque = mov?.ventanas[0]?.desde ?? 8
-    const cierre = -ob.vx * hacia
-    const enImpacto = dist - cierre * arranque
-    const alc = alcanceAtaque(k, atq)
+    const armada = herramientaArmada(k)
     const kitRival = I.kits[(1 - lado) as Lado]
     const punoRival = kitRival.movimientos[kitRival.inicio.golpe]?.ventanas[0]?.desde ?? 5
-    // Tiene que pegar antes de que el otro llegue a su alcance y le meta el puño (salvo con armadura).
-    const llegaAntes = armada || (dist - alcRival) / Math.max(0.5, cierre) + punoRival >= arranque
-    if (enImpacto <= alc - 4 && enImpacto > alc - 50 && llegaAntes) {
-      c.recibio = true
-      if (chance(c.azar, prm.recibir)) {
-        apretar(c, atq)
-        c.motivo = 'recibe'
-        ponerPlan(c, 'esperar', 6)
-        return
+    const pesados = c.pesadosRival > USA_PESADOS
+    const cierre = -ob.vx * hacia
+    const alcHerrRival = alcanceAtaque(kitRival, 'herramienta')
+    const candidatos: Ataque[] = armada ? ['herramienta'] : pesados ? ['golpe', 'herramienta'] : ['golpe']
+    for (const atq of candidatos) {
+      if (pesados && !armada && alcanceAtaque(k, atq) < alcHerrRival - 5) continue
+      const mov = k.movimientos[atq === 'golpe' ? k.inicio.golpe : k.inicio.herramienta]
+      const arranque = mov?.ventanas[0]?.desde ?? 8
+      const enImpacto = dist - cierre * arranque
+      const alc = alcanceAtaque(k, atq)
+      // Tiene que pegar antes de que el otro llegue a su alcance y le meta el puño (o la herramienta,
+      // si la viene usando), salvo con armadura.
+      const llegaAntes =
+        armada ||
+        ((dist - alcRival) / Math.max(0.5, cierre) + punoRival >= arranque &&
+          (!pesados || (dist - alcHerrRival) / Math.max(0.5, cierre) + arranqueAtaque(kitRival, 'herramienta') >= arranque))
+      if (enImpacto <= alc - 4 && enImpacto > alc - 50 && llegaAntes) {
+        c.recibio = true
+        if (chance(c.azar, prm.recibir)) {
+          apretar(c, atq)
+          c.motivo = 'recibe'
+          ponerPlan(c, 'esperar', 6)
+          return
+        }
+        break
       }
     }
   } else if (!acercandose) c.recibio = false
@@ -1200,6 +1516,7 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
         embestida !== 0 &&
         prm.especiales !== 'torpe' &&
         yo.carga + 1e-9 >= ficha.especiales[embestida - 1].costo &&
+        !repiteDeMas(c, k, embestida, yo, ob, dist) &&
         embestidaLlega(k, embestida, dist, ob, prm.reaccion)
       ) {
         apretar(c, embestida === 1 ? 'especial1' : 'especial2')
@@ -1243,8 +1560,42 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
     }
   } else if (!ob.vulnerable) c.merced = false
 
+  // 8) La oportunidad del especial que viene usando poco: si el rival queda a su distancia (lo
+  //    empujó un golpe, se alejó) y tiene sentido, no espera a la próxima vez que piensa.
+  if (prm.especiales !== 'torpe' && c.plan !== 'rango' && c.enfriaEspecial === 0) {
+    const n = c.proximoEspecial
+    const def = k.especiales[n - 1]
+    const [rmin, rmax] = k.cpu.rangoEspecial[n - 1]
+    if (
+      leFaltaUsar(c, n) &&
+      rmin > 0 &&
+      yo.carga + 1e-9 >= ficha.especiales[n - 1].costo &&
+      dist >= rmin &&
+      dist <= rmax &&
+      conveniencia(usoDe(def), def, k, n, p, lado, dist, true, ob, prm, true) > 0 &&
+      chance(c.azar, 0.25)
+    ) {
+      apretar(c, n === 1 ? 'especial1' : 'especial2')
+      tiroEspecial(c, n, prm)
+      c.motivo = `especial ${usoDe(def)} (oportunidad)`
+      ponerPlan(c, 'esperar', 6)
+      return
+    }
+  }
+
+  // 9) Aprovechar un derribo: con el rival en el piso hay tiempo para irse a la distancia del
+  //    especial que le toca y tirarlo apenas se levanta (la cura, ahí mismo). Se decide una vez.
+  if (ob.tirado && !c.tiradoVisto) {
+    c.tiradoVisto = true
+    if (c.plan !== 'rango' && quiereBuscarRango(c, p, I, lado, dist, ob) && chance(c.azar, prm.especiales === 'torpe' ? 0.6 : 0.9)) {
+      c.rango = c.proximoEspecial
+      c.motivo = 'busca rango (derribo)'
+      ponerPlan(c, 'rango', 90)
+    }
+  } else if (!ob.tirado) c.tiradoVisto = false
+
   // ─── Pensar (cada `cadencia` ticks) ───
-  if (c.sinAvanzar > 120 && c.plan !== 'presionar' && c.plan !== 'acercarse') {
+  if (c.sinAvanzar > 120 && c.plan !== 'presionar' && c.plan !== 'acercarse' && c.plan !== 'rango') {
     // Nunca trabada: 2 s sin atacar ni ir para adelante → avanza.
     c.objetivo = alcMio - 10
     ponerPlan(c, 'acercarse', 50)
@@ -1339,6 +1690,45 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
           c.motivo = 'espera el hueco'
         }
       } else c.dir = hacia
+      break
+    }
+    case 'rango': {
+      // A la distancia del especial que le toca y, ahí, lo tira apenas tiene sentido.
+      c.guardia = false
+      c.abajo = false
+      const n = c.rango
+      if (n === 0 || yo.carga + 1e-9 < ficha.especiales[n - 1].costo) {
+        c.rango = 0
+        c.planT = 0
+        break
+      }
+      const [rmin, rmax] = k.cpu.rangoEspecial[n - 1]
+      const def = k.especiales[n - 1]
+      const dentro = dist >= rmin && dist <= rmax
+      if (conveniencia(usoDe(def), def, k, n, p, lado, dist, dentro, ob, prm, true) > 0) {
+        c.dir = 0
+        apretar(c, n === 1 ? 'especial1' : 'especial2')
+        tiroEspecial(c, n, prm)
+        c.motivo = `especial ${usoDe(def)} (rango)`
+        ponerPlan(c, 'esperar', 6)
+      } else if (dentro) {
+        // En su distancia, esperando que tenga sentido (que el rival se levante, que baje del salto).
+        c.dir = 0
+      } else if (dist < rmin) {
+        if (acorralado) {
+          c.rango = 0
+          c.planT = 0
+          c.esperaProximo = esperaMaxima(ficha.especiales[n - 1].costo)
+          break
+        }
+        c.dir = (-hacia) as -1 | 1
+        if (li.dashEspera === 0 && rmin - dist > 50) apretar(c, 'dash')
+      } else c.dir = hacia
+      if (c.planT <= 1) {
+        // No llegó a tirarlo: la próxima vez se conforma con el otro especial.
+        c.rango = 0
+        c.esperaProximo = esperaMaxima(ficha.especiales[n - 1].costo)
+      }
       break
     }
     case 'mantener':

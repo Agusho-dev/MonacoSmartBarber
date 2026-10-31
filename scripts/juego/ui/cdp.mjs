@@ -4,7 +4,7 @@
 //   const ch = await abrirChrome({ puerto: 9347 })
 //   const p = await ch.pagina()                    // o { aislada: true }: otro «celular» (storage propio)
 //   await p.tam(390, 844, true)                     // celular vertical con toques
-//   await p.navegar('http://localhost:3100/juego')
+//   await p.navegar(`${urlBase()}/juego`)           // URL_BASE obligatoria (ver urlBase)
 //   await p.esperarSelector('.cf-inicio__tocar')
 //   await p.tocar('.cf-inicio__tocar')
 //   await p.foto('/tmp/x.png')
@@ -17,6 +17,19 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+/**
+ * El servidor a probar, de URL_BASE (sin barra final), p. ej. URL_BASE=http://localhost:3210.
+ * Obligatoria: el :3100 es el servidor de desarrollo del dueño; una prueba no le pega sin querer.
+ */
+export function urlBase() {
+  const u = (process.env.URL_BASE || '').trim().replace(/\/+$/, '')
+  if (!u) {
+    console.error('Falta URL_BASE: el servidor de desarrollo a probar (p. ej. URL_BASE=http://localhost:3210). El :3100 es el del dueño: usalo sólo a propósito.')
+    process.exit(2)
+  }
+  return u
+}
 
 export const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
 

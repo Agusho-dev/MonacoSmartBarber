@@ -89,7 +89,7 @@ const nextConfig: NextConfig = {
       {
         // Sprites, arenas, efectos y la canción del juego (~5 MB): con no-store el celular
         // del cliente los volvía a bajar en cada visita. Se revalidan siempre por ETag (304 sin
-        // bajar nada), así un atlas.json nuevo nunca convive con un atlas.png viejo del caché.
+        // bajar nada), así un atlas.json nuevo nunca convive con una imagen vieja del caché.
         source: '/juego/:carpeta(personajes|arenas|efectos|audio)/:path*',
         headers: [
           {

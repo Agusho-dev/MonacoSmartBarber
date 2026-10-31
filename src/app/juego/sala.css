@@ -1125,10 +1125,17 @@ button.cf-sala-chip:active {
 
 /* ─── Pelea online: HUD, «VOS», conexión ──────────────────────────────────── */
 
+/*
+ * El nombre del jugador junto al del barbero: con lugar entra entero (son 16 letras como máximo)
+ * y, si no alcanza (en vertical la fila tiene ≈ 105 px), cede ANTES que el del barbero, sin bajar
+ * de unas tres letras. Antes tenía un tope de 9ch: decía «PRUE…» aun en horizontal, con lugar de
+ * sobra, y «Jugador 1234» quedaba en «JUGA…». Medido con hud-nombres.mjs (30/oct/2026).
+ */
 .cf-hud__jugador {
   overflow: hidden;
-  flex-shrink: 1;
-  max-width: 9ch;
+  /* Absorbe todo el achique antes que el nombre del barbero (flexbox reparte en proporción). */
+  flex: 0 10000 auto;
+  min-width: 0;
   padding: 2px 5px 0;
   font-family: var(--cf-numeros);
   font-size: 12px;
@@ -1142,8 +1149,28 @@ button.cf-sala-chip:active {
 }
 
 .cf-hud__jugador[data-yo] {
+  flex-shrink: 0;
   color: #00131f;
   background: var(--cf-online);
+}
+
+/* El rival: aunque falte lugar, que se lean las primeras letras (si no, quedaba sólo «…»). */
+.cf-hud__jugador:not([data-yo]) {
+  min-width: min(3.2em, 38%);
+}
+
+.cf-hud--online .cf-hud__nombre {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Celulares angostos en vertical: la etiqueta más compacta le deja el lugar al nombre del barbero. */
+@media (max-width: 400px) {
+  .cf-hud__jugador {
+    padding: 2px 4px 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
 }
 
 /* La mini carga del rival vive del lado del rival: a la izquierda, se llena desde la izquierda. */
@@ -1270,11 +1297,30 @@ button.cf-sala-chip:active {
   clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
   transform: translate(-50%, -50%);
   pointer-events: none;
+  /* Con left: 50% el ancho «natural» era la mitad de la pantalla: en vertical (390) el número de
+     «Conexión lenta… 7» se iba a otro renglón, fuera de la caja. */
+  width: max-content;
+  max-width: calc(100% - 24px);
+  white-space: nowrap;
+}
+
+.cf-online-lenta > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cf-online-lenta[data-visible] {
   display: flex;
-  animation: cf-pop 0.3s var(--cf-rebote) both;
+  animation: cf-online-lenta-pop 0.3s var(--cf-rebote) both;
+}
+
+/* Como cf-pop pero sin perder el centrado (cf-pop pisa el translate: asomaba corrida a la derecha). */
+@keyframes cf-online-lenta-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
 }
 
 .cf-online-lenta svg {

@@ -35,6 +35,7 @@ import {
   enCombo,
   finVentanas,
   golpeable,
+  inmuneAlControl,
   interrumpir,
   interseccion,
   limitar,
@@ -144,6 +145,9 @@ export function ponerEstado(
   // bombo, trago o termo encima del primero pega, pero no alarga el aturdido, el mareo ni la
   // quemadura. Sin esto, con carga, se encadenaba sin fin. LENTO (la nube) sí se renueva.
   if (estado !== 'lento' && (vi.inmune[estado] > 0 || v.efectos[estado] > 0)) return false
+  // Los que lo dejan sin moverse no entran si ya lleva demasiado encerrado (TOPE_ENCIERRO). El
+  // mareo, la quemadura y la lentitud no le sacan el control: entran igual.
+  if ((estado === 'aturdido' || estado === 'electrocutado' || estado === 'congelado') && inmuneAlControl(vi)) return false
   const t = duracion(I.kits[victima], ticks)
   v.efectos[estado] = Math.max(v.efectos[estado], t)
   return true
@@ -153,7 +157,7 @@ export function ponerEstado(
 export function congelar(p: Partida, I: EstadoInterno, victima: Lado, atacante: Lado, ticks: number): void {
   const v = p.luchadores[victima]
   const vi = I.luchadores[victima]
-  if (vi.inmune.congelado > 0) return
+  if (vi.inmune.congelado > 0 || inmuneAlControl(vi)) return
   interrumpir(v, vi)
   vi.stun = 0
   vi.stunBloqueo = false
@@ -274,7 +278,8 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
     vic.destello = DESTELLO
     atk.combo++
     if (atk.combo > p.estadisticas[lado].comboMax) p.estadisticas[lado].comboMax = atk.combo
-    p.estadisticas[lado].golpesAcertados++
+    // Los apretones y el tirón son parte del agarre, que ya contó UN golpe acertado (agarrar):
+    // contarlos aparte llevaba la «Precisión» por encima de 100 %.
     emitir(p, {
       tipo: 'golpe',
       atacante: lado,
@@ -292,14 +297,15 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
   }
   if (g.t >= def.sostener) {
     const real = hacerDanio(p, I, lado, g.victima, Math.round(def.tiron.danio * multFuria(p, I, lado) * (1 - I.kits[g.victima].reduccionDanio)))
+    // Si ya lleva demasiado encerrado (TOPE_ENCIERRO), el tirón le pega pero no lo deja tirado: cae parado.
+    const derriba = !inmuneAlControl(vi)
     vi.agarradoPor = null
     vic.vy = 5
     vi.vEmpuje = atk.mira * def.tiron.empuje
-    vi.caidaDerribo = EFECTO.derribo
+    vi.caidaDerribo = derriba ? EFECTO.derribo : 0
     vi.selloStun++
     atk.combo++
     if (atk.combo > p.estadisticas[lado].comboMax) p.estadisticas[lado].comboMax = atk.combo
-    p.estadisticas[lado].golpesAcertados++
     sumarCarga(p, lado, CARGA.porGolpe)
     sumarCarga(p, g.victima, CARGA.porRecibir)
     emitir(p, {
@@ -315,7 +321,7 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
       herramienta: 'agarre',
     })
     emitir(p, { tipo: 'combo', quien: lado, golpes: atk.combo })
-    emitir(p, { tipo: 'derribo', quien: g.victima })
+    if (derriba) emitir(p, { tipo: 'derribo', quien: g.victima })
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, HITSTOP.especial)
     a.agarre = null
     a.total = a.t + 1 + def.recuperacion
@@ -346,9 +352,15 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   // ─── Agarre (imbloqueable; lo levanta) ───
   const esp = a?.mov as DefEspecial | undefined
   if (ef === 'agarre' && a && esp?.agarre) {
+    // Agarre contra golpe en el mismo tick: los golpes se aplican antes que los agarres
+    // (contactosCuerpoACuerpo los deja al final), así que si al que agarra ya le cortaron el
+    // movimiento, no agarra. Antes agarraba igual: la víctima quedaba «agarrada» sin agarre,
+    // después tirada gratis, y el especial contaba como acertado (dependía del lado).
+    if (ai.accion !== a) return 'golpe'
     agarrar(p, I, imp, a, esp.agarre)
     return 'golpe'
   }
+  const inmune = inmuneAlControl(vi)
 
   // ─── Bloqueado ───
   if (!imp.imbloqueable && bloquea(vic, vi, imp.origenX)) {
@@ -374,11 +386,12 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
       fuerza: imp.fuerza,
       herramienta: imp.herramienta,
     })
-    if (vic.guardia <= 0) {
+    if (vic.guardia <= 0 && !inmune) {
       romperGuardia(p, I, imp.victima, imp.atacante)
       vi.vEmpuje = imp.dir * imp.empujeBloqueo
     } else {
-      const bs = Math.max(1, Math.round(imp.hitstun * FACTOR_BLOCKSTUN))
+      // Inmune al control (TOPE_ENCIERRO): la guardia no se rompe y el blockstun queda en el piso.
+      const bs = Math.max(1, Math.round(imp.hitstun * FACTOR_BLOCKSTUN * (inmune ? ESCALADO_STUN.minimo : 1)))
       vi.stun = Math.max(vi.stun, bs)
       vi.stunTotal = vi.stun
       vi.stunBloqueo = true
@@ -447,11 +460,13 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   interrumpir(vic, vi)
   vi.selloStun++
   vi.stunBloqueo = false
-  const derriba = ef === 'rompe_guardia' || ef === 'derriba' || ef === 'sismo'
+  // Inmune al control (TOPE_ENCIERRO): nada lo tira y el aturdimiento del golpe queda en el piso
+  // de ESCALADO_STUN, así el combo se cae enseguida.
+  const derriba = (ef === 'rompe_guardia' || ef === 'derriba' || ef === 'sismo') && !inmune
   if (!vic.enSuelo) {
     // En el aire: cae y queda tirado.
     vi.stun = 0
-    vi.caidaDerribo = Math.max(vi.caidaDerribo, derriba ? EFECTO.derribo : EFECTO.derriboAereo)
+    if (!inmune) vi.caidaDerribo = Math.max(vi.caidaDerribo, derriba ? EFECTO.derribo : EFECTO.derriboAereo)
     vic.vy = Math.max(vic.vy, 6)
     vi.vEmpuje = imp.dir * Math.max(3.2, imp.empuje)
     if (derriba) emitir(p, { tipo: 'derribo', quien: imp.victima })
@@ -464,7 +479,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     vi.caidaDerribo = EFECTO.derribo
     emitir(p, { tipo: 'derribo', quien: imp.victima })
   } else {
-    vi.stun = Math.max(1, Math.round(imp.hitstun * multiplicadorStun(atk.combo)))
+    vi.stun = Math.max(1, Math.round(imp.hitstun * (inmune ? ESCALADO_STUN.minimo : multiplicadorStun(atk.combo))))
     vi.stunTotal = vi.stun
     vi.vEmpuje = imp.dir * imp.empuje
     if (imp.rebotePared && contraPared(vic, imp.dir)) ai.vEmpuje = -imp.dir * imp.empuje * 0.7
@@ -520,6 +535,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
 /** Busca los contactos cuerpo a cuerpo de este tick (los dos lados, antes de aplicar: hay cambios de golpes). */
 export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] {
   const lista: Impacto[] = []
+  const agarres: Impacto[] = []
   for (const lado of [0, 1] as const) {
     const l = p.luchadores[lado]
     const li = I.luchadores[lado]
@@ -533,8 +549,9 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
     if (!cuerpo) continue
     const kit = I.kits[lado]
     const efEspecial = a.especial ? efectoDe(p, lado, a.especial) : null
-    // El agarre no agarra en el aire (la ventana sigue buscando por si aterriza).
-    if (efEspecial === 'agarre' && !v.enSuelo) continue
+    // El agarre no agarra en el aire (la ventana sigue buscando por si aterriza) ni al que ya lleva
+    // demasiado encerrado (TOPE_ENCIERRO): si no vuelve a moverse a tiempo, el agarre sale al aire.
+    if (efEspecial === 'agarre' && (!v.enSuelo || inmuneAlControl(vi))) continue
     for (let i = 0; i < a.mov.ventanas.length; i++) {
       if (a.resueltas[i] || a.esperaVentana[i] > 0) continue
       const w = a.mov.ventanas[i]
@@ -551,7 +568,7 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
       const fuerza = rem?.fuerza ?? w.fuerza
       const efVentana = rem && rem.efecto !== undefined ? rem.efecto : w.efecto
       const efecto = a.especial ? (efVentana !== undefined ? efVentana : efectoNormalizado(efEspecial)) : null
-      lista.push({
+      ;(efecto === 'agarre' ? agarres : lista).push({
         atacante: lado,
         victima: otro,
         danio: rem ? rem.danio : w.danio,
@@ -587,7 +604,10 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
       break
     }
   }
-  return lista
+  // Los golpes antes que los agarres (el golpe le gana al agarre en el mismo tick, sin importar el
+  // lado) y, si los dos agarran en el mismo tick, se traban: no agarra ninguno.
+  if (agarres.length === 2) return lista
+  return agarres.length ? [...lista, ...agarres] : lista
 }
 
 /** El efecto de cada especial sale de la ficha del personaje (personajes.ts). */

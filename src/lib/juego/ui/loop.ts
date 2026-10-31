@@ -22,6 +22,11 @@ import type { EntradaJugador, EventoJuego, Partida, Renderizador } from '../tipo
 
 const PASO_MS = 1000 / TPS
 const MAX_PASOS = 5
+/**
+ * Escalones de calidad que se pueden pedir en una pelea: alta → media → baja. Con uno solo, un
+ * celular sin canvas acelerado bajaba a «media» y se quedaba a 39 fps sin llegar nunca a «baja».
+ */
+const MAX_AVISOS = 2
 /** Un cuadro más largo que esto (pestaña dormida, GC) se cuenta como este máximo. */
 const DT_MAX_MS = 100
 const SIN_EVENTOS: readonly EventoJuego[] = []
@@ -36,7 +41,10 @@ export interface OpcionesLoop {
   alFinPartida?: (p: Partida) => void
   /** Cuánto se ve el festejo antes de pasar al resultado (ms de pantalla). */
   esperaFinMs?: number
-  /** Una sola vez, si el celular no llega a ~40 fps sostenidos en plena pelea. */
+  /**
+   * Si el celular no llega a ~40 fps sostenidos en plena pelea. Hasta MAX_AVISOS veces por pelea
+   * (alta → media → baja), midiendo de cero después de cada una.
+   */
   alRendimientoBajo?: () => void
   /** Un error del motor o del render: el loop se detiene y avisa. */
   alError?: (error: unknown) => void
@@ -79,16 +87,21 @@ export function crearLoop(op: OpcionesLoop): ControlLoop {
   let media = PASO_MS
   let msEnPelea = 0
   let msLento = 0
-  let avisoRendimiento = false
+  let avisos = 0
 
   function medir(dt: number) {
-    if (avisoRendimiento || p.fase !== 'pelea' || dt <= 0) return
+    if (avisos >= MAX_AVISOS || p.fase !== 'pelea' || dt <= 0) return
     media = media * 0.94 + dt * 0.06
     msEnPelea += dt
     if (msEnPelea > 2500 && media > 25) msLento += dt
     else msLento = 0
     if (msLento > 3000) {
-      avisoRendimiento = true
+      avisos++
+      // Se vuelve a medir de cero: el renderizador nuevo necesita unos cuadros para estabilizarse
+      // (cachés, la arena a la resolución nueva) antes de decidir si hace falta otro escalón.
+      media = PASO_MS
+      msEnPelea = 0
+      msLento = 0
       op.alRendimientoBajo?.()
     }
   }

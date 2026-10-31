@@ -6,7 +6,7 @@
 // resultado. Lo único que se fuerza: posiciones, carga 10 para los especiales y la vida para cerrar
 // los rounds. NO toca ningún botón del resultado (guardarían la partida en la base de producción).
 //
-// Uso (contra el servidor de DESARROLLO; con varios agentes en la Mac, con el candado de Chrome):
+// Uso (contra el servidor de DESARROLLO de URL_BASE; con varios agentes en la Mac, con el candado de Chrome):
 //   node scripts/juego/revision/pelea-revision.mjs <id> <rival> <anchoxalto> [arena] [salida]
 //   salida: carpeta de las capturas (por defecto <tmp>/corte-final-revision/peleas); queda
 //   <salida>/<anchoxalto>/<id>_NN_<momento>.png, <id>.json (datos) y <id>.txt (registro).
@@ -14,7 +14,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { abrirChrome, esperar } from './cdp.mjs'
+import { abrirChrome, esperar, urlBase } from './cdp.mjs'
 
 const [ID, RIVAL, TAM = '844x390', ARENA = 'rondeau', SALIDA = path.join(os.tmpdir(), 'corte-final-revision', 'peleas')] = process.argv.slice(2)
 if (!ID || !RIVAL) {
@@ -24,7 +24,7 @@ if (!ID || !RIVAL) {
 const [ancho, alto] = TAM.split('x').map(Number)
 const DIR = path.join(SALIDA, TAM)
 mkdirSync(DIR, { recursive: true })
-const BASE = process.env.URL_BASE || 'http://localhost:3100'
+const BASE = urlBase()
 const URL = `${BASE}/juego?prueba=${ID},${RIVAL},${ARENA},facil`
 
 // Distancia para cada especial (dentro del rango con que la CPU lo usa, motor/movimientos.ts).

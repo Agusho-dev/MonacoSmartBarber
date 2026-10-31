@@ -15,6 +15,7 @@ import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '../../..
 import { cuadroDeAtaque, cuadrosDeImpacto } from '../../../src/lib/juego/motor/animacion.ts'
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
 import { EFECTO } from '../../../src/lib/juego/motor/constantes.ts'
+import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
 
 // Los daños salen de los kits (ya con el factor de balance de DANIO_KIT): las pruebas miden la
 // mecánica (reducción de Chipi, escalado, crítico), no los números de diseño.
@@ -535,6 +536,159 @@ function acercar(p: Partida, d = 100) {
     n++
   }
   ok(a.fase === 'terminada', 'CPU vs CPU con meta vacía, 1 round de 30 s y semilla enorme: termina', `${n} ticks`)
+}
+
+// ─── Revisión del 30/oct (segunda tanda): los defectos que encontró la verificación ───
+
+/** Arranca una pelea con posiciones y carga 10 para los dos. */
+function pelea(pj: [IdPersonaje, IdPersonaje], x0: number, x1: number, semilla = 7): Partida {
+  const p = nueva(pj, semilla)
+  p.luchadores[0].x = x0
+  p.luchadores[1].x = x1
+  p.luchadores[0].carga = 10
+  p.luchadores[1].carga = 10
+  return p
+}
+
+// crearNube borraba otro proyectil (el índice quedaba corrido al sacar la nube vieja): Lucas tira dos
+// Pañalazos y Nahuel un Pelotazo mientras vuela el segundo. Ningún tiro desaparece sin pegar, sin
+// salir de la pantalla o sin vencer, cada pañal que toca el piso o pega deja UNA nube y el pañal
+// que pega no sigue volando.
+{
+  let combinaciones = 0
+  let malas: string[] = []
+  let pelotasVistas = 0
+  for (let m = 70; m <= 190; m += 24) {
+    for (let k = m; k <= m + 120; k += 24) {
+      combinaciones++
+      const p = pelea(['lucas', 'nahuel'], 300, 760)
+      const vistos = new Map<number, { tipo: string; duenio: number; edad: number }>()
+      for (let t = 0; t < 420 && p.fase === 'pelea'; t++) {
+        p.luchadores[0].carga = 10
+        p.luchadores[1].carga = 10
+        avanzar(p, [
+          { ...ENTRADA_VACIA, especial2: t < 2 || (t >= m && t < m + 2) },
+          { ...ENTRADA_VACIA, especial1: t >= k && t < k + 2 },
+        ])
+        const evs = p.eventos.splice(0)
+        const nubes = de(evs, 'nube').filter((e) => e.quien === 0).length
+        const golpesPanal = de(evs, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'panal').length
+        if (nubes > 1) malas.push(`m${m} k${k} t${t}: ${nubes} nubes en un tick`)
+        if (golpesPanal > nubes) malas.push(`m${m} k${k} t${t}: el pañal pegó y no dejó nube`)
+        if (p.proyectiles.some((q) => q.tipo === 'panal' && q.golpesRestantes <= 0)) malas.push(`m${m} k${k} t${t}: un pañal que ya pegó sigue volando`)
+        const ahora = new Set(p.proyectiles.map((q) => q.id))
+        for (const [id, q] of vistos) {
+          if (ahora.has(id) || q.duenio !== 1) continue
+          pelotasVistas++
+          const pego = de(evs, 'golpe').some((g) => g.atacante === 1 && g.herramienta === 'pelota')
+          const vence = q.edad + 1 >= (MOVIMIENTOS.nahuel.especiales[0].proyectil?.vida ?? 75)
+          if (!pego && !vence) malas.push(`m${m} k${k} t${t}: la pelota de Nahuel desapareció sin pegar (edad ${q.edad})`)
+        }
+        vistos.clear()
+        for (const q of p.proyectiles) vistos.set(q.id, { tipo: q.tipo, duenio: q.duenio, edad: q.edad })
+      }
+    }
+  }
+  malas = [...new Set(malas)]
+  ok(malas.length === 0 && pelotasVistas > 0, 'nube: dos pañales y un tiro del rival en vuelo — no se borra nada ajeno, una nube por pañal', `${combinaciones} combinaciones, ${pelotasVistas} pelotas seguidas${malas.length ? '; ' + malas.slice(0, 3).join(' | ') : ''}`)
+}
+
+// Graffiti Slam: cubrirse no puede costar más vida que comérselo (con 5 golpes e intervalo 0 rompía
+// la guardia al 2.º contacto y el 3.º entraba limpio: 310 contra 182).
+{
+  const vidaPerdida = (cubre: boolean) => {
+    const p = pelea(['gabriel', 'simon'], 300, 550)
+    const v0 = p.luchadores[1].vida
+    correr(p, 120, (t) => [{ especial2: t < 2 }, { guardia: cubre }])
+    return v0 - p.luchadores[1].vida
+  }
+  const cubierto = vidaPerdida(true)
+  const limpio = vidaPerdida(false)
+  ok(cubierto > 0 && limpio > 0 && cubierto < limpio, 'graffiti: cubrirse cuesta menos vida que comérselo', `cubierto ${cubierto}, sin cubrirse ${limpio}`)
+}
+
+// Agarre contra golpe en el mismo tick: gana el golpe (sin importar el lado), nadie queda «agarrado»
+// sin que lo agarren y el agarre que no salió no cuenta como acertado. El golpe es la MÁQUINA de
+// Fabri (fuerte): un puño leve no frena a Brian (su armadura) y el agarre sale igual, que está bien.
+{
+  let cruces = 0
+  let huerfanos = 0
+  let malContado = 0
+  for (const brianLado of [0, 1] as const) {
+    for (let f = 0; f <= 30; f++) {
+      const pj: [IdPersonaje, IdPersonaje] = brianLado === 0 ? ['brian', 'fabri'] : ['fabri', 'brian']
+      const p = pelea(pj, brianLado === 0 ? 400 : 465, brianLado === 0 ? 465 : 400)
+      const I = internoDe(p)
+      const fabri = (1 - brianLado) as 0 | 1
+      let agarres = 0
+      for (let t = 0; t < 160 && p.fase === 'pelea'; t++) {
+        const ent: [EntradaJugador, EntradaJugador] = [{ ...ENTRADA_VACIA }, { ...ENTRADA_VACIA }]
+        ent[brianLado].especial1 = t >= 10 && t < 12
+        ent[fabri].herramienta = t >= f && t < f + 2
+        const aBrian = I.luchadores[brianLado].accion
+        const ventana = aBrian?.mov.id === 'agarre_y_apreton' && aBrian.t >= 8 && aBrian.t < 14
+        avanzar(p, ent)
+        const evs = p.eventos.splice(0)
+        agarres += de(evs, 'agarre').length
+        if (ventana && p.congelamientoGolpe > 0 && de(evs, 'golpe').some((g) => g.atacante === fabri && !g.bloqueado && g.fuerza !== 'leve')) cruces++
+        for (const lado of [0, 1] as const) {
+          const li = I.luchadores[lado]
+          if (li.agarradoPor !== null && I.luchadores[li.agarradoPor].accion?.agarre?.victima !== lado) huerfanos++
+        }
+      }
+      if (agarres === 0 && p.estadisticas[brianLado].especialesAcertados > 0) malContado++
+    }
+  }
+  ok(cruces > 0 && huerfanos === 0 && malContado === 0, 'agarre contra golpe: gana el golpe, nadie queda colgado y no cuenta como acertado', `${cruces} golpes en la ventana del agarre, ${huerfanos} ticks agarrado sin agarre, ${malContado} aciertos de más`)
+}
+
+// La onda del Grito no arrastra ni aturde fuera de la pelea: si Rodrigo cae mientras lleva al rival,
+// el ganador remata «¡AL CERO!».
+{
+  const p = pelea(['rodrigo', 'stefano'], 90, 260)
+  p.rondasGanadas[1] = 1
+  let arrastrado = false
+  let remate = false
+  let aturdidoEnFinal = 0
+  for (let t = 0; t < 700 && p.fase !== 'terminada'; t++) {
+    const enOnda = p.proyectiles.some((q) => q.tipo === 'onda') && p.luchadores[1].estado === 'aturdido'
+    if (enOnda && !arrastrado && p.fase === 'pelea') {
+      arrastrado = true
+      p.luchadores[0].vida = 0
+    }
+    if (p.fase === 'final' && p.congelamientoGolpe === 0 && p.luchadores[1].estado === 'aturdido') aturdidoEnFinal++
+    avanzar(p, [{ ...ENTRADA_VACIA, especial2: t < 2 }, { ...ENTRADA_VACIA, golpe: p.fase === 'final' && t % 6 < 2 }])
+    if (p.eventos.splice(0).some((e) => e.tipo === 'final_al_cero')) remate = true
+  }
+  ok(arrastrado && remate && aturdidoEnFinal < 30, 'onda: con Rodrigo noqueado no arrastra más y el ganador remata', `aturdido ${aturdidoEnFinal} ticks de la fase final, remate ${remate}`)
+}
+
+// «Curándose» se apaga cuando el ¡TIEMPO! corta la Curación.
+{
+  const p = pelea(['fabri', 'simon'], 300, 700)
+  p.luchadores[0].vida = 500
+  p.tiempoRestante = 30
+  let curandoEnTiempo = 0
+  let curo = false
+  for (let t = 0; t < 200 && p.fase !== 'entre_rounds'; t++) {
+    avanzar(p, [{ ...ENTRADA_VACIA, especial1: t < 2 }, ENTRADA_VACIA])
+    if (p.eventos.splice(0).some((e) => e.tipo === 'curacion')) curo = true
+    if (p.fase === 'tiempo') curandoEnTiempo = Math.max(curandoEnTiempo, p.luchadores[0].efectos.curando)
+  }
+  ok(curo && curandoEnTiempo === 0, 'cura: el «curándose» se apaga con el ¡TIEMPO!', `curando durante «tiempo» = ${curandoEnTiempo}`)
+}
+
+// «Precisión»: los aciertos nunca pasan a los intentos (el molino de 5 golpes y el agarre con sus
+// apretones contaban más aciertos que intentos).
+{
+  const p = pelea(['gabriel', 'simon'], 300, 420)
+  correr(p, 200, (t) => [{ especial1: t < 2 || (t > 120 && t < 123) }, {}])
+  const g = p.estadisticas[0]
+  const q = pelea(['brian', 'simon'], 400, 470)
+  correr(q, 200, (t) => [{ especial1: t < 2 }, {}])
+  const b = q.estadisticas[0]
+  ok(g.golpesAcertados >= 5 && g.golpesAcertados <= g.golpesIntentados, 'precisión: el molino no pasa de 100 %', `${g.golpesAcertados}/${g.golpesIntentados}`)
+  ok(b.golpesAcertados === 1 && b.golpesIntentados === 1, 'precisión: el agarre cuenta un intento y un acierto', `${b.golpesAcertados}/${b.golpesIntentados}`)
 }
 
 console.log(`\n${pruebas - fallas}/${pruebas} pruebas ok`)

@@ -9,6 +9,7 @@ import {
   CUERPO_AIRE,
   CUERPO_ANCHO,
   EMPUJE_CAJA,
+  TOPE_ENCIERRO,
   X_MAX,
   X_MIN,
 } from './constantes'
@@ -103,6 +104,21 @@ export function puedeActuarEnAire(l: LuchadorEstado, li: InternoLuchador): boole
     l.efectos.aturdido === 0 &&
     li.agarradoPor === null
   )
+}
+
+/**
+ * No puede hacer nada por culpa del rival: en el piso sin poder actuar y sin un movimiento propio
+ * en curso (hitstun, guardia rota, congelado, aturdido, tirado, levantándose…), o en el aire
+ * cayendo derribado o agarrado. Es la vara de los encierros (cadenas.mts mide lo mismo).
+ */
+export function sinControl(l: LuchadorEstado, li: InternoLuchador): boolean {
+  if (!l.enSuelo) return li.caidaDerribo > 0 || li.agarradoPor !== null
+  return !puedeActuar(l, li) && li.accion === null && li.dash === null
+}
+
+/** Lleva tanto sin poder actuar que ya nada lo controla más (ver TOPE_ENCIERRO). */
+export function inmuneAlControl(li: InternoLuchador): boolean {
+  return li.sinControl >= TOPE_ENCIERRO.inmuneDesde
 }
 
 /** El rival lo tiene a merced: le está pegando o no puede moverse. */

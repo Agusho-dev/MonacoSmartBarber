@@ -1,4 +1,4 @@
-// Galería del render del elenco en Chrome headless, contra el dev server (http://localhost:3100):
+// Galería del render del elenco en Chrome headless, contra el dev server de URL_BASE (obligatoria):
 // una partida falsa (galeria-pagina.js) con cada proyectil, estado y especial, sin motor.
 //
 //   capturas: node scripts/juego/render-audio/galeria.mjs capturas 844x390 todas [alta|media|baja]
@@ -11,7 +11,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { abrirChrome, esperar } from './cdp.mjs'
+import { abrirChrome, esperar, urlBase } from './cdp.mjs'
 import { empaquetar, SALIDA } from './empaquetar.mjs'
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url))
@@ -28,6 +28,8 @@ const ESCENAS = {
   chorros: { ids: ['nico_u', 'stefano'], esc: ['chorros'], fotos: [450, 900] },
   estados: { ids: ['stefano', 'nico_u'], esc: ['estados'], fotos: [1200, 4200, 6900] },
   golpes: { ids: ['nico_u', 'joaquin'], esc: ['golpes'], fotos: [600, 1400, 2200, 3000] },
+  // Fabri tira el Modo Boxeador y Luciano la Moto 100 ms después: se ven las DOS bandas.
+  esp_dos: { ids: ['fabri', 'luciano'], esc: ['dosEspeciales'], fotos: [320, 520, 760] },
   esp_nico1: { ids: ['nico_u', 'stefano'], esc: ['especial', 1], fotos: [250, 650, 1100] },
   esp_nico2: { ids: ['nico_u', 'stefano'], esc: ['especial', 2], fotos: [250, 650, 1100] },
   esp_gabriel1: { ids: ['gabriel', 'nico_u'], esc: ['especial', 1], fotos: [300, 700, 1100] },
@@ -52,7 +54,7 @@ const c = await abrirChrome({ ancho, alto, movil: true, puerto: 9391 })
 let fallas = 0
 try {
   // una página liviana del mismo origen: los atlas se bajan del dev server sin CORS
-  await c.cdp('Page.navigate', { url: 'http://localhost:3100/juego/efectos/efectos.json' })
+  await c.cdp('Page.navigate', { url: `${urlBase()}/juego/efectos/efectos.json` })
   await esperar(1200)
   await c.evaluar(bundle + ';true')
   await c.evaluar(pagina + ';true')

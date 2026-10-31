@@ -4,7 +4,7 @@ import { Crosshair, Flame, LoaderCircle, RotateCcw, Sparkles, Swords, Timer, Tro
 import type { CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import type { EstadoDuelo } from '@/lib/juego/online/duelo'
-import { bajadaResultado, tituloResultado } from '@/lib/juego/online/textos'
+import { bajadaResultado, textoRivalAusente, tituloResultado } from '@/lib/juego/online/textos'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { formatearDuracion, formatearPuntos, porcentaje } from '@/lib/juego/ui/textos'
 import { ImagenJuego } from '../imagen-juego'
@@ -170,13 +170,7 @@ export function ResultadoOnline({
           </button>
         ) : (
           <p className="cf-resultado-online__ausente" role="status">
-            {estado.rivalSeFue === 'turno'
-              ? `${rival} fue llamado a cortarse`
-              : estado.rivalSeFue === 'salir'
-                ? `${rival} volvió a la sala`
-                : estado.rivalSeFue === 'cerro'
-                  ? `${rival} cerró el juego`
-                  : `Sin revancha: ${rival} ya no está`}
+            {textoRivalAusente(r, rival, estado.rivalSeFue)}
           </p>
         )}
         <button type="button" className="cf-btn cf-btn--sec" onClick={onVolverSala}>

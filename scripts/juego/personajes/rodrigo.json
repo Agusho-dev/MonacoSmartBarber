@@ -18,10 +18,12 @@
   },
   "animaciones": {
     "quieto": {
+      "_nota": "revisión 31/oct: con el apoyo en el torso los pies patinaban (el de atrás saltaba 18 u del mundo entre los cuadros 2 y 3); apoyoX deja quieto el punto medio de los pies (≤ 5,7 u), con el mismo apoyo promedio",
       "inferencia": "ancho",
       "cajas": [[10, 36, 79, 172], [78, 36, 149, 172], [147, 36, 217, 172], [215, 36, 285, 172], [283, 36, 353, 172]],
       "pegados": 2,
-      "sombra": {"lumMax": 24, "recuperar": 1}
+      "sombra": {"lumMax": 24, "recuperar": 1},
+      "apoyoX": {"0": 46.9, "1": 111.4, "2": 184.4, "3": 255.9, "4": 318.4}
     },
     "caminar": {
       "inferencia": "ancho",
@@ -166,7 +168,8 @@
       ],
       "impactos": [1, 3, 5, 7],
       "pintar": "azules",
-      "quitarColor": ["azules", "magentas"],
+      "_nota": "revisión 31/oct: «purpuras» saca el orbe rosa de la mano del 6 y el resplandor violeta del puño del 7; en el 6 se excluye el humo azul oscuro a la derecha de la zapatilla y en el 7 «sombra» saca la cuña oscura debajo de la pierna de atrás",
+      "quitarColor": ["azules", "magentas", "purpuras"],
       "pegados": 2,
       "region": [851, 377, 1527, 508],
       "inferenciaPorCuadro": {"4": "ancho&panel", "5": "ancho&panel", "6": "ancho&panel", "7": "panel"},
@@ -273,8 +276,9 @@
           [[1410, 490], [1452, 480], [1460, 508], [1410, 508]],
           [[1440, 475], [1462, 470], [1462, 490], [1440, 490]]
         ],
-        "6": [[1326, 455, 1331, 508]]
-      }
+        "6": [[1326, 455, 1331, 508], [[1357, 477], [1366, 471], [1377, 465], [1379, 500], [1364, 500], [1360, 494], [1357, 488]]]
+      },
+      "sombra": {"7": {"zona": [1405, 476, 1462, 498], "lumMax": 29, "recuperar": 1}}
     },
     "herramienta1": {"alias": "combo", "usar": [4, 5, 7, 5], "impactos": [2]},
     "herramienta2": {"alias": "patada", "usar": [0, 1, 3, 0], "impactos": [2]},
@@ -306,7 +310,9 @@
       "pintar": "magentas",
       "quitarColor": ["magentas", "purpuras"],
       "pegados": 2,
-      "sombra": {"lumMax": 26, "recuperar": 1}
+      "sombra": {"lumMax": 26, "recuperar": 1},
+      "_nota": "revisión 31/oct: en el 2 (el grito) quedaban flecos oscuros de las ondas a la derecha de la campera",
+      "excluir": {"2": [[[1067, 612], [1082, 612], [1082, 642], [1067, 642]]]}
     },
     "danio": {
       "_nota": "revisión 30/oct: la fila de abajo de la hoja (paneles de 156 px contra 136 de la de arriba) está dibujada ~1,14x: sin escala, al festejar o recibir un golpe crecía de golpe",
@@ -321,6 +327,8 @@
       ],
       "pegados": 2,
       "inferenciaPorCuadro": {"3": "caja"},
+      "_nota2": "revisión 31/oct: en el 3 quedaban manchas oscuras sueltas a la derecha del pie",
+      "excluir": {"3": [[238, 868, 262, 888]]},
       "sombra": {
         "0": {"lumMax": 24, "recuperar": 1},
         "1": {"lumMax": 24, "recuperar": 1},
@@ -330,10 +338,12 @@
       }
     },
     "ko": {
+      "_nota": "revisión 31/oct: el último panel de la hoja dibuja DOS cuerpos tirados encimados (el que cae y el tendido): el cuadro 2 (el que queda quieto en el KO, en cada derribo y en levantarse[0]) se queda sólo con el de la derecha, tendido de costado",
       "escala": 0.88,
       "inferencia": "ancho",
       "cajas": [[339, 739, 418, 895], [413, 739, 500, 895], [495, 739, 691, 895]],
-      "pegados": 2
+      "pegados": 2,
+      "excluir": {"2": [[[495, 739], [578, 739], [578, 845], [572, 847], [568, 850], [565, 854], [563, 859], [562, 865], [562, 871], [563, 877], [565, 883], [568, 889], [572, 894], [576, 896], [495, 896]]]}
     },
     "levantarse": {
       "escala": 0.88,

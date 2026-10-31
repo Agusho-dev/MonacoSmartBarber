@@ -5,7 +5,7 @@
 //   node scripts/juego/ui/flujo-cpu.mjs <jugador> <rival> [tamaño] [query]
 //     jugador / rival: el nombre como aparece en la grilla ("nico u.", "guillermo", "simón")
 //     tamaño: 844x390 (por defecto) · query: lo que va después de /juego? (ej. "qr=brian,Juan")
-//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (http://localhost:3100)
+//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (obligatoria, p. ej. http://localhost:3210)
 //
 // Para no esperar dos rounds enteros, cuando la pelea arranca el rival queda con 1 de vida en cada
 // round (por el gancho de pruebas `window.__corteFinal`, sólo en desarrollo) y se aprieta GOLPE.
@@ -14,10 +14,10 @@
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { abrirChrome, esperar } from './cdp.mjs'
+import { abrirChrome, esperar, urlBase } from './cdp.mjs'
 
 const SALIDA = process.env.SALIDA || join(tmpdir(), 'corte-final-capturas')
-const BASE = process.env.URL_BASE || 'http://localhost:3100'
+const BASE = urlBase()
 const [jugador = '', rival = '', tam = '844x390', query = ''] = process.argv.slice(2)
 const [w, h] = tam.split('x').map(Number)
 const prefijo = `cpu_${(jugador || 'x').replace(/[^a-z]+/gi, '')}_vs_${(rival || 'x').replace(/[^a-z]+/gi, '')}_${tam}`

@@ -18,14 +18,38 @@
       "region": [729, 34, 1086, 160],
       "cortes": [[790, 838], [888, 938], [968, 1012]],
       "quitar": [{ "zona": [1030, 115, 1088, 160], "bMenosRMin": 4, "lumMin": 55 }],
-      "porCuadro": { "3": { "excluir": [[1040, 110, 1088, 160]] } }
+      "porCuadro": {
+        "1": {
+          "_nota": "revisión 31/oct: sin el contorno negro del humo detrás de la pierna de atrás (lo oscuro en una franja pegada al borde de arriba del pantalón); el «quitar» de la animación se repite porque el del cuadro lo reemplaza",
+          "quitar": [
+            { "zona": [1030, 115, 1088, 160], "bMenosRMin": 4, "lumMin": 55 },
+            { "zona": [[818, 108], [852, 108], [852, 117], [844, 122], [836, 127], [829, 131], [823, 136], [818, 137]], "lumMax": 45 }
+          ]
+        },
+        "3": { "excluir": [[1040, 110, 1088, 160]] }
+      }
     },
     "dash": {
       "sinFondo": { "tol": 24 },
       "region": [1097, 34, 1525, 160],
       "cuadros": 3,
-      "usar": [0, 0, 0],
-      "quitar": [{ "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 }]
+      "_nota": "revisión 31/oct: sin la sombra negra de la velocidad detrás de la rodilla y debajo del pie de adelante (parecía una capa negra), ni el negro del hueco de la rodilla doblada (quedaba un bloque de bordes rectos debajo del muslo); los tres cuadros son el mismo rectángulo del atlas (prestados) en vez de tres copias",
+      "usar": [0],
+      "prestados": [{ "pos": 1, "de": "dash", "cuadro": 0 }, { "pos": 2, "de": "dash", "cuadro": 0 }],
+      "quitar": [{ "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 }],
+      "porCuadro": {
+        "0": {
+          "excluir": [
+            [[1204, 115], [1214, 109], [1222, 107], [1222, 140], [1203, 140], [1203, 128], [1204, 120]],
+            [[1186, 133], [1205, 133], [1205, 156], [1183, 156], [1183, 136]]
+          ],
+          "quitar": [
+            { "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 },
+            { "zona": [[1158, 120], [1186, 120], [1186, 127], [1178, 129], [1160, 129]], "lumMax": 60 },
+            { "zona": [[1196, 126], [1205, 126], [1205, 135], [1186, 135]], "lumMax": 45 }
+          ]
+        }
+      }
     },
     "guardia": { "region": [14, 194, 344, 315], "cuadros": 4 },
     "agachado": { "region": [355, 194, 641, 315], "cuadros": 4 },
@@ -51,13 +75,20 @@
     "patada": { "region": [449, 353, 815, 472], "cuadros": 4, "usar": [0, 1, 2], "impactos": [1] },
     "combo": {
       "region": [827, 353, 1525, 472],
-      "cortes": [[895, 912], [975, 995], [1040, 1062], [1120, 1145], [1212, 1235], [1288, 1306], [1380, 1400]],
+      "cortes": [[895, 912], [975, 995], [1040, 1062], [1131, 1134], [1212, 1235], [1288, 1306], [1380, 1400]],
       "usar": [0, 1, 2, 3, 5, 6, 7],
       "impactos": [3, 6],
       "porCuadro": {
         "3": {
-          "excluir": [[[1070, 472], [1070, 458], [1076, 446], [1086, 437], [1098, 428], [1106, 424], [1132, 421], [1132, 472]]],
-          "quitar": [{ "zona": [1114, 360, 1140, 432], "lumMax": 45 }]
+          "_nota": "revisión 31/oct (combo[3], impacto del puño): la costura con el cuadro siguiente pasa a 1131-1134; en 1120 cortaba el puño que pega y la punta del ala del sombrero con una recta. Sin la estela de fuego arriba a la derecha ni el bloque de fondo negro pegado al talón de la zapatilla de apoyo",
+          "excluir": [[[1070, 472], [1070, 458], [1076, 446], [1086, 437], [1098, 428], [1106, 424], [1132, 421], [1132, 472]], [1122, 356, 1140, 372], [1129, 403, 1136, 415]],
+          "quitar": [
+            { "zona": [[1122, 356], [1140, 356], [1140, 432], [1112, 432], [1112, 380], [1122, 380]], "lumMax": 45 },
+            { "zona": [1112, 404, 1135, 426], "rMenosGMin": 90 },
+            { "zona": [1108, 358, 1140, 380], "rMenosGMin": 30, "gMenosBMax": 15, "lumMax": 140 },
+            { "zona": [1112, 390, 1135, 426], "rMenosGMin": 30, "gMenosBMax": 15, "lumMax": 140 },
+            { "zona": [1066, 454, 1073, 472], "lumMax": 40 }
+          ]
         },
         "6": {
           "excluir": [[[1319, 449], [1352, 449], [1352, 472], [1319, 472]]],
@@ -70,9 +101,14 @@
             [[1488, 370], [1528, 370], [1528, 472], [1468, 472], [1468, 460], [1475, 445], [1485, 428], [1495, 418], [1508, 412], [1508, 390], [1500, 386], [1490, 386]],
             [[1402, 458], [1442, 452], [1442, 472], [1402, 472]]
           ],
+          "_nota": "revisión 31/oct (combo[6] = el impacto final y todo el Remate): además, sin el borde rojo del fuego a la derecha del sombrero ni el fondo rojo y negro detrás de la cabeza (por color, en la zona de afuera del sombrero y de la cara), y sin la cuña negra y bordó entre las piernas",
           "quitar": [
             { "zona": [1418, 368, 1447, 412], "rMenosGMin": 60, "lumMin": 40 },
-            { "zona": [1438, 432, 1480, 472], "rMenosGMin": 60, "lumMin": 40 }
+            { "zona": [1438, 432, 1480, 472], "rMenosGMin": 60, "lumMin": 40 },
+            { "zona": [[1469, 358], [1500, 358], [1500, 389], [1488, 391], [1488, 400], [1476, 400], [1472, 399], [1472, 386], [1469, 386]], "rMenosGMin": 110 },
+            { "zona": [[1469, 358], [1500, 358], [1500, 389], [1488, 391], [1488, 400], [1476, 400], [1472, 399], [1472, 386], [1469, 386]], "gMenosBMax": 20 },
+            { "zona": [[1405, 447], [1436, 437], [1447, 437], [1442, 443], [1440, 447], [1438, 458], [1405, 458]], "lumMax": 60 },
+            { "zona": [[1458, 437], [1480, 437], [1480, 447], [1462, 447]], "lumMax": 70 }
           ]
         }
       }
@@ -90,7 +126,25 @@
       ],
       "usar": [0, 2, 4, 5, 6],
       "impactos": [2],
-      "quitar": [{ "zona": [12, 590, 1525, 635], "bMenosRMin": 4, "lumMin": 55 }]
+      "quitar": [{ "zona": [12, 590, 1525, 635], "bMenosRMin": 4, "lumMin": 55 }],
+      "porCuadro": {
+        "4": {
+          "_nota": "revisión 31/oct (especial1[2], el lanzamiento del gorro): sin el fondo negro encerrado entre la mano que sostiene la faja suelta y la faja (una cuña negra); el «quitar» de la animación se repite porque el del cuadro lo reemplaza",
+          "quitar": [
+            { "zona": [12, 590, 1525, 635], "bMenosRMin": 4, "lumMin": 55 },
+            { "zona": [[478, 566], [516, 566], [516, 576], [504, 577], [503, 583], [478, 583]], "lumMax": 21 },
+            { "zona": [[478, 566], [516, 566], [516, 576], [504, 577], [503, 583], [478, 583]], "bMenosRMin": 6, "lumMax": 60 }
+          ]
+        },
+        "5": {
+          "_nota": "revisión 31/oct (especial1[3]): lo mismo bajo la faja suelta",
+          "quitar": [
+            { "zona": [12, 590, 1525, 635], "bMenosRMin": 4, "lumMin": 55 },
+            { "zona": [895, 568, 918, 585], "lumMax": 21 },
+            { "zona": [895, 568, 918, 585], "bMenosRMin": 6, "lumMax": 60 }
+          ]
+        }
+      }
     },
     "especial2": {
       "region": [12, 673, 1525, 799],
@@ -105,7 +159,21 @@
       "quitar": [{ "zona": [12, 750, 1525, 799], "bMenosRMin": 4, "lumMin": 55 }]
     },
     "danio": { "region": [12, 835, 362, 988], "cuadros": 5, "escala": 0.87 },
-    "ko": { "region": [373, 835, 680, 988], "cuadros": 4, "escala": 0.87 },
+    "ko": {
+      "region": [373, 835, 680, 988],
+      "cortes": [[437, 447], [513, 516], [597, 599]],
+      "escala": 0.87,
+      "_nota": "revisión 31/oct: costuras en vez de manchas (con manchas no se podía sumar nada que el modelo dejara afuera, como el sombrero caído); la zapatilla del cuadro 2 que quedaba sin dueño vuelve a él",
+      "porCuadro": {
+        "1": { "excluir": [[505, 950, 520, 975]] },
+        "2": { "agregar": [[505, 950, 520, 975]] },
+        "3": {
+          "_nota": "revisión 31/oct (el cuadro que queda quieto en el KO): en la hoja la cadera queda pegada a la figura anterior y terminaba en una recta; se le suman las piernas plegadas que asoman debajo (la zona bajo el cinturón de la figura anterior) y el sombrero caído al lado de la cabeza, que el modelo dejaba afuera",
+          "agregar": [[[597, 944], [591, 946], [588, 951], [578, 957], [568, 964], [564, 972], [566, 982], [575, 986], [600, 986], [600, 944]]],
+          "incluir": [[[660, 935], [659, 936], [659, 968], [662, 967], [665, 972], [670, 976], [674, 970], [675, 965], [680, 953], [677, 951], [664, 937]]]
+        }
+      }
+    },
     "levantarse": { "region": [692, 835, 943, 988], "cuadros": 4, "escala": 0.92 },
     "victoria": { "region": [954, 835, 1224, 988], "cuadros": 4, "escala": 0.87 },
     "burla": { "region": [1235, 835, 1524, 988], "cuadros": 4, "escala": 0.87 }

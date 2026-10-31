@@ -1,7 +1,7 @@
 'use client'
 
 import { ChevronLeft, SignalHigh, SignalLow, SignalMedium, Swords } from 'lucide-react'
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
 import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
 import type {
@@ -85,6 +85,8 @@ export function PantallaSeleccion({
   const [modo, setModo] = useState<ModoEleccion>('jugador')
   const [filtro, setFiltro] = useState<string | null>(null)
   const grillaRef = useRef<HTMLDivElement>(null)
+  /** Se tocó VOS o RIVAL: la grilla vuelve a la vista cuando el modo nuevo ya está dibujado. */
+  const volverAGrilla = useRef(false)
 
   const sucursalCliente = datos.sucursal?.slug ?? null
   const jugador = PERSONAJES[eleccion.jugador]
@@ -99,10 +101,20 @@ export function PantallaSeleccion({
   const cambiarModo = (m: ModoEleccion) => {
     if (m === modo) return
     onTocar?.()
+    volverAGrilla.current = true
     setModo(m)
-    // Si bajó a leer los especiales, la grilla vuelve a la vista: con ella se elige.
-    grillaRef.current?.scrollIntoView({ block: 'nearest', behavior: prefiereMenosMovimiento() ? 'auto' : 'smooth' })
   }
+
+  // Si bajó a leer los especiales, la grilla vuelve a la vista: con ella se elige. Después de
+  // dibujar el modo nuevo: en vertical la ficha grande de arriba cambia de alto con el modo y, con
+  // el destino medido antes, el scroll quedaba corrido ±10 px (en 360 px cortaba las caras de la
+  // primera fila). El margen de arriba lo da el scroll-margin-top de .cf-plantel (la etiqueta
+  // VOS/CPU sobresale de la grilla).
+  useLayoutEffect(() => {
+    if (!volverAGrilla.current) return
+    volverAGrilla.current = false
+    grillaRef.current?.scrollIntoView({ block: 'nearest', behavior: prefiereMenosMovimiento() ? 'auto' : 'smooth' })
+  }, [modo])
 
   const cambiarFiltro = (f: string | null) => {
     if (f === filtro) return

@@ -28,7 +28,7 @@ import {
   X_MAX,
   X_MIN,
 } from './constantes'
-import { dirDe, franjaEmpuje, invulnerablePorAccion, limitar, mirarA, puedeActuar, puedeActuarEnAire } from './cuerpo'
+import { dirDe, franjaEmpuje, invulnerablePorAccion, limitar, mirarA, puedeActuar, puedeActuarEnAire, sinControl } from './cuerpo'
 import type { BotonBuffer, EstadoControl, EstadoInterno, InternoLuchador } from './interno'
 import { emitir } from './interno'
 import type { DefEspecial, KitPersonaje } from './movimientos'
@@ -158,6 +158,7 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     inmune: { aturdido: 0, mareado: 0, quemado: 0, congelado: 0, electrocutado: 0 },
     quema: null,
     agarradoPor: null,
+    sinControl: 0,
   }
 }
 
@@ -217,6 +218,7 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   for (const e of ESTADOS_CONTROL) li.inmune[e] = 0
   li.quema = null
   li.agarradoPor = null
+  li.sinControl = 0
 }
 
 export function vaciarBuffer(li: InternoLuchador): void {
@@ -633,6 +635,9 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
       l.guardia = Math.min(GUARDIA.max, l.guardia + GUARDIA.regen)
     }
     sumarCarga(p, lado, ((p.turbo ? CARGA.turboMult : 1) * (k.pasiva?.multCarga ?? 1)) / CARGA.ticksPorUnidad)
+    // Encierro (TOPE_ENCIERRO): ticks de pelea seguidos sin poder actuar. Este reloj no corre en el
+    // hitstop ni en el super flash, así que tampoco los cuenta.
+    li.sinControl = sinControl(l, li) ? li.sinControl + 1 : 0
   }
 }
 

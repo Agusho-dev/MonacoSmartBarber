@@ -5,14 +5,28 @@
  * debería ganarle más de ≈ 65 % a la CPU normal ni dejar a un rival sin chance.
  *
  *   cd scripts/juego/simulador && node --import ./cargador.mjs adversario.mts [opciones]
- *     --semillas=N    partidas por luchador, bot y rival (def. 6)
+ *     --semillas=N    partidas por luchador, bot y rival (def. 10; con menos, una celda de 130
+ *                     partidas tiene ±8 puntos y el tope salta por ruido)
  *     --dif=normal    dificultad de la CPU (def. normal)
  *     --bots=a,b      sólo esos bots (def. todos)
  *     --solo=a,b      sólo esos luchadores para el bot
  *     --hilos=K       hilos (def. 6)
- *     --tope=65       % a partir del cual una estrategia se marca como degenerada
+ *     --tope=65       % a partir del cual una celda (bot, barbero) es una estrategia degenerada
+ *     --topeTodos=46  % máximo de un bot con todos los barberos juntos
+ *     --sal=K         semillas nuevas (para validar con semillas que no usó ningún ajuste)
  *     --json=ruta     números crudos
- *     --ajuste=ruta   prueba otros números sin tocar el código (mismo formato que balance.mts)
+ *     --ajuste=ruta   prueba otros números sin tocar el código (mismo formato que balance.mts:
+ *                     kit, daño, vida, costo, pericia, periciaHumano y asistencia)
+ *
+ * Sale con código 1 si alguna celda pasa de `tope` o algún bot pasa de `topeTodos` (o si alguna
+ * partida no termina). Topes por defecto según la dificultad (los de la revisión del 30/oct):
+ *  - normal: celda 65, todos 46. Un bot de una sola idea es lo que hace un cliente que encontró
+ *    «el truco»: si con algún barbero le gana 2 de 3 a la dificultad por defecto, ese barbero
+ *    está roto para ese cliente. «Todos» en 46: la CPU normal tiene que ganarle a cualquier truco
+ *    más de la mitad de las veces sumando los 13.
+ *  - difícil: celda 35, todos 10. Difícil es para el que sabe; ningún truco solo puede ganarle más
+ *    de 1 de 3 con ningún barbero.
+ *  - fácil: sin tope (cualquier cosa le gana a la fácil: es lo que se busca).
  *
  * Los bots ven al rival con REACCION ticks de retraso (como una persona) y a sí mismos al instante.
  * Juegan siempre por el camino de un humano (flancos, buffer, doble toque), sin tocar el motor.
@@ -27,8 +41,10 @@ import { avanzar, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/mo
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
 import { duracionesDeRounds } from '../../../src/lib/juego/motor/partida.ts'
 import { finVentanas, primeraVentana } from '../../../src/lib/juego/motor/cuerpo.ts'
-import { KITS_DISENIO, MOVIMIENTOS, conDanio } from '../../../src/lib/juego/motor/movimientos.ts'
+import { DANIO_KIT, KITS_DISENIO, MOVIMIENTOS, conDanio } from '../../../src/lib/juego/motor/movimientos.ts'
 import type { KitPersonaje } from '../../../src/lib/juego/motor/movimientos.ts'
+import { CONTRA_PERSONA } from '../../../src/lib/juego/motor/cpu.ts'
+import type { ParamsCpu } from '../../../src/lib/juego/motor/cpu.ts'
 import { IDS_PERSONAJES, PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 
 const REPO = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '')
@@ -267,13 +283,47 @@ const BOTS: Record<string, Bot> = {
 
 // ─── Ajustes de prueba (el mismo formato que balance.mts --ajuste) ───────────
 
+type PorDificultad = Partial<Record<IdPersonaje, Partial<Record<Dificultad, number>>>>
 interface Ajuste {
+  kit?: Partial<Record<IdPersonaje, Record<string, unknown>>>
+  /** Escala el daño de diseño de la cadena de GOLPE (con la aérea) y la de la HERRAMIENTA de un barbero. */
+  cadenas?: Partial<Record<IdPersonaje, { golpe?: number; herramienta?: number }>>
   danio?: Partial<Record<IdPersonaje, [number, number, number?, number?]>>
   vida?: Partial<Record<IdPersonaje, number>>
   costo?: Partial<Record<IdPersonaje, [number, number]>>
+  pericia?: PorDificultad
+  periciaHumano?: PorDificultad
+  asistencia?: PorDificultad
+  /** Pisa lo que cambia la CPU contra una persona (CONTRA_PERSONA de cpu.ts). */
+  persona?: Partial<Record<Dificultad, Partial<ParamsCpu>>>
+}
+/** Pone `valor` en `ruta` («a.b.0.c») dentro de `obj` (como en balance.mts). */
+function parchar(obj: unknown, ruta: string, valor: unknown): void {
+  const partes = ruta.split('.')
+  let o = obj as Record<string, unknown>
+  for (const parte of partes.slice(0, -1)) {
+    if (o[parte] === undefined || o[parte] === null) o[parte] = {}
+    o = o[parte] as Record<string, unknown>
+  }
+  o[partes[partes.length - 1]] = valor
 }
 function aplicarAjuste(a: Ajuste | null): void {
   if (!a) return
+  const ids = new Set([...Object.keys(a.kit ?? {}), ...Object.keys(a.cadenas ?? {})]) as Set<IdPersonaje>
+  for (const id of ids) {
+    const k = structuredClone(KITS_DISENIO[id])
+    for (const [ruta, valor] of Object.entries(a.kit?.[id] ?? {})) parchar(k, ruta, valor)
+    const esc = a.cadenas?.[id]
+    for (const [boton, f] of [['golpe', esc?.golpe], ['herramienta', esc?.herramienta]] as const) {
+      if (!f || f === 1) continue
+      const movs: string[] = boton === 'golpe' ? [k.inicio.aereo] : []
+      for (let m: string | undefined = boton === 'golpe' ? k.inicio.golpe : k.inicio.herramienta; m && movs.length < 8; m = k.movimientos[m]?.siguiente) movs.push(m)
+      for (const m of movs) for (const v of k.movimientos[m]?.ventanas ?? []) v.danio = Math.max(1, Math.round(v.danio * f))
+    }
+    ;(KITS_DISENIO as Record<IdPersonaje, KitPersonaje>)[id] = k
+    const [fn, fe, fg, fge] = DANIO_KIT[id]
+    MOVIMIENTOS[id] = conDanio(k, fn, fe, fg, fge)
+  }
   for (const [id, f] of Object.entries(a.danio ?? {})) {
     const [fn, fe, fg, fge] = f as [number, number, number?, number?]
     MOVIMIENTOS[id as IdPersonaje] = conDanio(KITS_DISENIO[id as IdPersonaje], fn, fe, fg ?? 1, fge ?? fg ?? 1)
@@ -282,6 +332,14 @@ function aplicarAjuste(a: Ajuste | null): void {
   for (const [id, c] of Object.entries(a.costo ?? {})) {
     PERSONAJES[id as IdPersonaje].especiales[0].costo = (c as [number, number])[0]
     PERSONAJES[id as IdPersonaje].especiales[1].costo = (c as [number, number])[1]
+  }
+  for (const [d, q] of Object.entries(a.persona ?? {})) CONTRA_PERSONA[d as Dificultad] = { ...CONTRA_PERSONA[d as Dificultad], ...q }
+  // La pericia de la CPU y la asistencia a la persona (EstiloCpu), como en balance.mts.
+  for (const campo of ['pericia', 'periciaHumano', 'asistencia'] as const) {
+    for (const [id, pe] of Object.entries(a[campo] ?? {})) {
+      const k = MOVIMIENTOS[id as IdPersonaje]
+      MOVIMIENTOS[id as IdPersonaje] = { ...k, cpu: { ...k.cpu, [campo]: { ...pe } } }
+    }
   }
 }
 
@@ -378,15 +436,28 @@ if (!isMainThread) {
   parentPort?.postMessage(ac)
 }
 
+/** Topes por dificultad: [celda (bot, barbero), todos los barberos juntos] (ver el encabezado). */
+const TOPES: Record<Dificultad, [number, number]> = { facil: [101, 101], normal: [65, 46], dificil: [35, 10] }
+
+function mezcla32(x: number): number {
+  x = x >>> 0
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d) >>> 0
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b) >>> 0
+  return (x ^ (x >>> 16)) >>> 0
+}
+
 async function principal(): Promise<void> {
   const args = process.argv.slice(2)
   const arg = (n: string) => args.find((a) => a.startsWith(`--${n}=`))?.split('=')[1]
-  const semillas = Number(arg('semillas') ?? 6)
+  const semillas = Number(arg('semillas') ?? 10)
   const dif = (arg('dif') ?? 'normal') as Dificultad
   const bots = arg('bots')?.split(',') ?? Object.keys(BOTS)
   const solo = (arg('solo')?.split(',') as IdPersonaje[] | undefined) ?? IDS_PERSONAJES
   const hilos = Math.max(1, Math.min(Number(arg('hilos') ?? 6), availableParallelism()))
-  const tope = Number(arg('tope') ?? 65)
+  const tope = Number(arg('tope') ?? TOPES[dif][0])
+  const topeTodos = Number(arg('topeTodos') ?? TOPES[dif][1])
+  const salArg = arg('sal')
+  const sal = salArg !== undefined ? Number(salArg) : null
   const rutaAjuste = arg('ajuste')
   const ajuste: Ajuste | null = rutaAjuste ? (JSON.parse(readFileSync(rutaAjuste, 'utf8')) as Ajuste) : null
   const trabajos: Trabajo[] = []
@@ -394,7 +465,10 @@ async function principal(): Promise<void> {
   for (const bot of bots) {
     if (!BOTS[bot]) throw new Error(`bot desconocido: ${bot}`)
     for (const yo of solo) for (const rival of IDS_PERSONAJES) for (let s = 0; s < semillas; s++) {
-      trabajos.push({ bot, yo, rival, dif, lado: (s % 2) as Lado, semilla: (base++ * 48271) % 2147483647 })
+      const b = base++
+      // Sin --sal, las semillas de siempre; con --sal, un hash del contador y de la sal.
+      const semilla = sal === null ? (b * 48271) % 2147483647 : 1 + (mezcla32(mezcla32(b + 0x1b873593) ^ mezcla32(Math.imul(sal, 0x9e3779b1) + 47)) % 2147483646)
+      trabajos.push({ bot, yo, rival, dif, lado: (s % 2) as Lado, semilla })
     }
   }
   const lotes: Trabajo[][] = Array.from({ length: hilos }, () => [])
@@ -421,11 +495,14 @@ async function principal(): Promise<void> {
   }
   const seg = (performance.now() - t0) / 1000
   const nom = (id: IdPersonaje) => PERSONAJES[id].nombre
-  console.log(`# Bots contra la CPU ${dif}: ${trabajos.length} partidas en ${seg.toFixed(0)} s (${semillas} por luchador, bot y rival; reacción ${REACCION} ticks)`)
+  console.log(
+    `# Bots contra la CPU ${dif}: ${trabajos.length} partidas en ${seg.toFixed(0)} s (${semillas} por luchador, bot y rival; reacción ${REACCION} ticks; semillas ${sal === null ? 'de siempre' : `nuevas, sal ${sal}`})`,
+  )
   console.log()
   console.log(`| bot | ${solo.map(nom).join(' | ')} | todos | por tiempo |`)
   console.log(`|---|${solo.map(() => '---:').join('|')}|---:|---:|`)
   const marcas: string[] = []
+  const fallas: string[] = []
   for (const bot of bots) {
     let n = 0
     let g = 0
@@ -446,15 +523,23 @@ async function principal(): Promise<void> {
       n += nn
       g += gg
       const v = (100 * gg) / Math.max(1, nn)
+      if (v > tope) fallas.push(`${bot} con ${nom(yo)}: ${v.toFixed(1)} % (${gg}/${nn}; tope ${tope})`)
       return `${v.toFixed(0)}${v > tope ? ' (!)' : ''}`
     })
-    console.log(`| ${bot} | ${celdas.join(' | ')} | ${((100 * g) / Math.max(1, n)).toFixed(1)} | ${((100 * tiempo) / Math.max(1, rounds)).toFixed(1)} % |`)
+    const vt = (100 * g) / Math.max(1, n)
+    if (vt > topeTodos) fallas.push(`${bot} con todos: ${vt.toFixed(1)} % (tope ${topeTodos})`)
+    console.log(`| ${bot} | ${celdas.join(' | ')} | ${vt.toFixed(1)}${vt > topeTodos ? ' (!)' : ''} | ${((100 * tiempo) / Math.max(1, rounds)).toFixed(1)} % |`)
   }
   console.log()
   console.log(marcas.length ? `Cruces casi seguros (≥ 85 %, muestra chica):\n${marcas.map((m) => `- ${m}`).join('\n')}` : 'Ningún cruce casi seguro (≥ 85 %).')
-  if (ac.noTerminan) console.log(`\n${ac.noTerminan} partidas no terminaron`)
+  if (ac.noTerminan) {
+    console.log(`\n${ac.noTerminan} partidas no terminaron`)
+    fallas.push(`${ac.noTerminan} partidas no terminaron`)
+  }
   const rutaJson = arg('json')
   if (rutaJson) writeFileSync(rutaJson, JSON.stringify(ac))
+  console.log(fallas.length ? `\nFALLAS (${fallas.length}; celda > ${tope} %, todos > ${topeTodos} %):\n${fallas.map((f) => `- ${f}`).join('\n')}` : `\nOK: ninguna celda pasa de ${tope} % ni ningún bot de ${topeTodos} %.`)
+  if (fallas.length) process.exitCode = 1
 }
 
 if (isMainThread && process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {

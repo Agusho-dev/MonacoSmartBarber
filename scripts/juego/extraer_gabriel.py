@@ -65,7 +65,10 @@ polígono [[x,y],...]):
                                  el fondo (sombras pintadas bajo las zapatillas)
         "humo": {"zona", "lumMin", "lumMax", "satMax", "pasos"}  pela del borde lo gris claro
         "pegados": px            sólo las manchas a menos de px de la principal (pies del vecino)
-        "excluirFinal", "cerrar": radio, "rellenar": N px, "anclaZona": [formas] (apoyo X)
+        "excluirFinal", "incluirFinal" (se agrega tal cual DESPUÉS de quitarColor, sombra y humo:
+                                 un tramo del cuerpo teñido por el efecto de al lado),
+        "cerrar": radio, "rellenar": N px, "anclaZona": [formas] (apoyo X),
+        "apoyoX": {"i": x} (apoyo X a mano en px de la hoja: los pies fijos en un ciclo)
       "injerto": {"donante": [anim, i], "escala": s, "cuadros": {"i": {"corte", "cabeza", "dx"}}}
                                  completa un primer plano cortado por el panel con las piernas
                                  de otro cuadro (Guillermo, especial 1)
@@ -478,6 +481,11 @@ def limpiar_cuadro(hoja, anim, i, region, M, m):
     exc2 = por_cuadro(anim, 'excluirFinal', i)
     if exc2:
         m = m & ~rasterizar(exc2, org, tam)
+    inc2 = por_cuadro(anim, 'incluirFinal', i)
+    if inc2:
+        # formas que se agregan al FINAL, después de quitarColor, sombra y humo: un tramo oscuro del
+        # cuerpo teñido por el efecto de al lado (la muñeca entre el brazo y la lata del graffiti)
+        m = m | rasterizar(inc2, org, tam)
     cerrar = por_cuadro(anim, 'cerrar', i)
     if cerrar:
         r = int(cerrar)
@@ -569,6 +577,14 @@ def extraer_anim(hoja, nombre, anim, revision=None, extraidos=None):
                 if opts.get('espejo'):
                     ax = c['img'].width - ax
                 c['ax'] = round(float(ax), 1)
+        apoyo = por_cuadro(anim, 'apoyoX', i)
+        if apoyo is not None:
+            # apoyo X a mano, en px de la hoja: en un ciclo cuyo torso se balancea, que los pies no
+            # patinen (el apoyo «torso» los corría 10-18 u del mundo entre cuadros de «quieto»)
+            ax = float(apoyo) - c['origen'][0]
+            if opts.get('espejo'):
+                ax = c['img'].width - ax
+            c['ax'] = round(ax, 1)
         # máscara blanda del modelo (para el retrato: bordes suaves al agrandar)
         c['mascara'] = m
         c['region'] = region

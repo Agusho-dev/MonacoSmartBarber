@@ -14,7 +14,10 @@
  * cuando el dedo se aleja más de `CORREA` radios. Las direcciones salen por ángulo
  * (`leerStick`, stick.ts): arriba incluye las diagonales y mantenerla vuelve a saltar (lo
  * resuelve el motor). Esquiva: el botón ESQUIVA, dos empujones rápidos al mismo costado o
- * dos toques quietos en el joystick (hacia atrás).
+ * dos toques quietos en el joystick (hacia atrás). Un pulgar que ya estaba apoyado cuando
+ * arranca la pelea (sobre la cortina, el VS o la carga) toma el stick con su primer movimiento,
+ * sin levantarlo; para que eso pase, esas capas van con `touch-action: none` (juego.css): con un
+ * paneo empezado, Chrome no entrega más toques hasta levantar todos los dedos.
  *
  * Elementos que busca dentro de `raiz`:
  *   [data-zona="joystick"]  con  [data-joy="base"] > [data-joy="perilla"]
@@ -161,43 +164,63 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
     reposar()
   }
 
+  /**
+   * El dedo `e` toma el joystick. `adoptado`: no se apoyó acá sino que ya venía apoyado (ver el
+   * pointermove): no cuenta como toque quieto ni dispara la esquiva del doble toque.
+   */
+  const tomarJoystick = (zona: HTMLElement, e: PointerEvent, adoptado: boolean) => {
+    try {
+      zona.setPointerCapture(e.pointerId)
+    } catch {
+      // Puntero que ya no existe: sigue igual sin captura.
+    }
+    const ahora = performance.now()
+    joyId = e.pointerId
+    const r = zona.getBoundingClientRect()
+    rect = { left: r.left, top: r.top }
+    R = (base?.offsetWidth || 112) / 2
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    // La base aparece justo donde está el pulgar: así arranca sin ninguna dirección.
+    bx = x
+    by = y
+    dx = 0
+    dy = 0
+    inicio = ahora
+    xIni = x
+    yIni = y
+    seMovio = adoptado
+    zona.dataset.activo = '1'
+    // Doble toque quieto = esquiva hacia atrás. Se dispara al apoyar, sin esperar.
+    if (!adoptado && ahora - ultimoToqueQuieto < VENTANA_DOBLE_TOQUE) {
+      ultimoToqueQuieto = -Infinity
+      esquivar()
+    }
+    pintar()
+  }
+
   if (zonaJoy) {
     escuchar(zonaJoy, 'pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       if (joyId !== null || !op.activo()) return
       e.preventDefault()
-      try {
-        zonaJoy.setPointerCapture(e.pointerId)
-      } catch {
-        // Puntero que ya no existe: sigue igual sin captura.
-      }
-      const ahora = performance.now()
-      joyId = e.pointerId
-      const r = zonaJoy.getBoundingClientRect()
-      rect = { left: r.left, top: r.top }
-      R = (base?.offsetWidth || 112) / 2
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      // La base aparece justo donde apoyás el pulgar: así arranca sin ninguna dirección.
-      bx = x
-      by = y
-      dx = 0
-      dy = 0
-      inicio = ahora
-      xIni = x
-      yIni = y
-      seMovio = false
-      zonaJoy.dataset.activo = '1'
-      // Doble toque quieto = esquiva hacia atrás. Se dispara al apoyar, sin esperar.
-      if (ahora - ultimoToqueQuieto < VENTANA_DOBLE_TOQUE) {
-        ultimoToqueQuieto = -Infinity
-        esquivar()
-      }
-      pintar()
+      tomarJoystick(zonaJoy, e, false)
     })
 
     escuchar(zonaJoy, 'pointermove', (e) => {
-      if (e.pointerId !== joyId) return
+      if (e.pointerId !== joyId) {
+        // Un pulgar que ya estaba apoyado cuando arrancó la pelea —sobre la cortina, el VS o la
+        // carga— llega acá ya apretado y sin pointerdown: el elemento donde se apoyó desapareció
+        // y Chrome le busca destino de nuevo (o el stick se soltó con una pausa y el pulgar
+        // siguió ahí). Se adopta en el punto donde está, así maneja el stick sin levantarlo.
+        // Sólo un dedo (touch) en contacto y con el stick libre: un dedo de los botones o de una
+        // carta nunca llega acá (los captura su zona), así que el multitouch sigue igual.
+        if (joyId === null && e.pointerType === 'touch' && (e.buttons & 1) === 1 && op.activo()) {
+          e.preventDefault()
+          tomarJoystick(zonaJoy, e, true)
+        }
+        return
+      }
       e.preventDefault()
       const ahora = performance.now()
       // Los movimientos agrupados del cuadro, en orden: un empujón rápido no se pierde.

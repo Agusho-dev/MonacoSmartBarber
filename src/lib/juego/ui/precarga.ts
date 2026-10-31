@@ -8,8 +8,12 @@
  * por atlas: tocar las 13 caras eran 15 MB de datos del celular). Un caché chico por
  * combinación (personajes + arena): la revancha no vuelve a bajar nada, y los recursos que no
  * se usan se sueltan (un atlas decodificado pesa varios MB en un celular).
+ *
+ * Mientras una combinación carga, la canción del juego no compite por la red (`retenerPista`,
+ * audio/pista.ts): en 3G le sumaba ≈ 5 s a la pantalla de carga.
  */
 import { useEffect, useSyncExternalStore } from 'react'
+import { retenerPista } from '../audio/pista'
 import { cargarRecursos } from '../render'
 import type { IdArena, IdPersonaje, RecursosJuego } from '../tipos'
 
@@ -80,14 +84,17 @@ export function precargar(jugador: IdPersonaje, rival: IdPersonaje, arena: IdAre
     avisar(e)
   }
   const personajes = [...new Set<IdPersonaje>([jugador, rival])]
+  const soltarRed = retenerPista()
   Promise.resolve()
     .then(() => cargarRecursos(personajes, arena, alProgresar))
     .then(
       (recursos) => {
+        soltarRed()
         e.estado = { estado: 'listo', progreso: 1, recursos }
         avisar(e)
       },
       (error: unknown) => {
+        soltarRed()
         console.error('[juego] no se pudieron cargar los recursos', error)
         e.estado = { estado: 'error', progreso: 0, recursos: null }
         avisar(e)

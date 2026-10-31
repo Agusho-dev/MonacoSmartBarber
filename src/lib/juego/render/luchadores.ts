@@ -173,7 +173,7 @@ export interface FuenteRapado {
 
 /**
  * El atlas «pelado» del remate ¡AL CERO!: el mismo atlas con los cuadros de `danio` y `ko`
- * cambiados por los de rapado.png (mismo w, h, ax, ay y orden: scripts/juego/generar_rapado.py).
+ * cambiados por los de la hoja de rapado.json (mismo w, h, ax, ay y orden: scripts/juego/generar_rapado.py).
  * Las dos imágenes van a un lienzo (atlas arriba, rapados abajo) y el resto del render (tintes,
  * reflejo, estela) no se entera. Una animación que no encaja cuadro por cuadro queda con pelo.
  */

@@ -13,6 +13,12 @@ import { IconoMaquina } from './iconos'
 import { LogoCorteFinal } from './logo-corte-final'
 
 const CADA_TIP_MS = 4200
+/**
+ * Desde cuándo se ofrece «Volver» mientras carga: con una red lenta (3G, una antena que se traba)
+ * la carga puede tardar mucho, y nadie tiene que quedar atrapado sin poder volver a elegir. Si se
+ * cuelga del todo, cada archivo se corta solo (render/recursos.ts) y aparece el error.
+ */
+const VOLVER_DESDE_MS = 6000
 
 /** Para que cada carga siga con consejos generales distintos. */
 let siguienteTip = 0
@@ -36,6 +42,7 @@ export function PantallaCarga({
     return [...consejosDePelea(PERSONAJES[eleccion.jugador], PERSONAJES[eleccion.rival]), ...generales]
   })
   const [tip, setTip] = useState(0)
+  const [puedeVolver, setPuedeVolver] = useState(false)
   const listo = useEffectEvent(onListo)
   const recursos = precarga.estado === 'listo' ? precarga.recursos : null
   const fallo = precarga.estado === 'error'
@@ -51,6 +58,11 @@ export function PantallaCarga({
     }, CADA_TIP_MS)
     return () => window.clearInterval(t)
   }, [consejos.length])
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setPuedeVolver(true), VOLVER_DESDE_MS)
+    return () => window.clearTimeout(t)
+  }, [])
 
   const progreso = Math.round(precarga.progreso * 100)
   const llenos = precarga.progreso * CARGA_MAX
@@ -101,6 +113,12 @@ export function PantallaCarga({
             <Lightbulb aria-hidden="true" />
             <span>{consejos[tip]}</span>
           </p>
+          {puedeVolver && (
+            <button type="button" className="cf-btn cf-btn--sec cf-carga-pantalla__volver" onClick={onVolver}>
+              <ChevronLeft aria-hidden="true" />
+              <span>Volver</span>
+            </button>
+          )}
         </>
       )}
     </section>

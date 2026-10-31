@@ -117,14 +117,25 @@
       ],
       "usar": [0, 2, 3, 4, 2],
       "impactos": [3],
-      "limite": {"4": [[[330, 352], [402, 352], [402, 440], [422, 440], [422, 473], [330, 473]]]},
-      "excluir": {"3": [[240, 448, 251, 473], [338, 445, 349, 473]], "4": [[330, 368, 348, 400]]}
+      "_nota": "revisión 31/oct: en el impacto (cuadro 4 de la hoja) el destello dorado quedaba pegado alrededor del puño y el límite recto en x=402 le cortaba los nudillos: el límite llega a x=408 a la altura del puño y se sacan el destello de arriba y de abajo del puño y lo blanco y amarillo entre los nudillos (el render dibuja su propio destello)",
+      "limite": {"4": [[[330, 352], [402, 352], [402, 380], [408, 380], [408, 392], [402, 392], [402, 440], [422, 440], [422, 473], [330, 473]]]},
+      "excluir": {
+        "3": [[240, 448, 251, 473], [338, 445, 349, 473]],
+        "4": [[330, 368, 348, 400], [394, 352, 412, 380], [391, 392, 412, 405]]
+      },
+      "quitarColor": {
+        "4": [
+          {"zona": [396, 378, 412, 393], "lumMin": 215},
+          {"zona": [396, 378, 412, 393], "tono": [32, 70], "satMin": 0.3, "lumMin": 120}
+        ]
+      }
     },
     "patada": {
       "inferencia": "ancho",
       "cajas": [[446, 352, 515, 473], [515, 352, 612, 473], [612, 352, 716, 473], [712, 352, 822, 473]],
       "usar": [0, 1, 2, 3, 0],
       "impactos": [3],
+      "_nota": "revisión 31/oct: en el impacto (cuadro 3) el resplandor oscuro y los rayos del destello quedaban pegados arriba de la pierna estirada como pelos: se saca todo lo que está arriba de la canilla (y < 376, x >= 764)",
       "limite": {"3": [[716, 352, 796, 473]]},
       "sombra": {"1": {"zona": [515, 422, 562, 473], "lumMax": 45, "recuperar": 1}},
       "quitarColor": {
@@ -133,7 +144,7 @@
           {"zona": [780, 355, 797, 402], "tono": [32, 75], "satMin": 0.3, "lumMin": 120}
         ]
       },
-      "excluir": {"1": [[515, 440, 525, 473]], "2": [[612, 352, 622, 400]]}
+      "excluir": {"1": [[515, 440, 525, 473]], "2": [[612, 352, 622, 400]], "3": [[764, 352, 797, 376]]}
     },
     "combo": {
       "inferencia": "ancho",
@@ -182,7 +193,8 @@
       "region": [11, 511, 1525, 633],
       "inferenciaPorCuadro": {"2": "panel"},
       "usar": [0, 1, 3, 4, 5, 6, 7, 8],
-      "excluir": {"6": [[706, 563, 746, 606]]}
+      "_nota": "revisión 31/oct: en el 7 (especial1[6], impacto) un pedazo del remolino oscuro salía del cuerpo hacia la izquierda como un palito",
+      "excluir": {"6": [[706, 563, 746, 606]], "7": [[918, 599, 933, 608], [933, 603, 943, 608]]}
     },
     "especial2": {
       "inferencia": "ancho",
@@ -206,10 +218,16 @@
         "5": ["efectos"],
         "6": ["efectos", "restos"]
       },
+      "_nota": "revisión 31/oct: en el 5 quedaba pegado un pedazo de graffiti azul marino con agujeros en el hueco entre el torso, el brazo derecho y la pierna: se excluye ese hueco (con «restos» se iba también la campera, que en este cuadro es azul marino); en el 3 la muñeca, teñida por el graffiti, se iba con «restos» y la mano con la lata flotaba separada del brazo: «incluirFinal» la vuelve a poner",
       "region": [11, 671, 1525, 800],
       "inferenciaPorCuadro": {"5": "panel"},
       "agregar": {"2": [[326, 765, 354, 801]]},
-      "excluir": {"3": [[380, 708, 394, 730], [445, 674, 472, 684]], "6": [[1048, 705, 1060, 745], [925, 708, 945, 730]]}
+      "excluir": {
+        "3": [[380, 708, 394, 730], [445, 674, 472, 684]],
+        "5": [[[757, 744], [786, 744], [786, 767], [801, 767], [801, 786], [786, 786], [784, 783], [778, 783], [777, 776], [773, 769], [768, 764], [761, 758], [757, 753]]],
+        "6": [[1048, 705, 1060, 745], [925, 708, 945, 730]]
+      },
+      "incluirFinal": {"3": [[[438, 697], [442, 692], [446, 689], [449, 690], [449, 696], [445, 699], [441, 701]]]}
     },
     "danio": {
       "inferencia": "ancho&panel",

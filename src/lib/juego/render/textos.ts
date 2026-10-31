@@ -5,6 +5,14 @@
  * Cada texto se pinta UNA vez en un lienzo propio (degradé metálico, doble contorno, sombra,
  * itálica por sesgo) y en el cuadro sólo se dibuja ese lienzo escalado/rotado. Los lienzos se
  * reusan (pool) y se vuelven a pintar si cambia la resolución.
+ *
+ * Precalentado: el primer drawImage de un lienzo recién pintado es el que cuesta (el navegador
+ * rasteriza los contornos gruesos y el degradé: 40 ms con la CPU normal, 70–85 ms con un celular
+ * medio) y caía justo en el primer cuadro del «ROUND 1», del «¡A PELEAR!» o del «K.O.». Se
+ * pintan y se dibujan una vez antes, uno por cuadro y siempre sin el jugador en control: al
+ * arrancar (cortina, presentación, anuncios) lo de la primera vez y lo que sale jugando (los
+ * impactos, el combo, el TURBO, el remate del final); en el festejo de un round, el «ROUND N»
+ * que viene. Quedan afuera «¡TIEMPO!» y «PERFECTO» (casi nunca salen).
  */
 import type { Lado, Partida } from '../tipos'
 import type { Escena } from './escena'
@@ -132,6 +140,63 @@ const COMBO_NUM = estilo(66, ORO, '#4A2200', { familia: 'numeros', espaciado: 0 
 const COMBO_TXT = estilo(22, CROMO, '#0B0B0E', { espaciado: 0.12, sombra: 0.05 })
 
 let medidor: CanvasRenderingContext2D | null = null
+
+/** Un texto para precalentar: [clave del caché, texto, estilo, ancho máximo]. */
+type Previo = readonly [string, string, EstiloTexto, number]
+
+function previoAnuncio(clave: ClaveAnuncio, texto: string): Previo {
+  return [`anuncio:${clave}:${texto}`, texto, ANUNCIOS[clave].estilo, 900]
+}
+
+/**
+ * Lo que se precalienta al arrancar: lo que sale primero y lo que cae con el jugador en control
+ * (el «¡A PELEAR!», el combo, los impactos, el TURBO, el remate del final) y el «K.O.». Los
+ * «ROUND N» siguientes, en el festejo del round anterior (ver precalentar).
+ */
+function previosDeLaPelea(): Previo[] {
+  const impactos = (Object.keys(IMPACTOS) as ClaveImpacto[]).map((k): Previo => [k, IMPACTOS[k].texto, IMPACTOS[k].estilo, 0])
+  return [
+    previoAnuncio('round', 'ROUND 1'),
+    previoAnuncio('pelea', '¡A PELEAR!'),
+    ['combo:golpes', 'GOLPES', COMBO_TXT, 0],
+    ...impactos,
+    previoAnuncio('turbo', 'TURBO'),
+    previoAnuncio('dejalo', '¡DEJALO AL CERO!'),
+    previoAnuncio('alcero', '¡AL CERO!'),
+    previoAnuncio('ko', 'K.O.'),
+  ]
+}
+
+/** La primera familia de una pila («'Anton', 'Anton Fallback', Impact, …» → «'Anton'»). */
+function primeraFamilia(pila: string): string {
+  return pila.split(',')[0]?.trim() || pila
+}
+
+/**
+ * ¿Ya cargaron las fuentes de los textos? Precalentar con la de reserva dejaría el texto pintado
+ * con ésa toda la pelea. Sin la API (o si falla), se asume que sí.
+ */
+function fuentesListas(familias: { titulo: string; numeros: string }): boolean {
+  try {
+    const f = typeof document !== 'undefined' ? document.fonts : undefined
+    if (!f || typeof f.check !== 'function') return true
+    const listas = [familias.titulo, familias.numeros].map((x) => `40px ${primeraFamilia(x)}`)
+    if (listas.every((fuente) => f.check(fuente))) return true
+    for (const fuente of listas) void f.load(fuente).catch(() => undefined)
+    return false
+  } catch {
+    return true
+  }
+}
+
+/** Cuadros que se espera a las fuentes antes de dejar de precalentar (≈ 4 s). */
+const ESPERA_FUENTES_CUADROS = 240
+/**
+ * Después de un cambio de resolución se espera esto antes de precalentar: al montar la pelea el
+ * lienzo cambia de tamaño un par de veces en los primeros cuadros (la disposición, el
+ * ResizeObserver) y lo pintado a la escala anterior se tira.
+ */
+const QUIETO_MS = 250
 
 function ponerEspaciado(g: CanvasRenderingContext2D, px: number): void {
   if ('letterSpacing' in g) g.letterSpacing = `${px.toFixed(2)}px`
@@ -310,6 +375,13 @@ export class Textos {
     { n: null, total: 0, desde: -1e9 },
   ]
   numerosVisibles = true
+  /** Los textos que faltan precalentar (ver el encabezado). */
+  private previos: Previo[] = previosDeLaPelea()
+  private cuadrosSinFuentes = 0
+  /** E.ms del último cambio de resolución. */
+  private invalidadoMs = 0
+  /** El «ROUND N» del round que viene ya precalentado. */
+  private proximoRound = ''
 
   constructor(E: Escena) {
     this.E = E
@@ -345,9 +417,53 @@ export class Textos {
     return t
   }
 
-  /** Tras redimensionar: los pintados se rehacen a la nueva resolución la próxima vez. */
+  /** Tras redimensionar: los pintados se rehacen a la nueva resolución (y se vuelven a precalentar). */
   invalidar(): void {
     this.escalaCache = 0
+    this.previos = previosDeLaPelea()
+    this.cuadrosSinFuentes = 0
+    this.invalidadoMs = this.E.ms
+    this.proximoRound = ''
+  }
+
+  /**
+   * Precalienta UN texto (ver el encabezado): lo pinta en su lienzo (el mismo caché que usa el
+   * cuadro) y lo dibuja una vez en el lienzo principal. El render lo llama ANTES de pintar el
+   * cuadro (que lo tapa entero) y nunca en la fase 'pelea'. Con las fuentes cargadas.
+   */
+  precalentar(p: Partida): void {
+    if (this.E.ms - this.invalidadoMs < QUIETO_MS) return
+    const previo = this.previos.length > 0 ? this.previos[0] : this.previoDelProximoRound(p)
+    if (!previo) return
+    if (!fuentesListas(this.E.familias)) {
+      if (++this.cuadrosSinFuentes > ESPERA_FUENTES_CUADROS) {
+        this.previos.length = 0
+        this.proximoRound = 'sin fuentes'
+      }
+      return
+    }
+    if (this.previos.length > 0) this.previos.shift()
+    else this.proximoRound = previo[0]
+    const [clave, texto, est, anchoMax] = previo
+    const t = this.cacheado(clave, texto, est, anchoMax)
+    const ctx = this.E.ctx
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.globalAlpha = 1
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.drawImage(t.lienzo, 0, 0)
+  }
+
+  /**
+   * En el festejo de un round que no definió la pelea (no en el K.O.: su primer cuadro es el del
+   * «K.O.»), el anuncio del que viene («ROUND 2» o «ROUND FINAL», igual que lo arma el motor).
+   * null si no hay o ya está.
+   */
+  private previoDelProximoRound(p: Partida): Previo | null {
+    if (p.fase !== 'entre_rounds' || p.ganadorPartida !== null) return null
+    const r = p.config.rondasParaGanar - 1
+    const final = p.rondasGanadas[0] === r && p.rondasGanadas[1] === r
+    const previo = final ? previoAnuncio('round_final', 'ROUND FINAL') : previoAnuncio('round', `ROUND ${p.round + 1}`)
+    return previo[0] === this.proximoRound ? null : previo
   }
 
   vaciar(): void {

@@ -12,6 +12,12 @@
  *
  * Sin `window` al importar; sin fetch o sin WebAudio, simplemente no hay pista (la música
  * vuelve a los temas sintetizados).
+ *
+ * Cuándo se baja: recién con el primer gesto (index.ts → desbloquear) y nunca contra los atlas de
+ * una pelea. Mientras una pelea carga sus recursos (ui/precarga.ts → `retenerPista`), la canción
+ * espera; si ya se estaba bajando y no llegó a la mitad, se corta y se vuelve a pedir cuando la
+ * pelea terminó de cargar (en 3G le sumaba ≈ 5 s a la carga). Ese rato lo cubre el tema
+ * sintetizado de reserva de musica.ts.
  */
 
 export const RUTA_PISTA = '/juego/audio/neon-dash.mp3'
@@ -20,7 +26,7 @@ export const BUCLE_INICIO = 0.13871
 /** …hasta acá (67,05 s exactos de música entre uno y otro). */
 export const BUCLE_FIN = 67.18846
 
-export type EstadoPista = 'sin-pedir' | 'bajando' | 'decodificando' | 'lista' | 'fallo'
+export type EstadoPista = 'sin-pedir' | 'en-espera' | 'bajando' | 'decodificando' | 'lista' | 'fallo'
 
 interface Carga {
   bytes: Promise<ArrayBuffer | null> | null
@@ -32,12 +38,87 @@ interface Carga {
 }
 
 const MAX_INTENTOS = 3
+/**
+ * Si una pelea empieza a cargar con la canción a medio bajar: por debajo de esta fracción se corta
+ * (y se vuelve a pedir después); por encima se deja terminar, porque cortarla tira lo ya bajado.
+ */
+const TERMINAR_DESDE = 0.5
 
 /** Una sola carga por página: si el audio se destruye y se vuelve a crear, no se baja de nuevo. */
 const carga: Carga = { bytes: null, buffer: null, decodificando: null, estado: 'sin-pedir', intentos: 0 }
 
+/** Cargas de pelea en curso: mientras haya alguna, la canción no pide nada. */
+let retenciones = 0
+/** Los que esperan a que la red quede libre. */
+let alLiberar: Array<() => void> = []
+/** El pedido de la canción en vuelo (para cederle la red a una pelea que empieza a cargar). */
+let enVuelo: { control: AbortController; recibido: number; total: number; cedido: boolean } | null = null
+
 export function estadoPista(): EstadoPista {
   return carga.estado
+}
+
+/**
+ * Una pelea empieza a cargar sus recursos: la canción le deja la red hasta que se llame a la
+ * función que devuelve (una vez, al terminar bien o mal). Ver el encabezado.
+ */
+export function retenerPista(): () => void {
+  retenciones++
+  const v = enVuelo
+  if (v && !v.cedido && (v.total <= 0 || v.recibido / v.total < TERMINAR_DESDE)) {
+    v.cedido = true
+    v.control.abort()
+  }
+  let suelta = false
+  return () => {
+    if (suelta) return
+    suelta = true
+    retenciones = Math.max(0, retenciones - 1)
+    if (retenciones > 0) return
+    const esperando = alLiberar
+    alLiberar = []
+    for (const f of esperando) f()
+  }
+}
+
+function redLibre(): Promise<void> {
+  if (retenciones === 0) return Promise.resolve()
+  return new Promise((listo) => alLiberar.push(listo))
+}
+
+/** Los bytes de la canción, cuando la red esté libre (null si falló). */
+async function traer(): Promise<ArrayBuffer | null> {
+  for (;;) {
+    if (retenciones > 0) carga.estado = 'en-espera'
+    await redLibre()
+    carga.estado = 'bajando'
+    const v = { control: new AbortController(), recibido: 0, total: 0, cedido: false }
+    enVuelo = v
+    try {
+      // Prioridad baja (Chrome): que no le gane a los sprites ni a las arenas.
+      const r = await fetch(RUTA_PISTA, { priority: 'low', signal: v.control.signal } as RequestInit)
+      if (!r.ok) return null
+      v.total = Number(r.headers.get('content-length')) || 0
+      if (!r.body) return await r.arrayBuffer()
+      const lector = r.body.getReader()
+      const partes: BlobPart[] = []
+      for (;;) {
+        const { done, value } = await lector.read()
+        if (done) break
+        if (value) {
+          partes.push(value)
+          v.recibido += value.byteLength
+        }
+      }
+      return await new Blob(partes).arrayBuffer()
+    } catch {
+      // Le cedió la red a una pelea que empezó a cargar: se vuelve a pedir cuando termine.
+      if (v.cedido) continue
+      return null
+    } finally {
+      if (enVuelo === v) enVuelo = null
+    }
+  }
 }
 
 /** Empieza a bajar el archivo (una sola vez). No necesita contexto de audio. */
@@ -50,16 +131,8 @@ export function bajarPista(): void {
   }
   if (carga.bytes || carga.intentos >= MAX_INTENTOS) return
   carga.intentos++
-  carga.estado = 'bajando'
-  let opciones: RequestInit = {}
-  try {
-    // Prioridad baja (Chrome): que no le gane a los sprites ni a las arenas.
-    opciones = { priority: 'low' } as RequestInit
-  } catch {
-    opciones = {}
-  }
-  const pedido = fetch(RUTA_PISTA, opciones)
-    .then((r) => (r.ok ? r.arrayBuffer() : null))
+  carga.estado = retenciones > 0 ? 'en-espera' : 'bajando'
+  const pedido = traer()
     .catch(() => null)
     .then((b) => {
       if (!b || b.byteLength === 0) {

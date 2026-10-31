@@ -2,7 +2,7 @@
 
 import '@/app/juego/sala.css'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { obtenerEstadisticasPersonajes } from '@/lib/actions/juego'
+import { guardarPartidaJuego, obtenerEstadisticasPersonajes } from '@/lib/actions/juego'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
 import { Duelo, type EstadoDuelo } from '@/lib/juego/online/duelo'
 import { sanearNombre, versionJuego, type EstadoJugador } from '@/lib/juego/online/protocolo'
@@ -10,6 +10,7 @@ import { marcadorCon, registrarResultadoOnline, useRegistroOnline } from '@/lib/
 import type { Emparejamiento } from '@/lib/juego/online/sala'
 import { textoCierre } from '@/lib/juego/online/textos'
 import { abrirTransportePelea } from '@/lib/juego/online/transporte'
+import { reintentarPendientes } from '@/lib/juego/pendientes'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { createClient } from '@/lib/supabase/client'
 import type {
@@ -245,6 +246,13 @@ export function JuegoRaiz({
     }
   }
   const turno = useTurno(datos.token, alAvisoTurno)
+
+  // Partidas que el servidor frenó por el tope (src/lib/juego/pendientes.ts): se reintentan al
+  // volver al inicio y al abrir la página. Sin cola o con la espera vigente no hace nada (ni
+  // llama al servidor), y nunca manda dos veces: si hay una vuelta en marcha, devuelve ésa.
+  useEffect(() => {
+    if (pantalla === 'inicio') void reintentarPendientes(guardarPartidaJuego)
+  }, [pantalla])
 
   // Mientras el juego está montado: sin rebote de scroll ni pull-to-refresh ni zoom con gesto.
   useEffect(() => {
@@ -686,8 +694,13 @@ export function JuegoRaiz({
               setVerTutorial(true)
             }}
             onSonido={() => {
+              // Primero la preferencia nueva y después destrabar: si este es el primer toque y es
+              // para silenciar, el contexto nace ya con la sesión de iOS en 'ambient' (sin pasar por
+              // 'playback', que cortaría la música de otra app). El botón lleva data-audio-propio.
+              const sonido = !prefs.sonido
+              audio.configurar(sonido, prefs.musica)
+              guardarPreferencias({ sonido })
               audio.desbloquear()
-              guardarPreferencias({ sonido: !prefs.sonido })
             }}
           />
         )}

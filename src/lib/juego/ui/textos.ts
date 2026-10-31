@@ -63,15 +63,15 @@ const CONTRA_ESPECIAL: Partial<Record<IconoEspecial, string>> = {
   spray: 'La Fijación de {n} te congela: no te quedes adelante del spray.',
   bombo: 'El bombo de {n} rueda por el piso: saltalo, o te deja aturdido.',
   navaja: 'El Navajazo de {n} es corto pero siempre crítico: cuando tiene carga, no te quedes al lado.',
-  cura: '{n} se cura tomando su bebida: pegale mientras toma y se le corta.',
+  cura: '{n} se cura tomando su bebida: cortásela con un golpe fuerte o un especial; los golpes leves no alcanzan.',
   guante: 'El Modo Boxeador de {n} rompe la guardia: esquivalo en vez de cubrirte.',
-  moto: 'La moto de {n} cruza toda la pantalla y te tira: saltala o esquivala.',
+  moto: 'La moto de {n} cruza toda la pantalla y te tira: cubrite y castigala cuando frena.',
   pistola: 'La pistola de {n} tira tres balas seguidas: cubrite o pasalas por arriba.',
-  break: 'El Break Dance de {n} no se puede cortar al principio: cubrite y castigá al final.',
-  graffiti: 'El graffiti de {n} tarda un instante en estallar: salí del área cuando lo pinta.',
+  break: 'El Break Dance de {n} no se puede cortar al principio: saltalo por encima, o esquivalo para atrás si estás lejos.',
+  graffiti: 'El graffiti de {n} tarda un instante en estallar: salí del área o cubrite (te come casi toda la guardia).',
   trago: 'El trago de {n} te marea: mareado no te podés cubrir.',
   botella: 'Las botellas de {n} caen a distintas distancias: movete y buscá el hueco.',
-  baile: 'Mientras baila, {n} atraviesa los proyectiles: cubrite del remate final.',
+  baile: 'Mientras baila, {n} atraviesa los proyectiles: cubrite cuando se te acerca bailando.',
   grito: 'La onda del grito de {n} se pasa con la ESQUIVA.',
   gorro: 'El gorro de {n} va y vuelve: te puede pegar a la ida y a la vuelta.',
   dragon: 'La Patada del Dragón de {n} cruza la pantalla y te tira: cubrite o esquivala.',
@@ -121,9 +121,14 @@ export function nombreCortoEspecial(nombre: string): string {
   return partes.reduce((a, b) => (b.length > a.length ? b : a), partes[0])
 }
 
+/**
+ * 0–100, redondeado. Topeado en 100 por las dudas: la «Precisión» del resultado (CPU y online)
+ * daba más de 100 con los multigolpes hasta que el motor contó un intento por golpe posible
+ * (30/oct); simular.mts chequea que los aciertos no pasen de los intentos.
+ */
 export function porcentaje(parte: number, total: number): number {
   if (!total || !Number.isFinite(parte) || !Number.isFinite(total)) return 0
-  return Math.round((parte / total) * 100)
+  return Math.min(100, Math.round((parte / total) * 100))
 }
 
 /** «hace 5 min», «ayer», «12 oct». `ahora` viene de afuera: nada de Date.now() en el render. */

@@ -48,6 +48,13 @@ const VACIAS: readonly [EntradaJugador, EntradaJugador] = [ENTRADA_VACIA, ENTRAD
 
 type Calidad = OpcionesRender['calidad']
 const MAS_BAJA: Record<Calidad, Calidad | null> = { alta: 'media', media: 'baja', baja: null }
+const ORDEN_CALIDAD: Record<Calidad, number> = { alta: 2, media: 1, baja: 0 }
+
+/**
+ * La calidad más baja a la que tuvo que bajar una pelea en esta visita: la siguiente (revancha,
+ * otra pelea) arranca ahí y no vuelve a pasar 5 s trabada antes de bajar otra vez.
+ */
+let calidadRecordada: Calidad | null = null
 
 /**
  * Una pelea online contra otro jugador de la sala (lockstep, ver src/lib/juego/online). El
@@ -73,14 +80,20 @@ function metaDe(recursos: RecursosJuego, id: IdPersonaje): MetaAnimaciones {
   return metaPorDefecto()
 }
 
-/** Una primera estimación; si igual no llega a ~40 fps, el loop avisa y se baja un escalón. */
+/**
+ * Una primera estimación; si igual no llega a ~40 fps, el loop avisa y se baja un escalón (hasta
+ * dos). Si una pelea anterior de esta visita ya tuvo que bajar, se arranca desde ahí.
+ */
 function calidadInicial(): Calidad {
   if (typeof navigator === 'undefined') return 'alta'
   const nav = navigator as Navigator & { deviceMemory?: number }
-  if (/iPhone|iPad|iPod/.test(nav.userAgent)) return 'alta'
-  const nucleos = nav.hardwareConcurrency || 4
-  const memoria = nav.deviceMemory ?? 4
-  return nucleos <= 4 || memoria <= 2 ? 'media' : 'alta'
+  let c: Calidad = 'alta'
+  if (!/iPhone|iPad|iPod/.test(nav.userAgent)) {
+    const nucleos = nav.hardwareConcurrency || 4
+    const memoria = nav.deviceMemory ?? 4
+    c = nucleos <= 4 || memoria <= 2 ? 'media' : 'alta'
+  }
+  return calidadRecordada && ORDEN_CALIDAD[calidadRecordada] < ORDEN_CALIDAD[c] ? calidadRecordada : c
 }
 
 function leerInsets(sonda: HTMLElement | null): Insets {
@@ -400,6 +413,7 @@ export function PantallaPelea({
           render.destruir()
           render = crearRenderizador(canvas, recursos, opcionesRender(nueva))
           calidad = nueva
+          calidadRecordada = nueva
           loop.cambiarRenderizador(render)
           medir()
         } catch (e) {

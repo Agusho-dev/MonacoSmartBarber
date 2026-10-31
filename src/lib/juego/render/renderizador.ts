@@ -44,6 +44,7 @@ import {
 } from './luchadores'
 import {
   actualizarSuperFlash,
+  apagarSuperFlash,
   crearDestello,
   crearEscenario,
   crearSuperFlash,
@@ -69,7 +70,7 @@ import { acotar, azar, mezcla, pasoSuave } from './util'
 const LIMITE_PARTICULAS: Record<Calidad, number> = { alta: 250, media: 150, baja: 70 }
 const DENSIDAD: Record<Calidad, number> = { alta: 1, media: 0.6, baja: 0.35 }
 
-/** La gorra que le vuela al que recibe el ¡AL CERO! (Chipi): un sprite suelto de rapado.png. */
+/** La gorra que le vuela al que recibe el ¡AL CERO! (Chipi): un sprite suelto de su hoja de rapado. */
 interface Gorra {
   activa: boolean
   quieta: boolean
@@ -318,7 +319,7 @@ export function crearRenderizadorImpl(
     E.tajos.vaciar()
     rastros.vaciar()
     textos.vaciar()
-    sf.activo = false
+    apagarSuperFlash(sf)
     destello.edad = destello.dur
     cam.zoom = 1.12
     cam.centroX = (p.luchadores[0].x + p.luchadores[1].x) / 2
@@ -453,7 +454,7 @@ export function crearRenderizadorImpl(
     dibujarParticulas(E, 1)
     E.tajos.dibujar(E)
     textos.dibujarMundo()
-    if (sf.activo) dibujarSuperFlashMundo(E, sf, p.luchadores[sf.lado], vis[sf.lado])
+    if (sf.activo) dibujarSuperFlashMundo(E, sf, p.luchadores, vis)
     dibujarParticulas(E, 2)
     dibujarVineta(E, escenario, p.turbo)
     dibujarSuperFlashBanda(E, sf, cam.altoVista)
@@ -475,6 +476,10 @@ export function crearRenderizadorImpl(
       procesarEventos(M, eventos)
       actualizar(M, p, dt)
       moverCamara(M, p, dt / 1000)
+      // Mientras no se juega (cortina, presentación, anuncios, K.O., entre rounds): un texto por
+      // cuadro queda pintado y rasterizado antes de que haga falta (textos.ts). Antes de pintar:
+      // el cuadro lo tapa entero.
+      if (p.fase !== 'pelea') textos.precalentar(p)
       pintar(p)
     } catch (e) {
       // un error de dibujo no puede cortar el loop del juego: se avisa una vez y se sigue

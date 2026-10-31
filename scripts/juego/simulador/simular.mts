@@ -306,6 +306,11 @@ function jugar(
     const suma = pu.partes.reduce((s, x) => s + x.puntos, 0)
     if (suma !== pu.total) violaciones.push(`puntaje: partes ${suma} ≠ total ${pu.total}`)
   }
+  // «Precisión» del resultado: nunca más aciertos que intentos (los multigolpes y el agarre la
+  // llevaban por encima de 100 % hasta el 30/oct).
+  for (const st of p.estadisticas) {
+    if (st.golpesAcertados > st.golpesIntentados) violaciones.push(`precisión: ${st.golpesAcertados} aciertos de ${st.golpesIntentados} intentos`)
+  }
   return {
     ganador: p.ganadorPartida,
     ticks: p.tick,

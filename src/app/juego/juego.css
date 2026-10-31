@@ -348,6 +348,15 @@ html.cf-html body {
     0 6px 18px rgba(0, 0, 0, 0.5);
 }
 
+/* El rótulo va sobre los retratos de la portada: con un barbero de zapatillas blancas (Lucas) el
+   gris se perdía. Un halo oscuro lo despega de cualquier fondo. */
+.cf-boton-icono span {
+  text-shadow:
+    0 1px 2px #000,
+    0 0 6px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(0, 0, 0, 0.75);
+}
+
 .cf-boton-icono:active {
   transform: scale(0.92);
 }
@@ -454,6 +463,11 @@ html.cf-html body {
 
 /* ─── Cortina entre pantallas ─────────────────────────────────────────────── */
 
+/* touch-action: none en la cortina, el VS y la carga: son lo que queda debajo del pulgar cuando
+   arranca la pelea. Con el `manipulation` heredado de .cf-raiz, un pulgar apoyado ahí que se
+   movía empezaba un paneo: Chrome mandaba pointercancel y no entregaba NINGÚN toque nuevo
+   (joystick, botones, cartas) hasta levantar todos los dedos. El touch-action de un toque se fija
+   al apoyarlo: no se puede corregir después. El joystick adopta ese pulgar (controles-tactiles.ts). */
 .cf-cortina {
   position: fixed;
   inset: -10% -40%;
@@ -465,6 +479,7 @@ html.cf-html body {
     linear-gradient(100deg, #030304 0%, #0f0f15 50%, #030304 100%);
   transform: translateX(-120%) skewX(-14deg);
   pointer-events: all;
+  touch-action: none;
 }
 
 .cf-cortina[data-fase='cerrando'] {
@@ -1492,6 +1507,9 @@ html.cf-html body {
   gap: 9px 5px;
   max-width: 560px;
   padding-top: 6px;
+  /* Al volver a la grilla (VOS / RIVAL), la etiqueta del elegido (top −6px, más el agrandado
+     del elegido) sobresale ≈ 5 px por arriba: sin margen quedaba cortada contra el borde. */
+  scroll-margin-top: 14px;
 }
 
 @media (max-width: 330px) {
@@ -2338,6 +2356,8 @@ html.cf-html body {
 
 .cf-vs {
   background: #000;
+  /* Un pulgar apoyado en el VS sigue apoyado cuando arranca la pelea (ver .cf-cortina). */
+  touch-action: none;
   animation: cf-temblor 0.45s linear 0.32s both;
 }
 
@@ -2653,6 +2673,8 @@ html.cf-html body {
   padding: calc(var(--cf-sa-t) + 20px) calc(var(--cf-sa-r) + 20px) calc(var(--cf-sa-b) + 20px)
     calc(var(--cf-sa-l) + 20px);
   background: radial-gradient(80% 60% at 50% 40%, color-mix(in srgb, var(--cf-tono, #2a2622) 80%, #000), #000 75%);
+  /* Un pulgar apoyado en la carga sigue apoyado cuando arranca la pelea (ver .cf-cortina). */
+  touch-action: none;
 }
 
 .cf-carga-pantalla__logo {
@@ -2726,6 +2748,27 @@ html.cf-html body {
   flex-direction: column;
   align-items: center;
   gap: 14px;
+}
+
+/* «Volver» mientras carga: aparece a los 6 s (pantalla-carga.tsx), sin saltar. */
+.cf-carga-pantalla__volver {
+  flex-shrink: 0;
+  animation: cf-tip 0.5s var(--cf-salida) both;
+}
+
+/* Celular acostado: el logo más chico para que el consejo y «Volver» entren sin cortarse. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .cf-carga-pantalla {
+    gap: 12px;
+  }
+
+  .cf-carga-pantalla__logo {
+    width: min(34vw, 190px);
+  }
+
+  .cf-carga-pantalla__titulo {
+    font-size: clamp(30px, 8vh, 44px);
+  }
 }
 
 .cf-tip {
@@ -4071,9 +4114,12 @@ html.cf-html body {
   width: 100%;
 }
 
+/* Dos columnas: en Android (4 interruptores) y en el iPhone (2: sin vibrar ni pantalla completa)
+   son las mismas filas que con tres, y cada uno tiene lugar. Con tres columnas de 135 px,
+   «Vibración» y su «Sí» no entraban y el ícono se aplastaba. */
 .cf-ajustes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   width: 100%;
 }
@@ -4095,6 +4141,8 @@ html.cf-html body {
 }
 
 .cf-interruptor svg {
+  /* Sin esto, un rótulo largo («Pantalla completa», «Vibración») aplastaba el ícono. */
+  flex-shrink: 0;
   width: 19px;
   height: 19px;
   margin-top: -2px;
@@ -4895,6 +4943,16 @@ html.cf-html body {
   font-weight: 600;
 }
 
+/* Frenada por el tope del servidor: está en la cola de pendientes.ts (ámbar, no el verde de «Guardado»). */
+.cf-apodo__listo[data-estado='pendiente'] {
+  background: rgba(255, 196, 0, 0.08);
+  border-left-color: #ffc400;
+}
+
+.cf-apodo__listo[data-estado='pendiente'] svg {
+  color: #ffc400;
+}
+
 .cf-apodo__error {
   margin: 0;
   font-size: 13px;
@@ -4967,6 +5025,88 @@ html.cf-html body {
 
   .cf-stats {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Celular acostado (844×390, 740×360, 667×375): todo un poco más compacto para que las dos filas de
+   estadísticas entren arriba de la barra de botones. Antes la segunda (Especiales, Precisión,
+   Tiempo) quedaba tapada y nada avisaba que se podía scrollear. */
+@media (orientation: landscape) and (max-height: 440px) {
+  .cf-resultado__scroll {
+    padding-top: calc(var(--cf-sa-t) + 6px);
+  }
+
+  .cf-resultado__panel {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .cf-puntaje {
+    gap: 12px;
+  }
+
+  .cf-rango {
+    width: 70px;
+    height: 70px;
+  }
+
+  .cf-rango span {
+    margin-top: 4px;
+    font-size: 42px;
+  }
+
+  .cf-puntaje__numero {
+    gap: 2px;
+  }
+
+  .cf-puntaje__valor {
+    font-size: 50px;
+  }
+
+  .cf-record {
+    padding: 3px 7px 1px;
+    font-size: 13px;
+  }
+
+  .cf-apodo__form {
+    gap: 6px;
+  }
+
+  .cf-apodo__fila .cf-input {
+    height: 42px;
+  }
+
+  .cf-apodo__fila .cf-btn {
+    --cf-btn-alto: 42px;
+  }
+
+  .cf-stats {
+    gap: 5px;
+  }
+
+  .cf-stat {
+    padding: 6px 8px 4px;
+  }
+
+  .cf-stat dt {
+    font-size: 10.5px;
+  }
+
+  .cf-stat dd {
+    font-size: 19px;
+  }
+
+  .cf-resultado__acciones {
+    padding-top: 6px;
+    padding-bottom: calc(var(--cf-sa-b) + 8px);
+  }
+
+  .cf-resultado__acciones .cf-btn--grande {
+    --cf-btn-alto: 50px;
+  }
+
+  .cf-resultado__acciones .cf-btn--sec {
+    --cf-btn-alto: 48px;
   }
 }
 

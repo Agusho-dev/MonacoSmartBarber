@@ -183,32 +183,52 @@ export function dibujarDestello(E: Escena, d: Destello): void {
 const BANDA_W = 1180
 const BANDA_H = 150
 export const DUR_SUPER = 1000
+/** Altura de la banda (fracción del alto visible): la de siempre y la del segundo especial. */
+const FILAS_BANDA = [0.3, 0.62] as const
 
-export interface SuperFlash {
+/**
+ * El super flash de UN lado. Cada luchador tiene el suyo: si los dos tiran un especial casi
+ * juntos, se ven las dos bandas (la segunda, más abajo) y los dos encendidos. Antes había uno
+ * solo y el segundo pisaba al primero: la banda del especial del jugador podía no verse nunca.
+ */
+export interface FlashLado {
   activo: boolean
   edad: number
-  lado: Lado
   color: string
   rayos: string
   banda: HTMLCanvasElement | null
   bandaEscala: number
+  /** 0 = arriba (la de siempre), 1 = abajo (llegó con el otro todavía activo). */
+  fila: 0 | 1
+}
+
+export interface SuperFlash {
+  /** ¿Hay alguno activo? */
+  activo: boolean
+  lados: [FlashLado, FlashLado]
   /** Bandas ya pintadas por especial y lado (se repiten varias veces por partida). */
   bandas: Map<string, HTMLCanvasElement>
   bandasEscala: number
 }
 
+function flashLado(): FlashLado {
+  return { activo: false, edad: 0, color: '#FFFFFF', rayos: 'rgba(255,255,255,0.3)', banda: null, bandaEscala: 1, fila: 0 }
+}
+
 export function crearSuperFlash(): SuperFlash {
   return {
     activo: false,
-    edad: 0,
-    lado: 0,
-    color: '#FFFFFF',
-    rayos: 'rgba(255,255,255,0.3)',
-    banda: null,
-    bandaEscala: 1,
+    lados: [flashLado(), flashLado()],
     bandas: new Map(),
     bandasEscala: 0,
   }
+}
+
+/** Corta los dos (round nuevo, pelea nueva). */
+export function apagarSuperFlash(sf: SuperFlash): void {
+  sf.activo = false
+  sf.lados[0].activo = false
+  sf.lados[1].activo = false
 }
 
 function caminoParalelogramo(g: CanvasRenderingContext2D, cx: number, y0: number, y1: number, ancho: number, sesgo: number): void {
@@ -333,11 +353,15 @@ export function iniciarSuperFlash(
   ficha: FichaPersonaje,
   cara: CanvasImageSource | null,
 ): void {
+  const f = sf.lados[lado]
+  const otro = sf.lados[lado === 0 ? 1 : 0]
+  // Si el otro lado todavía muestra el suyo, esta banda va en la otra fila (no se tapan).
+  f.fila = otro.activo ? (otro.fila === 0 ? 1 : 0) : 0
+  f.activo = true
+  f.edad = 0
+  f.color = ficha.color
+  f.rayos = rgba(ficha.color, 0.24)
   sf.activo = true
-  sf.edad = 0
-  sf.lado = lado
-  sf.color = ficha.color
-  sf.rayos = rgba(ficha.color, 0.24)
   if (sf.bandasEscala !== E.cam.base) {
     for (const b of sf.bandas.values()) liberarLienzo(b)
     sf.bandas.clear()
@@ -349,20 +373,27 @@ export function iniciarSuperFlash(
     banda = pintarBanda(E, null, nombre, ficha, cara, lado)
     sf.bandas.set(clave, banda)
   }
-  sf.banda = banda
-  sf.bandaEscala = E.cam.base
+  f.banda = banda
+  f.bandaEscala = E.cam.base
 }
 
 export function actualizarSuperFlash(sf: SuperFlash, dtMs: number): void {
   if (!sf.activo) return
-  sf.edad += dtMs
-  if (sf.edad >= DUR_SUPER) sf.activo = false
+  for (const f of sf.lados) {
+    if (!f.activo) continue
+    f.edad += dtMs
+    if (f.edad >= DUR_SUPER) f.activo = false
+  }
+  sf.activo = sf.lados[0].activo || sf.lados[1].activo
 }
 
 export function liberarSuperFlash(sf: SuperFlash): void {
   for (const b of sf.bandas.values()) liberarLienzo(b)
   sf.bandas.clear()
-  sf.banda = null
+  for (const f of sf.lados) {
+    f.banda = null
+    f.activo = false
+  }
   sf.activo = false
 }
 
@@ -373,31 +404,49 @@ function oscuridad(t: number): number {
   return 0
 }
 
-/** Oscurece todo, tira rayos detrás del que lo lanza y lo vuelve a dibujar encendido. */
-export function dibujarSuperFlashMundo(E: Escena, sf: SuperFlash, l: LuchadorEstado, v: VisualLuchador): void {
+/**
+ * Oscurece todo (una vez, con el más oscuro de los dos), tira rayos detrás de cada uno que lo
+ * lanzó y lo vuelve a dibujar encendido.
+ */
+export function dibujarSuperFlashMundo(
+  E: Escena,
+  sf: SuperFlash,
+  luchadores: readonly [LuchadorEstado, LuchadorEstado],
+  vis: readonly [VisualLuchador, VisualLuchador],
+): void {
   if (!sf.activo) return
   const ctx = E.ctx
-  const t = sf.edad
-  const oscuro = oscuridad(t)
+  let oscuro = 0
+  for (const f of sf.lados) if (f.activo) oscuro = Math.max(oscuro, oscuridad(f.edad))
   if (oscuro > 0) {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.globalAlpha = oscuro
     ctx.fillStyle = '#05050A'
     ctx.fillRect(0, 0, E.cam.anchoPx, E.cam.altoPx)
   }
+  for (let lado = 0; lado < 2; lado++) {
+    const f = sf.lados[lado]
+    if (f.activo) dibujarEncendido(E, f, luchadores[lado], vis[lado], oscuro)
+  }
+}
+
+/** Los rayos detrás del que tiró el especial y él mismo encendido, encima del oscurecido. */
+function dibujarEncendido(E: Escena, f: FlashLado, l: LuchadorEstado, v: VisualLuchador, oscuro: number): void {
+  const ctx = E.ctx
+  const t = f.edad
   const aRayos = t < 60 ? t / 60 : t < 700 ? 1 : t < 950 ? 1 - (t - 700) / 250 : 0
   if (aRayos > 0) {
     const alto = v.at ? v.at.ficha.alturaMundo : 200
     const cx = l.x
     const cy = E.sueloY - l.y - alto * 0.55
     ctx.globalCompositeOperation = 'lighter'
-    spriteMundo(E, E.spr.brillo(sf.color), cx, cy, 560, 560, 0, 0.55 * aRayos)
+    spriteMundo(E, E.spr.brillo(f.color), cx, cy, 560, 560, 0, 0.55 * aRayos)
     enMundo(E)
     ctx.globalAlpha = aRayos
     const R = 1400
     const n = 16
     const giro = E.s * 0.55
-    ctx.fillStyle = sf.rayos
+    ctx.fillStyle = f.rayos
     ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const a0 = giro + (i * TAU) / n
@@ -425,27 +474,36 @@ export function dibujarSuperFlashMundo(E: Escena, sf: SuperFlash, l: LuchadorEst
   if (oscuro > 0.05) dibujarLuchador(E, l, v, Math.max(0, 1 - t / 260) * 0.75)
 }
 
-/** La banda en diagonal con la cara y el nombre (capa de pantalla, arriba de la viñeta). */
+/** Las bandas en diagonal con la cara y el nombre (capa de pantalla, arriba de la viñeta). */
 export function dibujarSuperFlashBanda(E: Escena, sf: SuperFlash, altoVista: number): void {
-  if (!sf.activo || !sf.banda) return
-  const t = sf.edad
+  if (!sf.activo) return
+  for (let lado = 0; lado < 2; lado++) {
+    const f = sf.lados[lado]
+    if (f.activo) dibujarBanda(E, f, lado as Lado, altoVista)
+  }
+}
+
+function dibujarBanda(E: Escena, f: FlashLado, lado: Lado, altoVista: number): void {
+  const banda = f.banda
+  if (!banda) return
+  const t = f.edad
   let desliza: number
   if (t < 50) return
   if (t < 250) desliza = 1 - salidaCubica((t - 50) / 200)
   else if (t < 780) desliza = 0
   else desliza = -entradaCuadratica((t - 780) / 180)
-  const dir = sf.lado === 0 ? -1 : 1
+  const dir = lado === 0 ? -1 : 1
   const offset = desliza * BANDA_W * dir
   const ctx = E.ctx
   const u = E.cam.base
   const rot = -0.16
   // en pantallas más anchas que 16:9 (celular acostado) la banda se achica con el alto visible
-  const s = (u / sf.bandaEscala) * acotar(altoVista / 540, 0.75, 1)
+  const s = (u / f.bandaEscala) * acotar(altoVista / 540, 0.75, 1)
   const c = Math.cos(rot) * s
   const sn = Math.sin(rot) * s
-  ctx.setTransform(c, sn, -sn, c, 480 * u, altoVista * 0.3 * u)
+  ctx.setTransform(c, sn, -sn, c, 480 * u, altoVista * FILAS_BANDA[f.fila] * u)
   ctx.globalAlpha = acotar(1 - Math.abs(desliza) * 0.3, 0, 1)
   ctx.imageSmoothingEnabled = true
-  ctx.drawImage(sf.banda, -sf.banda.width / 2 + offset * sf.bandaEscala, -sf.banda.height / 2)
+  ctx.drawImage(banda, -banda.width / 2 + offset * f.bandaEscala, -banda.height / 2)
   ctx.globalAlpha = 1
 }

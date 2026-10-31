@@ -2,6 +2,7 @@
 
 import {
   Check,
+  Clock,
   Crosshair,
   Flame,
   LoaderCircle,
@@ -17,8 +18,11 @@ import {
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { guardarPartidaJuego } from '@/lib/actions/juego'
 import { ARENAS } from '@/lib/juego/arenas'
+import { idDispositivo } from '@/lib/juego/dispositivo'
+import { esRechazoPorTope, type PartidaAGuardar, type RespuestaGuardado } from '@/lib/juego/guardado'
+import { encolarPendiente, reintentarPendientes } from '@/lib/juego/pendientes'
 import { PERSONAJES } from '@/lib/juego/personajes'
-import type { DatosEntradaJuego, EstadoTurnoJuego, PartidaParaGuardar } from '@/lib/juego/tipos'
+import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { prefiereMenosMovimiento } from '@/lib/juego/ui/media'
 import { guardarPreferencias, type PreferenciasJuego } from '@/lib/juego/ui/preferencias'
@@ -62,13 +66,17 @@ type Envio =
   | { tipo: 'nada' }
   | { tipo: 'guardando' }
   | { tipo: 'listo'; apodo: string; puesto: number | null }
+  /** El servidor la frenó por el tope: está en la cola de pendientes.ts y se guarda sola más tarde. */
+  | { tipo: 'pendiente'; apodo: string }
   | { tipo: 'error'; mensaje: string }
 
-function armarPartida(r: ResultadoPelea, datos: DatosEntradaJuego, apodo: string): PartidaParaGuardar {
+function armarPartida(r: ResultadoPelea, datos: DatosEntradaJuego, apodo: string): PartidaAGuardar {
   const e = r.estadisticas
   return {
     token: datos.token,
     sucursalSlug: datos.sucursal?.slug ?? null,
+    // Sin QR, el tope del guardado es por celular y no por el wifi del local (guardado.ts).
+    dispositivo: idDispositivo(),
     apodo,
     personaje: r.eleccion.jugador,
     rival: r.eleccion.rival,
@@ -146,11 +154,19 @@ export function PantallaResultado({
   const [aviso, setAviso] = useState<string | null>(null)
   const numeroRef = useRef<HTMLSpanElement>(null)
 
-  const terminarEnvio = (nombre: string, r: Awaited<ReturnType<typeof guardarPartidaJuego>>) => {
+  const terminarEnvio = (nombre: string, partida: PartidaAGuardar, r: RespuestaGuardado) => {
     if (r.ok) {
       guardarPreferencias({ apodo: nombre })
       setEnvio({ tipo: 'listo', apodo: nombre, puesto: r.puesto })
       onGuardado(nombre, total)
+      // El servidor ya acepta a este celular: van las que había frenado por el tope antes.
+      void reintentarPendientes(guardarPartidaJuego)
+    } else if (esRechazoPorTope(r)) {
+      // Frenada ANTES de insertar (no se guardó nada): a la cola, que la manda sola cuando se
+      // libere el cupo. El apodo ya pasó el filtro del servidor (se revisa antes que el tope).
+      encolarPendiente(resultado.id, partida, r.esperarSeg)
+      guardarPreferencias({ apodo: nombre })
+      setEnvio({ tipo: 'pendiente', apodo: nombre })
     } else {
       setEnvio({ tipo: 'error', mensaje: r.error || 'No se pudo guardar' })
     }
@@ -162,9 +178,10 @@ export function PantallaResultado({
   useEffect(() => {
     if (!apodoAuto || enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
-    guardarPartidaJuego(armarPartida(resultado, datos, apodoAuto))
-      .then((r) => alTerminarEnvio(apodoAuto, r))
-      .catch(() => alTerminarEnvio(apodoAuto, { ok: false, error: 'Sin conexión' }))
+    const partida = armarPartida(resultado, datos, apodoAuto)
+    guardarPartidaJuego(partida)
+      .then((r) => alTerminarEnvio(apodoAuto, partida, r))
+      .catch(() => alTerminarEnvio(apodoAuto, partida, { ok: false, error: 'Sin conexión' }))
   }, [resultado, datos, apodoAuto])
 
   // El puntaje cuenta hasta el total; después aparece el rango.
@@ -214,8 +231,9 @@ export function PantallaResultado({
     if (enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
     setEnvio({ tipo: 'guardando' })
-    guardarPartidaJuego(armarPartida(resultado, datos, nombre))
-      .then((r) => terminarEnvio(nombre, r))
+    const partida = armarPartida(resultado, datos, nombre)
+    guardarPartidaJuego(partida)
+      .then((r) => terminarEnvio(nombre, partida, r))
       .catch(() => setEnvio({ tipo: 'error', mensaje: 'Sin conexión' }))
   }
 
@@ -239,12 +257,21 @@ export function PantallaResultado({
 
   /**
    * Si se va sin tocar «Guardar», la pelea igual cuenta para las estadísticas, pero como
-   * «Anónimo»: el nombre precargado no se publica en el ranking sin que lo confirme.
+   * «Anónimo»: el nombre precargado no se publica en el ranking sin que lo confirme. La pantalla
+   * ya se va, pero la respuesta se mira igual: si el servidor la frenó por el tope, queda en la
+   * cola (pendientes.ts), y si se guardó, van las que estaban en la cola. Un error de red o
+   * desconocido NO se reintenta: pudo haberse guardado y no hay forma de saberlo.
    */
   const guardarAlSalir = () => {
     if (enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
-    void guardarPartidaJuego(armarPartida(resultado, datos, 'Anónimo')).catch(() => {})
+    const partida = armarPartida(resultado, datos, 'Anónimo')
+    void guardarPartidaJuego(partida)
+      .then((r) => {
+        if (r.ok) void reintentarPendientes(guardarPartidaJuego)
+        else if (esRechazoPorTope(r)) encolarPendiente(resultado.id, partida, r.esperarSeg)
+      })
+      .catch(() => {})
   }
 
   const compartir = async () => {
@@ -272,6 +299,7 @@ export function PantallaResultado({
     { clave: 'combo', etiqueta: 'Combo máx.', valor: `${est.comboMax} ${est.comboMax === 1 ? 'golpe' : 'golpes'}` },
     { clave: 'criticos', etiqueta: 'Críticos', valor: String(est.criticos) },
     { clave: 'especiales', etiqueta: 'Especiales', valor: `${est.especialesAcertados}/${est.especialesUsados}` },
+    // `porcentaje` topea en 100 (el motor ya cuenta un intento por golpe posible de cada ventana).
     { clave: 'precision', etiqueta: 'Precisión', valor: `${porcentaje(est.golpesAcertados, est.golpesIntentados)} %` },
     { clave: 'tiempo', etiqueta: 'Tiempo', valor: formatearDuracion(resultado.duracionSeg) },
   ]
@@ -356,6 +384,13 @@ export function PantallaResultado({
                 <p className="cf-apodo__listo">
                   <LoaderCircle className="cf-girando" aria-hidden="true" />
                   <span>Guardando en el ranking…</span>
+                </p>
+              ) : envio.tipo === 'pendiente' ? (
+                <p className="cf-apodo__listo" data-estado="pendiente">
+                  <Clock aria-hidden="true" />
+                  <span>
+                    Se guarda como <b>{envio.apodo}</b> en unos minutos
+                  </span>
                 </p>
               ) : (
                 <form className="cf-apodo__form" onSubmit={alGuardar}>

@@ -297,6 +297,36 @@ async function main() {
     a.silenciar(false)
   }
 
+  console.log('\n10) Bucles más cortos que el vuelo: la onda (4 s), el gorro (3 s) y la nube (4,5 s) suenan hasta el final')
+  {
+    // Los bucles duran un tiempo fijo (onda 2,5 s, gorro 2 s, nube 3,2 s); con el proyectil
+    // todavía en vuelo se empalman (audio/eventos.ts, EMPALME_S). Paso de 25 ms de audio.
+    for (const [tipo, seg] of [['onda', 4], ['gorro', 3], ['nube', 4.5]]) {
+      avanzar(ctx, 1)
+      const pr = { id: 4000 + seg * 10, tipo, duenio: 0, x: 300, y: 60, vx: 2, vy: 0, mira: 1, rot: 0, edad: 0, golpesRestantes: 1, vuelta: false, ancho: 120, alto: 120 }
+      const p = partida({ proyectiles: [pr] })
+      a.procesar([{ tipo: 'proyectil', quien: 0, proyectil: tipo }], p)
+      let mudos = 0
+      let maxVoces = 0
+      const pasos = Math.round(seg / 0.025)
+      for (let f = 0; f < pasos; f++) {
+        pr.x += 1.5
+        pr.edad++
+        a.procesar([], p)
+        avanzar(ctx, 0.025)
+        const voces = diagnosticarAudio(a).voces
+        if (f > 4 && voces === 0) mudos++
+        maxVoces = Math.max(maxVoces, voces)
+      }
+      p.proyectiles = []
+      a.procesar([], p)
+      avanzar(ctx, 3)
+      const limpio = ctx.conectados.size === base
+      ok(mudos === 0 && maxVoces <= 3 && limpio, `${tipo}: ${seg} s en vuelo → ${mudos} pasos mudos, hasta ${maxVoces} voces a la vez (el empalme), ${limpio ? 'sin restos' : ctx.conectados.size + ' conectados'}`)
+    }
+    ok(ctx.errores.length === 0, 'sin errores de la API')
+  }
+
   a.destruir()
   ok(ctx.state === 'closed', 'destruir() cierra el contexto')
   console.log(`\n${fallas === 0 ? 'TODO OK' : fallas + ' FALLAS'}`)

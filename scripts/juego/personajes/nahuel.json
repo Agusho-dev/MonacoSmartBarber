@@ -10,30 +10,63 @@
   ],
   "retrato": { "anim": "quieto", "cuadro": 0, "alto": 720, "cara": [8, -2, 44] },
   "animaciones": {
-    "quieto": { "region": [9, 30, 370, 151], "cuadros": 5, "usar": [0, 1, 2, 4], "quitarOscuro": { "desde": 0.4 } },
+    "quieto": {
+      "region": [9, 30, 370, 151],
+      "cuadros": 5,
+      "usar": [0, 1, 2, 4],
+      "quitarOscuro": { "desde": 0.4 },
+      "_nota": "revisión 31/oct: anclaDx deja quietos los pies entre los cuadros de la espera (el apoyo sale del torso, que en la hoja se mueve con los brazos, y los dos pies patinaban de costado hasta 9 u)",
+      "porCuadro": {
+        "0": { "anclaDx": 1.1 },
+        "1": { "anclaDx": -3.7 },
+        "2": { "anclaDx": 0.1 },
+        "4": {
+          "_nota": "revisión 31/oct: la franja del piso entre los pies y la sombra de la zapatilla derecha hacían de sombra negra entre los pies",
+          "anclaDx": 2.5,
+          "excluir": [[319, 148, 365, 151]],
+          "quitar": [{ "zona": [318, 134, 336, 148], "lumMax": 60 }]
+        }
+      }
+    },
     "caminar": {
       "region": [380, 30, 750, 151],
       "cuadros": 5,
       "quitarOscuro": { "desde": 0.4 },
-      "porCuadro": { "4": { "excluir": [[[723, 141], [726, 132], [734, 129], [742, 132], [748, 141], [744, 150], [734, 152], [726, 150]]] } }
+      "porCuadro": {
+        "1": { "_nota": "revisión 31/oct: sin la franja oscura del piso junto al talón de adelante", "excluir": [[486, 148, 499, 151]] },
+        "4": { "excluir": [[[723, 141], [726, 132], [734, 129], [742, 132], [748, 141], [744, 150], [734, 152], [726, 150]]] }
+      }
     },
     "correr": {
       "inferencia": "caja",
       "region": [760, 30, 1131, 151],
-      "cajas": [[760, 30, 892, 151], [868, 30, 1006, 151], [984, 30, 1131, 151]],
+      "cajas": [[760, 30, 892, 151], [862, 30, 1006, 151], [976, 30, 1131, 151]],
       "quitarOscuro": { "desde": 0.4 },
       "porCuadro": {
         "0": {
+          "_nota": "revisión 31/oct: vuelve la zapatilla de atrás (el modelo la fundía con el humo blanco y la pierna terminaba en el ruedo); sin la bocanada de humo gris pegada al talón de la zapatilla de adelante",
           "limite": [[[760, 30], [892, 30], [892, 76], [880, 80], [874, 90], [868, 151], [760, 151]]],
-          "excluir": [[[784, 151], [786, 135], [798, 127], [812, 121], [818, 118], [818, 137], [842, 137], [844, 118], [852, 108], [866, 104], [880, 102], [880, 151]]]
+          "incluir": [[[773, 122], [778, 123], [781, 125], [782, 132], [780, 137], [781, 144], [781, 148], [777, 150], [770, 150], [766, 147], [766, 130], [767, 125]]],
+          "excluir": [[[784, 151], [786, 135], [798, 127], [812, 121], [818, 118], [818, 137], [842, 137], [844, 118], [852, 108], [866, 104], [880, 102], [880, 151]], [815, 129, 825, 138]]
         },
         "1": {
-          "limite": [[[889, 30], [1004, 30], [1004, 76], [996, 80], [990, 95], [986, 151], [870, 151], [872, 110], [876, 90], [878, 77], [889, 77]]],
-          "excluir": [[[893, 151], [894, 132], [905, 125], [920, 120], [927, 118], [927, 142], [954, 142], [956, 120], [965, 110], [980, 105], [1000, 102], [1000, 151]]]
+          "_nota": "revisión 31/oct: la caja arranca en 862 para la zapatilla de atrás entera (la cortaba una recta) y se saca el humo oscuro a su derecha (un gancho negro); el hueco que deja la zapatilla de adelante sigue su borde (en x=927 le cortaba la punta en recta)",
+          "limite": [[[889, 30], [1004, 30], [1004, 76], [996, 80], [990, 95], [986, 151], [864, 151], [864, 122], [872, 110], [876, 90], [878, 77], [889, 77]]],
+          "incluir": [[[874, 123], [880, 123], [884, 126], [885, 130], [882, 133], [880, 138], [878, 141], [878, 147], [876, 150], [869, 150], [866, 147], [865, 135], [866, 126], [870, 124]]],
+          "excluir": [
+            [[893, 151], [894, 132], [905, 125], [917, 121], [919, 123], [919, 129], [922, 132], [924, 134], [926, 137], [928, 140], [929, 142], [954, 142], [956, 120], [965, 110], [980, 105], [1000, 102], [1000, 151]],
+            [[879, 151], [879, 142], [881, 138], [885, 134], [893, 131], [894, 151]]
+          ]
         },
         "2": {
-          "limite": [[[1004, 30], [1131, 30], [1131, 151], [986, 151], [990, 110], [994, 92], [996, 78], [1004, 77]]],
-          "excluir": [[[1010, 151], [1011, 132], [1022, 126], [1040, 120], [1060, 114], [1085, 110], [1095, 108], [1110, 104], [1131, 100], [1131, 151]]]
+          "_nota": "revisión 31/oct: la caja arranca en 976 para que entre la zapatilla de atrás entera (la cortaba una recta en 986); el humo se saca alrededor de las dos zapatillas (antes se llevaba la de adelante y dejaba un bloque gris junto a la de atrás) y el borde de arriba de lo que se saca sigue el ruedo del jean (una recta en y=128 le comía la botamanga)",
+          "limite": [[[1004, 30], [1131, 30], [1131, 151], [979, 151], [979, 121], [990, 110], [994, 92], [996, 78], [1004, 77]]],
+          "incluir": [
+            [[980, 127], [983, 125], [988, 124], [993, 123], [996, 125], [998, 129], [997, 134], [996, 140], [990, 141], [981, 141], [979, 137]],
+            [[1037, 121], [1040, 117], [1045, 116], [1053, 116], [1055, 121], [1055, 130], [1056, 137], [1055, 141], [1051, 143], [1047, 142], [1044, 139], [1042, 135], [1040, 131], [1038, 127]]
+          ],
+          "excluir": [[[979, 151], [979, 142], [996, 141], [999, 134], [1004, 133], [1008, 131], [1012, 129], [1016, 127], [1020, 123], [1024, 121], [1030, 119], [1034, 118], [1036, 124], [1037, 128], [1039, 132], [1041, 136], [1043, 140], [1047, 144], [1053, 145], [1057, 142], [1058, 136], [1057, 128], [1057, 120], [1060, 114], [1085, 110], [1095, 108], [1110, 104], [1131, 100], [1131, 151]]],
+          "quitar": [{ "zona": [1109, 76, 1120, 86], "lumMax": 25 }]
         }
       }
     },
@@ -50,26 +83,76 @@
       }
     },
     "guardia": { "region": [9, 184, 370, 293], "cuadros": 4, "quitarOscuro": { "desde": 0.4 } },
-    "agachado": { "region": [380, 184, 697, 293], "cuadros": 4, "quitarOscuro": { "desde": 0.5 } },
+    "agachado": {
+      "region": [380, 184, 697, 293],
+      "cuadros": 4,
+      "quitarOscuro": { "desde": 0.5 },
+      "_nota": "revisión 31/oct: el fondo negro y la sombra del piso encerrados debajo del cuerpo (entre los pies) hacían una mancha negra en los cuadros 0, 1 y 2",
+      "porCuadro": {
+        "0": { "quitar": [{ "zona": [410, 276, 421, 290], "lumMax": 50 }] },
+        "1": { "quitar": [{ "zona": [476, 277, 493, 291], "lumMax": 100 }] },
+        "2": { "quitar": [{ "zona": [553, 273, 592, 291], "lumMax": 50 }] }
+      }
+    },
     "saltar": {
       "region": [706, 156, 1067, 293],
       "cuadros": 4,
       "limite": [[706, 183, 1067, 293]],
       "quitarOscuro": { "desde": 0.4 },
-      "porCuadro": { "1": { "limite": [[706, 156, 1067, 293]] }, "2": { "limite": [[706, 156, 1067, 293]] } }
+      "porCuadro": {
+        "0": { "_nota": "revisión 31/oct: sin el polvo del despegue debajo del pie de adelante", "excluir": [[[745, 271], [757, 271], [760, 279], [764, 283], [775, 283], [778, 293], [745, 293]]] },
+        "1": { "limite": [[706, 156, 1067, 293]] },
+        "2": { "limite": [[706, 156, 1067, 293]] }
+      }
     },
-    "caer": {
+    "_clavado": {
+      "_nota": "oculta (no va al atlas.json): el primer dibujo del panel CAER, un clavado de cabeza con la mano al piso, para los prestados de la Chilena (especial 2)",
       "region": [1077, 184, 1591, 293],
       "cuadros": 5,
-      "usar": [0, 0, 0, 1, 2],
-      "porCuadro": { "1": { "quitarOscuro": { "desde": 0.45 } }, "2": { "quitarOscuro": { "desde": 0.45 } } }
+      "usar": [0],
+      "porCuadro": {
+        "0": {
+          "_nota": "revisión 31/oct: sin el fondo negro encerrado entre las piernas y junto a las zapatillas (cuñas negras en el impacto de la Chilena)",
+          "quitar": [
+            { "zona": [1150, 208, 1158, 216], "lumMax": 30 },
+            { "zona": [1186, 214, 1200, 225], "lumMax": 30 },
+            { "zona": [1170, 222, 1192, 240], "lumMax": 30 },
+            { "zona": [1198, 232, 1212, 240], "lumMax": 30 }
+          ]
+        }
+      }
+    },
+    "caer": {
+      "_nota": "revisión 31/oct: la bajada del salto es la pose de saltar 3 (prestada, como Joaquín y Lucas) y después el aterrizaje; con el clavado del panel Nahuel bajaba de cabeza en cada salto",
+      "region": [1077, 184, 1591, 293],
+      "cajas": [[1077, 184, 1226, 293], [1226, 184, 1322, 293], [1326, 184, 1412, 293]],
+      "usar": [1, 2],
+      "prestados": [{ "pos": 0, "de": "saltar", "cuadro": 3 }, { "pos": 1, "de": "saltar", "cuadro": 3 }, { "pos": 2, "de": "saltar", "cuadro": 3 }],
+      "porCuadro": {
+        "1": {
+          "_nota": "revisión 31/oct: el costado del buzo y la rodilla de atrás terminaban en una recta (x 1251; el modelo los perdía contra el humo): cajas por cuadro y se suman con incluir",
+          "quitarOscuro": { "desde": 0.45 },
+          "incluir": [[[1260, 231], [1255, 236], [1251, 240], [1248, 243], [1245, 246], [1245, 258], [1240, 259], [1235, 262], [1233, 265], [1233, 268], [1236, 271], [1243, 272], [1251, 272]]]
+        },
+        "2": { "quitarOscuro": { "desde": 0.45 } }
+      }
     },
     "golpe": {
       "inferencia": "caja",
       "region": [9, 325, 442, 435],
-      "cajas": [[12, 325, 86, 435], [88, 325, 170, 435], [170, 325, 258, 435], [262, 325, 372, 435]],
+      "cajas": [[12, 325, 86, 435], [88, 325, 209, 435], [170, 325, 270, 435], [262, 325, 372, 435]],
       "impactos": [3],
-      "quitarOscuro": { "desde": 0.4 }
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "1": {
+          "_nota": "revisión 31/oct: la caja llega a 209 (el puño y la zapatilla de adelante pasaban de 170 y quedaban cortados en recta), sin la pierna de atrás del cuadro siguiente",
+          "excluir": [[185, 402, 209, 436], [179, 418, 185, 436]]
+        },
+        "2": {
+          "_nota": "revisión 31/oct: la caja llega a 270 (el puño pasaba de 258 y quedaba cortado en recta); sin la estela celeste detrás del puño",
+          "quitar": [{ "zona": [250, 340, 270, 368], "bMenosRMin": 35 }]
+        }
+      }
     },
     "patada": {
       "inferencia": "caja",
@@ -80,12 +163,15 @@
       "quitarOscuro": { "desde": 0.4 },
       "porCuadro": {
         "1": {
+          "_nota": "revisión 31/oct (patada[1], que reusan combo, herramienta1 y herramienta2): el rectángulo que sacaba el humo del piso cortaba en recta la pierna de apoyo; ahora es un polígono por debajo del jean, vuelve la zapatilla de la patada (incluir) y se saca el fondo negro entre la botamanga y el talón de apoyo",
           "reinferir": [556, 325, 672, 435],
           "unirCaja": [[600, 325, 694, 435]],
+          "incluir": [[[688, 361], [684, 361], [679, 367], [677, 368], [675, 367], [672, 370], [671, 369], [671, 386], [673, 384], [681, 388], [685, 385], [686, 378], [689, 375], [691, 370], [691, 365]]],
           "excluir": [
             [[556, 375], [559, 366], [565, 361], [574, 361], [580, 365], [583, 375], [580, 384], [574, 389], [565, 389], [559, 384]],
-            [[626, 402], [694, 402], [694, 435], [626, 435]]
-          ]
+            [[640, 400], [694, 400], [694, 435], [618, 435], [622, 428], [630, 420], [636, 412]]
+          ],
+          "quitar": [{ "zona": [556, 430, 694, 435], "bMenosRMin": 25, "lumMax": 120 }, { "zona": [[609, 426], [622, 426], [622, 435], [614, 435], [613, 431], [610, 429]], "lumMax": 45 }]
         }
       }
     },
@@ -93,11 +179,25 @@
       "_nota": "los golpes del combo de la hoja vienen envueltos en remolinos azules, humo y la pelota: quedan sus 3 cuadros de preparación y los golpes se toman prestados (el puñetazo del golpe, la patada y la volea del especial 1), sin duplicar píxeles",
       "inferencia": "caja",
       "region": [854, 325, 1590, 435],
-      "cajas": [[857, 325, 922, 435], [925, 325, 1000, 435], [1002, 325, 1082, 435]],
+      "cajas": [[852, 325, 931, 435], [931, 325, 1016, 435], [1002, 325, 1100, 435]],
       "prestados": [{ "pos": 3, "de": "golpe", "cuadro": 3 }, { "pos": 4, "de": "patada", "cuadro": 1 }, { "pos": 5, "de": "patada", "cuadro": 1 }],
       "_nota2": "revisión 30/oct: la volea del especial 1 tenía la pierna cortada al ras (el pie queda detrás de la pelota en la hoja): el remate del combo es la patada",
       "impactos": [3, 5],
-      "quitarOscuro": { "desde": 0.4 }
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "0": { "_nota": "revisión 31/oct: cajas más anchas en los cuadros 0 y 1 (las zapatillas y los puños pasaban de los bordes y quedaban cortados en recta)" },
+        "1": { "excluir": [[[1013, 355], [1016, 355], [1016, 412], [1011, 412], [1011, 380], [1013, 374]]] },
+        "2": {
+          "_nota": "revisión 31/oct: la caja llega a 1100 (el puño y la zapatilla de adelante pasaban de 1082) sin el buzo de la figura siguiente; vuelve la zapatilla de apoyo (el modelo la perdía y la pierna terminaba en el ruedo); se saca la cuña azul marino del fondo entre el brazo y la rodilla y la sombra violeta del piso",
+          "incluir": [[[1017, 421], [1017, 424], [1027, 434], [1040, 434], [1039, 430], [1034, 425], [1041, 422], [1041, 416], [1027, 416], [1026, 417], [1024, 416]]],
+          "excluir": [[[1089, 325], [1100, 325], [1100, 404], [1086, 404], [1086, 378], [1089, 372]]],
+          "quitar": [
+            { "zona": [1046, 366, 1086, 394], "bMenosRMin": 25, "lumMax": 85 },
+            { "zona": [1040, 421, 1100, 436], "lumMax": 60 },
+            { "zona": [1040, 428, 1100, 436], "bMenosRMin": 25, "lumMax": 110 }
+          ]
+        }
+      }
     },
     "especial1": {
       "inferencia": "caja",
@@ -107,20 +207,56 @@
       "usar": [0, 1],
       "prestados": [{ "pos": 2, "de": "patada", "cuadro": 1 }, { "pos": 3, "de": "patada", "cuadro": 1 }],
       "impactos": [2],
-      "quitarOscuro": { "desde": 0.4 }
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "1": {
+          "_nota": "revisión 31/oct: sin el humo gris entre la pierna de atrás y la pelota ni el de la izquierda de la zapatilla",
+          "excluir": [
+            [[356, 560], [371, 560], [371, 577], [356, 577]],
+            [[398, 537], [412, 537], [412, 552], [414, 560], [413, 570], [412, 577], [393, 577], [393, 571], [398, 565]]
+          ]
+        }
+      }
     },
     "especial2": {
-      "_nota": "la chilena de la hoja (cabeza abajo sobre remolinos azules y humo) no sale limpia: isnet pierde las piernas y u2net se lleva el fondo. Se arma con la preparación agachada de la hoja y prestados limpios: el salto alto (saltar 2) y la vuelta en el aire con las piernas arriba (caer 0), que se lee como la chilena; la pelota y la energía las dibuja el render",
+      "_nota": "la chilena de la hoja (cabeza abajo sobre remolinos azules y humo) no sale limpia: isnet pierde las piernas y u2net se lleva el fondo. Se arma con la preparación agachada de la hoja y prestados limpios: el salto alto (saltar 2) y la vuelta en el aire con las piernas arriba (el primer dibujo de CAER, en la animación oculta _clavado), que se lee como la chilena; la pelota y la energía las dibuja el render",
       "inferencia": "caja",
       "region": [9, 612, 1591, 721],
       "cajas": [[85, 612, 172, 721]],
       "usar": [0, 0],
-      "prestados": [{ "pos": 1, "de": "saltar", "cuadro": 2 }, { "pos": 2, "de": "caer", "cuadro": 0 }, { "pos": 3, "de": "caer", "cuadro": 0 }],
+      "prestados": [{ "pos": 1, "de": "saltar", "cuadro": 2 }, { "pos": 2, "de": "_clavado", "cuadro": 0 }, { "pos": 3, "de": "_clavado", "cuadro": 0 }],
       "impactos": [2, 3],
-      "porCuadro": { "0": { "limite": [[93, 612, 172, 721]], "quitarOscuro": { "desde": 0.45 } } }
+      "porCuadro": {
+        "0": {
+          "limite": [[[86, 612], [172, 612], [172, 721], [92, 721], [92, 685], [86, 685]]],
+          "quitarOscuro": { "desde": 0.45 },
+          "_nota": "revisión 31/oct: sin la sombra y el humo del piso debajo de las zapatillas; el límite izquierdo deja entrar el puño (en x=93 lo cortaba en recta)",
+          "quitar": [{ "zona": [110, 708, 172, 721], "lumMax": 45 }],
+          "excluir": [[[110, 714], [135, 714], [142, 715], [146, 716], [156, 716], [156, 721], [110, 721]]]
+        }
+      }
     },
     "danio": { "escala": 0.97, "region": [10, 755, 300, 882], "cuadros": 4, "quitarOscuro": { "desde": 0.45 } },
-    "ko": { "escala": 0.97, "region": [312, 755, 660, 882], "cuadros": 3, "porCuadro": { "0": { "quitarOscuro": { "desde": 0.45 } } } },
+    "ko": {
+      "escala": 0.97,
+      "region": [312, 755, 660, 882],
+      "cajas": [[312, 755, 382, 882], [366, 755, 520, 882], [497, 755, 660, 882]],
+      "_nota": "revisión 31/oct: cajas por cuadro (con la separación por manchas no se podía sumar lo que el modelo perdía) y excluir de lo del vecino que cae en cada caja",
+      "porCuadro": {
+        "0": {
+          "_nota": "revisión 31/oct: sin la punta de la zapatilla del cuadro siguiente ni la sombra negra entre los pies",
+          "quitarOscuro": { "desde": 0.45 },
+          "excluir": [[[367, 826], [400, 826], [400, 882], [381, 882], [381, 866], [374, 864], [372, 858], [368, 850]]],
+          "quitar": [{ "zona": [330, 845, 357, 876], "lumMax": 60 }]
+        },
+        "1": { "excluir": [[[497, 836], [520, 836], [520, 866], [497, 866], [495, 852]], [[366, 857], [372, 857], [376, 860], [379, 868], [379, 882], [366, 882]]] },
+        "2": {
+          "_nota": "revisión 31/oct (el cuadro que queda quieto en el KO): las zapatillas, que la separación por manchas le daba al cuadro 1 (las piernas terminaban en una recta), y el pelo y la otra mano, que el modelo perdía contra el fondo negro (la cabeza terminaba en una recta y quedaba un mechón suelto arriba)",
+          "incluir": [[[624, 842], [632, 840], [641, 841], [644, 844], [645, 849], [647, 854], [650, 855], [655, 855], [660, 856], [661, 862], [657, 864], [627, 864], [624, 858], [623, 850]]],
+          "excluir": [[626, 828, 646, 841]]
+        }
+      }
+    },
     "levantarse": { "escala": 0.97, "region": [672, 755, 965, 882], "cuadros": 4, "porCuadro": { "1": { "quitarOscuro": { "desde": 0.45 } }, "2": { "quitarOscuro": { "desde": 0.4 } }, "3": { "quitarOscuro": { "desde": 0.4 } } } },
     "victoria": { "escala": 0.97, "region": [977, 755, 1253, 882], "cuadros": 4, "componentes": "todos" },
     "burla": { "escala": 0.97, "region": [1265, 755, 1590, 882], "cuadros": 4, "componentes": "todos" }

@@ -7,7 +7,8 @@
     "caja": [930, 855, 1003, 998],
     "espejo": true,
     "alto": 720,
-    "cara": [947, 856, 993, 902],
+    "_notaCara": "revisión 31/oct: la cara se recorta más cerrada (38 px en vez de 46, centrada en la cabeza): en la grilla de 43 px y en el HUD la cara se veía chica al lado de las de Simón y Chipi",
+    "cara": [956, 856, 994, 894],
     "nitidez": 110,
     "fondoLiso": [
       {
@@ -73,8 +74,18 @@
       ]
     },
     "guardia": {
+      "_nota": "revisión 31/oct: el fondo liso entre las piernas del cuadro 0 y la franja del piso entre los pies del 0 y del 3 (el que queda mientras se cubre) quedaban pegados",
       "panel": [9, 198, 349, 317],
-      "cuadros": 4
+      "cuadros": 4,
+      "porCuadro": {
+        "0": {
+          "quitarLiso": [{"zona": [[44, 280], [58, 280], [68, 300], [68, 311], [28, 311], [34, 296]]}],
+          "excluir": [[29, 311, 67, 318]]
+        },
+        "3": {
+          "excluir": [[271, 311, 299, 318]]
+        }
+      }
     },
     "agachado": {
       "panel": [356, 198, 646, 317],
@@ -109,10 +120,14 @@
       "impactos": [3]
     },
     "patada": {
+      "_nota": "revisión 31/oct: sin la luz violeta del piso a la derecha de la zapatilla del cuadro 2",
       "panel": [458, 352, 852, 469],
       "cuadros": 4,
       "usar": [0, 1, 2],
-      "impactos": [1]
+      "impactos": [1],
+      "porCuadro": {
+        "2": {"excluir": [[715, 453, 745, 470]]}
+      }
     },
     "combo": {
       "panel": [860, 352, 1528, 469],
@@ -147,9 +162,14 @@
           "lumMin": 15
         }
       ],
+      "_nota": "revisión 31/oct: en el 6 (impacto final y del Modo Boxeador) la pantorrilla, el talón y la zapatilla de la figura siguiente quedaban pegados a la punta de la de adelante, y la pierna de atrás terminaba en la rodilla: se le suma la zapatilla que la hoja dibuja debajo de esa rodilla (la comparte con el pie de adelante del cuadro 5)",
       "porCuadro": {
         "0": {
           "excluir": [[860, 352, 868, 469]]
+        },
+        "6": {
+          "agregar": [[[1338, 451], [1363, 450], [1365, 471], [1333, 471], [1333, 458]]],
+          "excluir": [[[1419, 428], [1448, 428], [1448, 472], [1426, 472], [1426, 457], [1419, 457]]]
         }
       },
       "usar": [0, 1, 2, 3, 4, 5, 6]
@@ -182,7 +202,14 @@
           "satMax": 0.3
         }
       ],
-      "usar": [0, 1, 2, 4]
+      "usar": [0, 1, 2, 4],
+      "_nota": "revisión 31/oct: el fondo liso entre las piernas del cuadro 0 y la franja del piso quedaban pegados",
+      "porCuadro": {
+        "0": {
+          "quitarLiso": [{"zona": [[48, 592], [62, 592], [72, 615], [70, 623], [26, 623], [30, 612]]}],
+          "excluir": [[27, 624, 69, 629]]
+        }
+      }
     },
     "herramienta2": {
       "panel": [498, 508, 917, 628],
@@ -196,7 +223,8 @@
           ]
         },
         "2": {
-          "excluir": [[772, 590, 806, 628]]
+          "_nota": "revisión 31/oct: sin el bloque de fondo azul oscuro a la derecha de la pierna de adelante",
+          "excluir": [[772, 590, 806, 628], [[756, 594], [781, 594], [781, 619], [768, 619], [764, 614], [758, 606]]]
         }
       },
       "fondoLiso": {
@@ -229,13 +257,33 @@
           "stdMax": 30
         }
       ],
-      "porCuadro": {
-        "4": {
-          "escala": 0.94
+      "_nota": "revisión 30/oct: el cuadro 2 salía cortado en la cintura (un torso apoyado en el piso): repite el 1. Revisión 31/oct: el cierre (cuadro 4 de la hoja) tiene el pelo ARRIBA de este panel (y 492-507) y salía sin pelo, con la cabeza terminada en los anteojos: sale de su propio panel («_especial1_cierre») y se suma al final",
+      "usar": [0, 1, 1, 3],
+      "sumar": [["_especial1_cierre", 0]]
+    },
+    "_especial1_cierre": {
+      "_nota": "auxiliar (no es una animación del atlas): el cierre de la Curación con su panel desde y=484, para que entre el pelo; «sumar» de especial1 lo usa como su último cuadro. El verde se pinta igual que en especial1. Este primer plano está dibujado 1,17x más grande que el resto: con el pelo entero, escala 0,855 lo deja del alto de cuando está parado (burla, levantarse: 113-115 px)",
+      "panel": [1404, 484, 1528, 628],
+      "cuadros": 1,
+      "escala": 0.855,
+      "pintar": [
+        {
+          "zona": [1404, 484, 1528, 628],
+          "verdeMin": 25,
+          "lumMin": 50
+        },
+        {
+          "zona": [1404, 484, 1528, 628],
+          "verdeMin": 40,
+          "lumMin": 25
+        },
+        {
+          "nota": "el borde verdoso que el resplandor deja en los brazos y el pelo (los flecos verdes)",
+          "zona": [1404, 484, 1528, 628],
+          "verdeMin": 10,
+          "lumMin": 15
         }
-      },
-      "_nota": "revisión 30/oct: el cuadro 2 salía cortado en la cintura (un torso apoyado en el piso): repite el 1",
-      "usar": [0, 1, 1, 3, 4]
+      ]
     },
     "especial2": {
       "alias": {
@@ -283,6 +331,13 @@
           "excluir": [
             [[40, 948], [50, 948], [52, 976], [50, 988], [38, 988], [37, 976]]
           ]
+        },
+        "2": {
+          "_nota": "revisión 31/oct: sin el objeto blanco y negro pegado a la espalda ni la pieza del cuadro siguiente arriba de la zapatilla de adelante",
+          "excluir": [
+            [[158, 874], [180, 874], [180, 886], [175, 893], [171, 900], [158, 900]],
+            [[200, 952], [218, 952], [218, 976], [208, 976], [200, 970]]
+          ]
         }
       }
     },
@@ -302,26 +357,55 @@
       "escala": 0.855
     },
     "burla": {
+      "_nota": "revisión 31/oct: el último cuadro de la hoja es de espaldas y quedaba fijo al arrancar la pelea (el lado 1 termina la burla justo cuando empieza): la burla termina en el 3, mirando al rival. Manchas de fondo pegadas al cuerpo (sobre fondo claro, una «pollera» oscura): en el 0 la franja del resplandor del vecino al costado derecho; en el 1 las franjas a los dos costados de las piernas, el hueco entre las piernas, el piso entre los pies y la luz roja en la mano (se pinta de negro); en el 2 el hueco entre las piernas",
       "panel": [1194, 847, 1528, 997],
       "cuadros": 5,
       "escala": 0.855,
       "cortes": [[1255, 1263], [1322, 1332], [1389, 1398], [1460, 1470]],
+      "usar": [0, 1, 2, 3],
       "pintar": [
         {
           "zona": [1200, 895, 1300, 960],
           "satMin": 0.6,
           "rojoMin": 70,
           "lumMin": 50
+        },
+        {
+          "nota": "la luz roja junto a la mano del cuadro 1 (la piel tiene el verde alto: no entra)",
+          "zona": [1266, 930, 1281, 950],
+          "rMin": 70,
+          "gMax": 75,
+          "satMin": 0.45,
+          "color": [27, 24, 24]
         }
-      ]
+      ],
+      "porCuadro": {
+        "0": {
+          "excluir": [[[1252, 928], [1265, 928], [1265, 977], [1249, 977], [1247, 965], [1247, 945], [1249, 936]]]
+        },
+        "1": {
+          "excluir": [
+            [[1250, 948], [1263, 948], [1263, 976], [1260, 977], [1259, 987], [1250, 987]],
+            [[1283, 950], [1287, 950], [1291, 962], [1294, 970], [1296, 976], [1296, 991], [1276, 991], [1276, 976], [1280, 968], [1282, 960]],
+            [1276, 990, 1296, 997],
+            [[1303, 946], [1320, 946], [1320, 978], [1307, 978], [1307, 969], [1303, 968]]
+          ]
+        },
+        "2": {
+          "excluir": [
+            [[1352, 952], [1357, 952], [1359, 962], [1361, 972], [1362, 978], [1346, 978], [1347, 970], [1350, 962]]
+          ]
+        }
+      }
     }
   },
   "efectos": {
     "guante": {
-      "caja": [840, 668, 980, 790],
+      "_nota": "revisión 31/oct: la caja terminaba en x=980 y el círculo estaba corrido a la izquierda (agarraba la muñeca y medio guante); ahora la elipse es la del guante entero (centro 959,725)",
+      "caja": [895, 668, 1012, 790],
       "inferencia": "caja",
       "limite": [
-        [[961, 722], [959, 732], [955, 742], [948, 750], [938, 757], [928, 761], [916, 762], [904, 761], [894, 757], [884, 750], [877, 742], [874, 732], [874, 722], [874, 712], [877, 702], [884, 694], [894, 687], [904, 683], [916, 682], [928, 683], [938, 687], [948, 694], [955, 702], [959, 712]]
+        [[1005, 725], [1003, 736], [999, 747], [992, 756], [982, 763], [971, 768], [959, 769], [947, 768], [936, 763], [926, 756], [919, 747], [915, 736], [913, 725], [915, 714], [919, 703], [926, 694], [936, 687], [947, 682], [959, 681], [971, 682], [982, 687], [992, 694], [999, 703], [1003, 714]]
       ]
     }
   }

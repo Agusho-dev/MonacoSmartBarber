@@ -6,16 +6,16 @@
 //              sólo en desarrollo; "s=parana" entra con la sucursal)
 //     tamaños: "390x844,360x740,844x390,667x375" (por defecto)
 //     extras:  "rival" (también la captura eligiendo el rival), "scroll" (también el final de la lista)
-//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (por defecto http://localhost:3100)
+//   SALIDA=<carpeta> (por defecto, <tmp>/corte-final-capturas) · URL_BASE (obligatoria, p. ej. http://localhost:3210)
 //
 // Contra el servidor de DESARROLLO (el atajo ?qr= no existe en producción). No escribe en la base.
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { abrirChrome, esperar } from './cdp.mjs'
+import { abrirChrome, esperar, urlBase } from './cdp.mjs'
 
 const SALIDA = process.env.SALIDA || join(tmpdir(), 'corte-final-capturas')
-const BASE = process.env.URL_BASE || 'http://localhost:3100'
+const BASE = urlBase()
 const [query = '', tams = '390x844,360x740,844x390,667x375', extras = ''] = process.argv.slice(2)
 const prefijo = 'seleccion' + (query ? '_' + query.replace(/[^a-z0-9]+/gi, '-') : '')
 mkdirSync(SALIDA, { recursive: true })

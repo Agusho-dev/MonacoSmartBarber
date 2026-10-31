@@ -94,14 +94,40 @@ export interface PresenciaJugador {
   e: EstadoJugador
   /** versionJuego() del que publica. */
   v: string
+  /**
+   * Número del estado `e` (sube con cada cambio de estado del que publica). La presencia llega a
+   * los demás 0,3–2,8 s tarde (más si el cupo la frena); el mismo estado viaja enseguida por
+   * broadcast (MsjEstadoSala) con su número, y se muestra el más nuevo. -1 = no lo mandó.
+   */
+  s: number
 }
+
+const MAX_SECUENCIA = 1_000_000_000
 
 export function leerPresencia(v: unknown): PresenciaJugador | null {
   if (!esObjeto(v) || !esId(v.id) || !esVersion(v.v)) return null
   if (typeof v.e !== 'string' || !(ESTADOS as readonly string[]).includes(v.e)) return null
   const n = sanearNombre(v.n)
   if (!n) return null
-  return { id: v.id, n, e: v.e as EstadoJugador, v: v.v }
+  const s = esEntero(v.s, 0, MAX_SECUENCIA) ? v.s : -1
+  return { id: v.id, n, e: v.e as EstadoJugador, v: v.v, s }
+}
+
+/**
+ * Broadcast de la sala (evento «estado»): «ahora estoy libre / eligiendo / peleando», con el mismo
+ * número que la presencia. Llega en ≈ 0,3 s, cuando la presencia puede tardar casi 3: sin esto, al
+ * volver a la sala el rival seguía «Peleando» y DESAFIAR deshabilitado hasta 3 s.
+ */
+export interface MsjEstadoSala {
+  de: string
+  e: EstadoJugador
+  s: number
+}
+
+export function leerEstadoSala(v: unknown): MsjEstadoSala | null {
+  if (!esObjeto(v) || !esId(v.de) || !esEntero(v.s, 0, MAX_SECUENCIA)) return null
+  if (typeof v.e !== 'string' || !(ESTADOS as readonly string[]).includes(v.e)) return null
+  return { de: v.de, e: v.e as EstadoJugador, s: v.s }
 }
 
 // ─── Desafíos (broadcast de la sala) ─────────────────────────────────────────

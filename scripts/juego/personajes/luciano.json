@@ -7,7 +7,8 @@
     "caja": [1458, 838, 1524, 986],
     "espejo": true,
     "alto": 720,
-    "cara": [1473, 840, 1519, 886],
+    "_notaCara": "revisión 31/oct: la cara se recorta más cerrada (38 px en vez de 46, centrada en la cabeza): en la grilla de 43 px y en el HUD la cara se veía chica al lado de las de Simón y Chipi",
+    "cara": [1476, 842, 1514, 880],
     "nitidez": 110,
     "fondoLiso": {
       "std": 4.5,
@@ -27,21 +28,45 @@
   },
   "animaciones": {
     "quieto": {
+      "_nota": "revisión 31/oct: con el apoyo en el torso los pies patinaban (el de atrás saltaba 14 u del mundo entre los cuadros 1 y 2); apoyoX deja quieto el punto medio de los pies (≤ 5,2 u), con el mismo apoyo promedio",
       "panel": [9, 33, 352, 158],
-      "cuadros": 5
+      "cuadros": 5,
+      "porCuadro": {
+        "0": {"apoyoX": 40.3},
+        "1": {"apoyoX": 108.3},
+        "2": {"apoyoX": 176.8},
+        "3": {"apoyoX": 246.3},
+        "4": {"apoyoX": 311.3}
+      }
     },
     "caminar": {
       "panel": [359, 33, 720, 158],
       "cuadros": 5
     },
     "correr": {
+      "_nota": "revisión 31/oct: la zapatilla de atrás del primer cuadro está pisando la barra que separa los paneles (x 719-740), afuera de este panel: la pierna terminaba en el tobillo. Ese cuadro sale de «_correr0» (su panel arranca en x=714) y va al final: el ciclo queda [1, 2, 3, 0], el mismo bucle",
       "panel": [726, 33, 1086, 158],
       "cuadros": 4,
       "cortes": [
         [[840, 33], [840, 104], [803, 122], [803, 160]],
         [[929, 33], [929, 104], [906, 118], [890, 128], [890, 160]],
         [[1012, 33], [1012, 90], [999, 98], [999, 103], [980, 118], [969, 130], [969, 160]]
-      ]
+      ],
+      "usar": [1, 2, 3],
+      "sumar": [["_correr0", 0]]
+    },
+    "_correr0": {
+      "_nota": "auxiliar (no es una animación del atlas): el primer cuadro de correr, del mismo panel corrido 12 px a la izquierda para que entre la zapatilla de atrás (con un panel angosto el modelo le pegaba un borde de fondo a todo el cuerpo); la barra clara del borde (x 719-727) se saca arriba de la zapatilla",
+      "panel": [714, 33, 1086, 158],
+      "cuadros": 4,
+      "cortes": [
+        [[840, 33], [840, 104], [803, 122], [803, 160]],
+        [[929, 33], [929, 104], [906, 118], [890, 128], [890, 160]],
+        [[1012, 33], [1012, 90], [999, 98], [999, 103], [980, 118], [969, 130], [969, 160]]
+      ],
+      "margenX": 0,
+      "excluirPanel": [[714, 33, 719, 158], [719, 33, 728, 137], [1080, 33, 1086, 158]],
+      "usar": [0]
     },
     "dash": {
       "panel": [1092, 33, 1526, 158],
@@ -107,8 +132,12 @@
       ],
       "porCuadro": {
         "1": {
+          "_nota": "revisión 31/oct: el pantalón liso de la pierna estirada salía agujereado: «incluir» la rellena",
           "caja": [748, 176, 846, 314],
-          "inferencia": "ancho"
+          "inferencia": "ancho",
+          "incluir": [
+            [[768, 256], [797, 258], [797, 264], [794, 270], [791, 276], [789, 282], [785, 287], [780, 291], [773, 294], [760, 292], [758, 286], [763, 272]]
+          ]
         },
         "2": {
           "caja": [842, 176, 931, 314],
@@ -118,10 +147,18 @@
       }
     },
     "caer": {
+      "_nota": "revisión 31/oct: la pierna estirada del cuadro 0 (la bajada de cada salto) salía llena de agujeros y sin la zapatilla (gris sobre gris): «incluir» con su contorno, hasta la zapatilla",
       "panel": [1020, 195, 1526, 314],
       "cuadros": 5,
       "usar": [0, 0, 1],
       "cortes": [[1172, 1182], [1255, 1268], [1338, 1350], [1420, 1435]],
+      "porCuadro": {
+        "0": {
+          "incluir": [
+            [[1088, 228], [1092, 224], [1101, 220], [1105, 215], [1118, 213], [1123, 210], [1127, 210], [1131, 208], [1134, 207], [1140, 207], [1144, 208], [1148, 209], [1151, 212], [1156, 214], [1158, 218], [1159, 236], [1158, 241], [1153, 245], [1145, 246], [1136, 245], [1128, 248], [1120, 253], [1103, 257], [1095, 258], [1088, 256]]
+          ]
+        }
+      },
       "sumar": [[
           "saltar",
           0
@@ -146,8 +183,27 @@
         {
           "zona": [384, 399, 404, 415],
           "lumMin": 25
+        },
+        {
+          "nota": "revisión 31/oct: el núcleo del destello pegado al puño (quedaba un recuadro dorado): la piel tiene el verde más bajo",
+          "zona": [394, 381, 404, 399],
+          "gMin": 185,
+          "lumMin": 200
+        },
+        {
+          "nota": "el halo naranja del destello (más saturado que la piel)",
+          "zona": [394, 381, 404, 399],
+          "rojoMin": 125,
+          "satMin": 0.6,
+          "lumMin": 120
         }
-      ]
+      ],
+      "porCuadro": {
+        "4": {
+          "_nota": "lo que queda del destello delante de los nudillos (x >= 399; el render dibuja su propio destello en el impacto)",
+          "excluir": [[399, 380, 406, 401]]
+        }
+      }
     },
     "patada": {
       "panel": [446, 351, 817, 471],
@@ -240,6 +296,10 @@
           "excluir": [[294, 512, 330, 634], [283, 580, 294, 611]]
         },
         "3": {
+          "_nota": "revisión 31/oct: la espalda y la pierna del piloto quedaban deshilachadas (sólo las rayas rojas, el negro de la campera se perdía entre las estelas): «incluir» con el contorno de la espalda",
+          "incluir": [
+            [[428, 538], [440, 538], [445, 560], [445, 595], [420, 600], [404, 594], [398, 584], [396, 570], [398, 556], [406, 546], [416, 541]]
+          ],
           "excluir": [
             [[330, 512], [398, 512], [396, 585], [352, 590], [330, 590]],
             [330, 585, 352, 633],

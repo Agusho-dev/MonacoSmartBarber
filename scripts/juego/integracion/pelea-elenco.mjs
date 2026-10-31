@@ -2,7 +2,9 @@
 //   node scripts/juego/integracion/pelea-elenco.mjs <jugador> <rival> <arena> <anchoxalto> [puerto]
 //   (todas-cpu.sh corre las 11 del elenco nuevo: cada uno una vez como jugador y otra como rival)
 // - Entra con /juego?prueba=<jugador>,<rival>,<arena>,normal (sólo desarrollo).
-// - 20 s de toques al azar (stick + GOLPE/MÁQUINA/GUARDIA/ESQUIVA + cartas).
+// - 20 s de toques al azar (stick SOSTENIDO con el dedo 1 + GOLPE/MÁQUINA/GUARDIA/ESQUIVA + cartas con
+//   el dedo 2). Después de cada toque: ningún botón ni carta queda apretado y el stick sigue tomado
+//   (multitouch de verdad: cdp.mjs suelta sólo el dedo que se levanta).
 // - Los dos especiales del jugador con la carta (la carga se llena por el gancho de pruebas para no
 //   esperar): mide que salga el evento `especial`, lo que tira (proyectiles/estados/curación) y las
 //   fuentes de sonido que se crean en los 1,2 s siguientes; saca una foto del efecto.
@@ -10,11 +12,11 @@
 // - Consola: cero errores y avisos (incluidos los 404 de recursos).
 // En el resultado NO se toca nada (los botones guardan en la base de producción).
 import { writeFileSync } from 'node:fs'
-import { abrirChrome, esperar, DIR } from './cdp.mjs'
+import { abrirChrome, esperar, DIR, urlBase } from './cdp.mjs'
 
 const [jugador, rival, arena = 'rondeau', tam = '844x390', puerto = '9381'] = process.argv.slice(2)
 const [ancho, alto] = tam.split('x').map(Number)
-const URL = `${process.env.URL_BASE || 'http://localhost:3100'}/juego?prueba=${jugador},${rival},${arena},normal`
+const URL = `${urlBase()}/juego?prueba=${jugador},${rival},${arena},normal`
 const nombre = `${jugador}_vs_${rival}_${tam}`
 let semilla = 7
 const rnd = () => { semilla = (semilla * 1103515245 + 12345) & 0x7fffffff; return semilla / 0x7fffffff }
@@ -41,7 +43,18 @@ try {
   const btn = {}
   for (const b of ['golpe', 'herramienta', 'guardia', 'dash']) btn[b] = await c.centro(`[data-boton="${b}"]`)
   const carta = [await c.centro('[data-carta="1"]'), await c.centro('[data-carta="2"]')]
-  const tocarEn = async (b, ms = 40) => { await c.dedo.bajar(2, b[0], b[1]); await esperar(ms); await c.dedo.subir(2) }
+  // Multitouch: después de levantar el dedo 2 no puede quedar ningún botón ni carta con data-activo
+  // y, mientras el pulgar sigue en el stick, el joystick tiene que seguir tomado.
+  const multitouch = { toques: 0, colgados: [], stickSuelto: 0 }
+  const tocarEn = async (b, ms = 40, conStick = false) => {
+    await c.dedo.bajar(2, b[0], b[1])
+    await esperar(ms)
+    await c.dedo.subir(2)
+    multitouch.toques++
+    const e = await c.evaluar(`({ colgados: [...document.querySelectorAll('[data-boton][data-activo], [data-carta][data-activo]')].map((x) => x.dataset.boton || 'carta ' + x.dataset.carta), stick: !!document.querySelector('[data-zona="joystick"][data-activo]') })`)
+    if (e.colgados.length) multitouch.colgados.push(e.colgados.join('+'))
+    if (conStick && !e.stick) multitouch.stickSuelto++
+  }
   const tick0 = await c.evaluar('window.__corteFinal.partida.tick')
   const t0 = Date.now()
   // 1) Toques al azar.
@@ -54,14 +67,18 @@ try {
     const r = 0.4 + rnd() * 1.0
     c.dedo.moverYa(1, P0[0] + Math.cos((ang * Math.PI) / 180) * r * g.R, P0[1] - Math.sin((ang * Math.PI) / 180) * r * g.R)
     const q = rnd()
-    if (q < 0.45) await tocarEn(btn.golpe)
-    else if (q < 0.55) await tocarEn(btn.herramienta)
-    else if (q < 0.62) await tocarEn(btn.guardia, 300)
-    else if (q < 0.68) await tocarEn(btn.dash)
-    else if (q < 0.74) await tocarEn(carta[Math.floor(rnd() * 2)], 60)
+    if (q < 0.45) await tocarEn(btn.golpe, 40, true)
+    else if (q < 0.55) await tocarEn(btn.herramienta, 40, true)
+    else if (q < 0.62) await tocarEn(btn.guardia, 300, true)
+    else if (q < 0.68) await tocarEn(btn.dash, 40, true)
+    else if (q < 0.74) await tocarEn(carta[Math.floor(rnd() * 2)], 60, true)
     await esperar(80 + rnd() * 120)
   }
   await c.dedo.subir(1)
+  verificar(
+    multitouch.toques >= 10 && multitouch.colgados.length === 0 && multitouch.stickSuelto === 0,
+    `${nombre}: multitouch, ${multitouch.toques} toques con el stick sostenido → ${multitouch.colgados.length} con algo colgado${multitouch.colgados.length ? ' (' + [...new Set(multitouch.colgados)].join(', ') + ')' : ''}, ${multitouch.stickSuelto} con el stick suelto`,
+  )
   const tick1 = await c.evaluar('window.__corteFinal.partida.tick')
   const tps = (tick1 - tick0) / ((Date.now() - t0) / 1000)
   const est = await c.evaluar(`(() => { const p = window.__corteFinal.partida; return { fase: p.fase, round: p.round, vida: p.luchadores.map((l) => Math.round(l.vida)), intentados: p.estadisticas[0].golpesIntentados, acertados: p.estadisticas[0].golpesAcertados, especiales: [p.estadisticas[0].especialesUsados, p.estadisticas[1].especialesUsados] } })()`)
@@ -125,6 +142,7 @@ try {
   const pedidos404 = await c.evaluar(`performance.getEntriesByType('resource').filter((r) => r.responseStatus >= 400).map((r) => r.responseStatus + ' ' + r.name)`)
   const juego = await c.evaluar(`performance.getEntriesByType('resource').filter((r) => /\\/juego\\/personajes\\//.test(r.name)).map((r) => r.name.split('/juego/personajes/')[1])`)
   anotar(`      recursos de personajes pedidos: ${JSON.stringify(juego)}`)
+  verificar(multitouch.colgados.length === 0, `${nombre}: en toda la pelea (${multitouch.toques} toques) ningún botón ni carta quedó apretado`)
   verificar(pedidos404.length === 0, `${nombre}: ningún pedido con error (${pedidos404.length ? pedidos404.join(' | ') : 'ninguno'})`)
   verificar(c.consola.length === 0, `${nombre}: consola ${c.consola.length ? c.consola.slice(0, 8).join(' | ') : 'sin errores ni avisos'}`)
   anotar(fallas === 0 ? `${nombre} TODO OK` : `${nombre} ${fallas} FALLAS`)

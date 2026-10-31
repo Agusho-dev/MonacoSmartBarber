@@ -23,6 +23,15 @@ import { IDS_PERSONAJES } from '@/lib/juego/personajes'
 import { IDS_ARENAS } from '@/lib/juego/arenas'
 import { firmarTokenJuego, leerTokenJuego } from '@/lib/juego/token'
 import {
+  LIMITE_GUARDAR_IP,
+  LIMITE_GUARDAR_JUGADOR,
+  claveJugador,
+  normalizarDispositivo,
+  segundosHasta,
+  type PartidaAGuardar,
+  type RespuestaGuardado,
+} from '@/lib/juego/guardado'
+import {
   ZONA_POR_DEFECTO,
   diaEnZona,
   nombreDePila,
@@ -39,7 +48,6 @@ import type {
   FilaRanking,
   IdArena,
   IdPersonaje,
-  PartidaParaGuardar,
   PeriodoRanking,
 } from '@/lib/juego/tipos'
 
@@ -47,6 +55,7 @@ const ERROR_GUARDAR = 'No pudimos guardar la partida. Probá de nuevo en un rato
 const ERROR_DATOS = 'Los datos de la partida no son válidos.'
 const ERROR_RANKING = 'No pudimos cargar el ranking. Probá de nuevo en un rato.'
 const ERROR_ESTADISTICAS = 'No pudimos cargar las estadísticas.'
+const ERROR_TOPE = 'Guardaste muchas partidas seguidas. Esperá unos minutos y probá de nuevo.'
 
 function mensaje(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -147,10 +156,15 @@ const entero = (min: number, max: number) =>
     .transform((n) => Math.round(n))
     .pipe(z.number().int().min(min).max(max))
 
-/** Rangos realistas para una partida al mejor de 3 de ~2–3 minutos (la base tiene redes más holgadas). */
+/**
+ * Rangos realistas para una partida al mejor de 3 (dura de ≈ 30 s a 4 min; la base tiene redes
+ * más holgadas). `dispositivo` es opcional y nunca hace rechazar la partida: si no tiene forma de
+ * UUID se toma como que no vino (la página de antes del 30/oct no lo manda).
+ */
 const esquemaPartida = z.object({
   token: z.string().max(400).nullish(),
   sucursalSlug: z.string().max(64).nullish(),
+  dispositivo: z.string().max(64).nullish().catch(null),
   apodo: z.string().max(64),
   personaje: z.string().refine(esPersonaje),
   rival: z.string().refine(esPersonaje),
@@ -193,8 +207,20 @@ function techoDePuntaje(p: PartidaValidada): number {
   return techo * 2 + 1000
 }
 
-const LIMITE_GUARDAR = { limit: 6, window: 600 }
-const LIMITE_GUARDAR_IP_CON_QR = { limit: 40, window: 600 }
+/**
+ * El rate limit del guardado (topes y claves en src/lib/juego/guardado.ts). Null si pasa; si no,
+ * los segundos hasta que se libera el cupo. Primero el techo de la IP y DESPUÉS el del jugador: el
+ * id del dispositivo lo arma el celular, y así una clave inventada en cada pedido no crea filas en
+ * `rate_limits` (que nadie limpia) más allá del techo. Un pedido frenado igual suma 1 en su ventana
+ * (check_rate_limit), pero la ventana termina cuando terminaba: reintentar no la estira.
+ */
+async function esperaPorTope(ip: string, clave: string): Promise<number | null> {
+  const porIp = await rateLimit('juego_guardar_ip', ip, LIMITE_GUARDAR_IP)
+  if (!porIp.allowed) return segundosHasta(porIp.reset_at, Date.now(), LIMITE_GUARDAR_IP.window)
+  const porJugador = await rateLimit('juego_guardar', clave, LIMITE_GUARDAR_JUGADOR)
+  if (!porJugador.allowed) return segundosHasta(porJugador.reset_at, Date.now(), LIMITE_GUARDAR_JUGADOR.window)
+  return null
+}
 
 interface FilaEntradaParaGuardar {
   branch_id: string | null
@@ -208,13 +234,16 @@ interface FilaEntradaParaGuardar {
  * sucursal salen del token del QR o, sin token, del slug; sin ninguna de las
  * dos, la partida queda en la organización del juego sin sucursal.
  *
- * Rate limit: 6 cada 10 min por jugador. Con QR el jugador es IP + entrada de
- * la fila (los clientes del local comparten el wifi), con un techo de 40 por
- * IP; sin QR, la IP.
+ * Rate limit: 24 cada 10 min por jugador y un techo de 150 por IP (los clientes
+ * del local comparten el wifi). El jugador es, con QR, IP + entrada de la fila;
+ * sin QR, IP + id del dispositivo; y con la página de antes del 30/oct, que no
+ * manda el dispositivo, la IP. El rechazo por el tope pasa ANTES del insert y
+ * vuelve con `motivo: 'tope'` y `esperarSeg`: es el único que el celular
+ * reintenta solo (src/lib/juego/pendientes.ts), porque se sabe que no se guardó
+ * nada. La forma de la respuesta es la de siempre; esos dos campos son nuevos y
+ * opcionales (Known Risk #38).
  */
-export async function guardarPartidaJuego(
-  input: PartidaParaGuardar,
-): Promise<{ ok: true; puesto: number | null } | { ok: false; error: string }> {
+export async function guardarPartidaJuego(input: PartidaAGuardar): Promise<RespuestaGuardado> {
   const parseo = esquemaPartida.safeParse(input)
   if (!parseo.success) {
     console.warn('[juego] partida rechazada:', parseo.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
@@ -238,13 +267,9 @@ export async function guardarPartidaJuego(
   try {
     const token = leerTokenJuego(p.token)
     const ip = await getClientIP()
-    const [porJugador, porIp] = await Promise.all([
-      rateLimit('juego_guardar', token ? `${ip}:${token.queueEntryId}` : ip, LIMITE_GUARDAR),
-      token ? rateLimit('juego_guardar_ip', ip, LIMITE_GUARDAR_IP_CON_QR) : Promise.resolve(null),
-    ])
-    if (!porJugador.allowed || (porIp && !porIp.allowed)) {
-      return { ok: false, error: 'Guardaste muchas partidas seguidas. Esperá unos minutos y probá de nuevo.' }
-    }
+    const clave = claveJugador(ip, token?.queueEntryId ?? null, normalizarDispositivo(p.dispositivo))
+    const espera = await esperaPorTope(ip, clave)
+    if (espera !== null) return { ok: false, error: ERROR_TOPE, motivo: 'tope', esperarSeg: espera }
 
     const admin = createAdminClient()
     const orgId = await orgDelJuego(admin)

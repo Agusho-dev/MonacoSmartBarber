@@ -57,7 +57,9 @@ export function hashPartida(p: Partida): number {
     h = mezclarEntero(h, l.mira)
     h = mezclarTexto(h, l.estado)
     h = mezclarTexto(h, l.anim)
-    h = mezclarEntero(h, l.cuadro)
+    // animTick y no `cuadro`: el cuadro sale del atlas.json que bajó CADA celular, y un atlas
+    // retocado en un deploy anulaba peleas con la simulación idéntica (revisión del 30/oct).
+    h = mezclarEntero(h, l.animTick)
     h = mezclarEntero(h, l.combo)
     h = mezclarNumero(h, l.efectos.congelado)
     h = mezclarNumero(h, l.efectos.electrocutado)
@@ -81,5 +83,7 @@ export function hashPartida(p: Partida): number {
   // El estado del azar del combate (críticos, desempates): si difiere, la partida ya se fue.
   const interno = internoSiExiste(p)
   h = mezclarEntero(h, interno ? interno.azar.s >>> 0 : 0)
+  // El reloj del encierro (TOPE_ENCIERRO): decide si un golpe agarra, congela o derriba.
+  for (const li of interno?.luchadores ?? []) h = mezclarEntero(h, li.sinControl)
   return h >>> 0
 }

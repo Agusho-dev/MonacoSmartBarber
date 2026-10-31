@@ -87,6 +87,13 @@ export function crearEstadoEventos(): EstadoEventos {
 /** Como mucho, tantos eventos por cuadro (una ráfaga rara no satura). */
 const MAX_EVENTOS_POR_CUADRO = 32
 const MAX_BUCLES = 5
+/**
+ * Un bucle del elenco que está por terminar (le quedan menos de estos segundos) con su proyectil
+ * todavía en vuelo se empalma con uno nuevo: los bucles duran un tiempo fijo y la onda del Grito
+ * vive hasta 3,8 s (más con un super flash, que congela el mundo pero no el audio) contra 2,5 s
+ * de sonido, y el gorro vuelve a los ≈ 2,3 s contra 2 s: el último tramo volaba mudo.
+ */
+const EMPALME_S = 0.3
 /** En estas fases no se oyen golpes contra el piso de proyectiles que se limpian. */
 const FASES_SIN_FINALES: ReadonlySet<FasePartida> = new Set<FasePartida>(['presentacion', 'anuncio', 'terminada'])
 const TIPOS_ELENCO: ReadonlySet<TipoProyectil> = new Set<TipoProyectil>([
@@ -409,6 +416,16 @@ function seguirProyectiles(m: Mesa, p: Partida, est: EstadoEventos, t: number): 
     const v = est.bucles.get(pr.id)
     if (v) {
       if (v.pan) suavizar(v.pan.pan, pan, ahora, 0.04)
+      // Sigue volando y su bucle se termina: otro igual que entra mientras éste se apaga. No antes
+      // del segundo de vida: un bucle que la mesa cortó para hacer lugar (tope de voces) no se
+      // rearma en cada cuadro, robándole el lugar a otro que a su vez se rearmaría.
+      if (v.fin - ahora > EMPALME_S || ahora - v.t0 < 1 || !TIPOS_ELENCO.has(pr.tipo)) continue
+      if (pr.tipo === 'graffiti' && pr.edad >= TIEMPOS_PROYECTIL.graffitiEstalla) continue
+      const otro = bucleElenco(m, t, pr.tipo, pan)
+      if (otro) {
+        m.cortar(v, EMPALME_S)
+        est.bucles.set(pr.id, otro)
+      }
       continue
     }
     if (est.bucles.size >= MAX_BUCLES) continue
@@ -417,7 +434,8 @@ function seguirProyectiles(m: Mesa, p: Partida, est: EstadoEventos, t: number): 
     // El graffiti que ya estalló no vuelve a sisear.
     if (pr.tipo === 'graffiti' && pr.edad >= TIEMPOS_PROYECTIL.graffitiEstalla) continue
     const elenco = bucleElenco(m, t, pr.tipo, pan)
-    // null = ése no lleva bucle; para no volver a probar cada cuadro, se anota sin voz
+    // null = ése no lleva bucle (bala, trago, botella, pelota, pañal, mate). Se vuelve a preguntar
+    // en cada cuadro: es un switch que no arma ningún nodo.
     if (elenco === null) continue
     const nuevo =
       elenco !== undefined

@@ -20,6 +20,15 @@
  * Desafío: A manda «desafio» a B (con el id del canal de la pelea). B lo acepta sólo si A está
  * en la presencia de la sala y tiene la misma versión. Si A y B se desafían a la vez, manda el
  * del id menor (el otro lo acepta solo).
+ *
+ * La presencia llega TARDE a los demás: el eco propio vuelve en ≈ 0,2 s, pero el cambio tarda
+ * 0,3–2,8 s en llegarle al otro (medido el 30/oct/2026; el servidor de Realtime junta los cambios
+ * de presencia entre sus nodos) y más si el cupo la frena. Al volver a la sala después de un
+ * duelo, el rival seguía «Peleando» y DESAFIAR deshabilitado hasta 3 s. Por eso cada cambio de
+ * estado sale además por broadcast («estado», ≈ 0,3 s) con un número que sube en cada cambio y
+ * que la presencia también lleva: de cada jugador se muestra el estado más nuevo de los dos. El
+ * broadcast no agrega jugadores (la lista la manda la presencia) y cuesta un mensaje por jugador
+ * de la sala por cambio (tres por duelo).
  */
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import type { Lado } from '../tipos'
@@ -27,6 +36,7 @@ import {
   type EstadoJugador,
   leerCancelar,
   leerDesafio,
+  leerEstadoSala,
   leerPresencia,
   leerRespuesta,
   type MotivoRechazo,
@@ -55,6 +65,10 @@ const REUNIR_MAX_MS = 60_000
 /** Un desafío de alguien que la presencia todavía no muestra: se espera un toque. */
 const ESPERA_PRESENCIA_MS = 2500
 const MAX_JUGADORES = 40
+/** Entre un broadcast «estado» y el siguiente (siempre sale el último estado). */
+const ESTADO_MIN_MS = 300
+/** El estado por broadcast de alguien que la presencia no muestra: se guarda este rato, por si llega. */
+const PISTA_VIDA_MS = 15_000
 
 export interface JugadorSala {
   id: string
@@ -142,8 +156,16 @@ export class Sala {
   private cierresSeguidos = 0
   private unidaDesde = 0
   private estado: EstadoJugador = 'libre'
+  /** Número del estado propio: sube con cada cambio (viaja en la presencia y en el broadcast). */
+  private secuencia = 0
+  private ultimoEstado = -Infinity
+  private timerEstado: ReturnType<typeof setTimeout> | null = null
   private nombre = 'Jugador'
   private jugadores = new Map<string, JugadorSala>()
+  /** El número del estado que trae la presencia de cada jugador (-1 = una versión que no lo manda). */
+  private secuenciaPresencia = new Map<string, number>()
+  /** El último estado de cada jugador que llegó por broadcast, si es más nuevo que su presencia. */
+  private pistas = new Map<string, { e: EstadoJugador; s: number; t: number }>()
   private vistos = new Set<string>()
   private entrante: DesafioEntrante | null = null
   private saliente: DesafioSaliente | null = null
@@ -281,6 +303,9 @@ export class Sala {
       .on('broadcast', { event: 'cancelar' }, (msg: { payload?: unknown }) => {
         if (this.canal === canal) this.alCancelar(msg?.payload)
       })
+      .on('broadcast', { event: 'estado' }, (msg: { payload?: unknown }) => {
+        if (this.canal === canal) this.alEstadoSala(msg?.payload)
+      })
       .subscribe((estado) => {
         if (this.canal !== canal) return
         if (estado === 'SUBSCRIBED') {
@@ -314,7 +339,11 @@ export class Sala {
     this.unida = false
     if (this.timerTrack !== null) clearTimeout(this.timerTrack)
     this.timerTrack = null
+    if (this.timerEstado !== null) clearTimeout(this.timerEstado)
+    this.timerEstado = null
     this.jugadores.clear()
+    this.secuenciaPresencia.clear()
+    this.pistas.clear()
     if (this.entrante) this.entrante = null
     if (this.saliente?.estado === 'esperando') this.saliente = null
     this.pendientes = []
@@ -339,6 +368,18 @@ export class Sala {
       )
     }
     this.avisar()
+  }
+
+  /**
+   * El socket abierto. Si realtime-js lo está cerrando (un latido vencido), la sala todavía figura
+   * unida y `send` caería al POST por REST: un broadcast que no sale ahora no se manda.
+   */
+  private socketAbierto(): boolean {
+    try {
+      return this.o.cliente().realtime.isConnected()
+    } catch {
+      return true
+    }
   }
 
   /** Si de verdad se dejó la sala (oculta o desmontada) y no queda ningún canal: no gastar una conexión. */
@@ -423,14 +464,38 @@ export class Sala {
     this.timerTrack = null
     this.ultimoTrack = t
     this.publicadas.push(t)
-    void canal.track({ id: this.id, n: this.nombre, e: this.estado, v: versionJuego() }).catch(() => {})
+    void canal
+      .track({ id: this.id, n: this.nombre, e: this.estado, v: versionJuego(), s: this.secuencia })
+      .catch(() => {})
   }
 
-  /** libre / eligiendo / peleando: se publica sólo si cambia. */
+  /**
+   * El estado nuevo por broadcast, para que los demás lo vean ya (la presencia llega hasta 3 s
+   * después). Siempre el ÚLTIMO, con ESTADO_MIN_MS entre uno y otro.
+   */
+  private mandarEstado(): void {
+    if (!this.canal || !this.unida) return
+    const falta = ESTADO_MIN_MS - (this.ahora() - this.ultimoEstado)
+    if (falta > 0) {
+      if (this.timerEstado === null) {
+        this.timerEstado = setTimeout(() => {
+          this.timerEstado = null
+          this.mandarEstado()
+        }, falta)
+      }
+      return
+    }
+    this.ultimoEstado = this.ahora()
+    this.mandar('estado', { de: this.id, e: this.estado, s: this.secuencia })
+  }
+
+  /** libre / eligiendo / peleando: se publica sólo si cambia (por la presencia y por broadcast). */
   setEstado(e: EstadoJugador): void {
     if (this.estado === e) return
     this.estado = e
+    this.secuencia++
     this.publicar()
+    this.mandarEstado()
     this.avisar()
   }
 
@@ -447,13 +512,26 @@ export class Sala {
     if (!canal) return
     const estado = canal.presenceState() as Record<string, unknown[]>
     const nuevos = new Map<string, JugadorSala>()
+    const secuencias = new Map<string, number>()
     const miVersion = versionJuego()
+    const t0 = this.ahora()
     for (const [clave, metas] of Object.entries(estado)) {
       if (nuevos.size >= MAX_JUGADORES) break
       if (clave === this.id || !Array.isArray(metas) || metas.length === 0) continue
       const p = leerPresencia(metas[metas.length - 1])
       if (!p || p.id !== clave) continue
-      nuevos.set(p.id, { id: p.id, nombre: p.n, estado: p.e, compatible: p.v === miVersion })
+      // Lo que llegó por broadcast gana si es más nuevo; si la presencia ya lo alcanzó, se suelta.
+      const pista = this.pistas.get(p.id)
+      let e = p.e
+      if (pista && pista.s > p.s) e = pista.e
+      else if (pista) this.pistas.delete(p.id)
+      secuencias.set(p.id, p.s)
+      nuevos.set(p.id, { id: p.id, nombre: p.n, estado: e, compatible: p.v === miVersion })
+    }
+    this.secuenciaPresencia = secuencias
+    // Pistas de quien no está en la presencia: sólo un rato (la presencia puede llegar después).
+    for (const [id, pista] of this.pistas) {
+      if (!nuevos.has(id) && t0 - pista.t > PISTA_VIDA_MS) this.pistas.delete(id)
     }
 
     // Llegadas: una vez por jugador nuevo que viene a pelear.
@@ -492,9 +570,9 @@ export class Sala {
 
   // ─── Desafíos ──────────────────────────────────────────────────────────────
 
-  private mandar(evento: 'desafio' | 'respuesta' | 'cancelar', payload: Record<string, unknown>): void {
+  private mandar(evento: 'desafio' | 'respuesta' | 'cancelar' | 'estado', payload: Record<string, unknown>): void {
     const canal = this.canal
-    if (!canal || !this.unida) return
+    if (!canal || !this.unida || !this.socketAbierto()) return
     void canal.send({ type: 'broadcast', event: evento, payload }).catch(() => {})
   }
 
@@ -627,6 +705,21 @@ export class Sala {
     }
     this.saliente = { ...s, estado: m.m ?? 'no' }
     this.limpiarSalienteLuego(s.d)
+    this.avisar()
+  }
+
+  /** Alguien cambió de estado (broadcast): se muestra ya, sin esperar a que llegue su presencia. */
+  private alEstadoSala(crudo: unknown): void {
+    const m = leerEstadoSala(crudo)
+    if (!m || m.de === this.id) return
+    const previa = this.pistas.get(m.de)
+    if (previa && previa.s >= m.s) return
+    const j = this.jugadores.get(m.de)
+    // De alguien que la presencia no muestra (todavía): se guarda un rato, sin agregarlo a la lista.
+    if (!j && this.pistas.size >= MAX_JUGADORES * 2) return
+    this.pistas.set(m.de, { e: m.e, s: m.s, t: this.ahora() })
+    if (!j || m.s <= (this.secuenciaPresencia.get(m.de) ?? -1) || j.estado === m.e) return
+    this.jugadores.set(m.de, { ...j, estado: m.e })
     this.avisar()
   }
 

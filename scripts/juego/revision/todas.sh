@@ -4,6 +4,7 @@
 #   scripts/juego/revision/todas.sh <anchoxalto> [ids...]
 # Con varios agentes en la Mac, CANDADO=<comando> antepone el candado de Chrome a cada pelea
 # (ej. CANDADO="env TURNO=chrome $SP/herramientas/turno.sh"). SALIDA=<carpeta> como en pelea-revision.mjs.
+# URL_BASE (obligatoria): el servidor de desarrollo a probar (el :3100 es el del dueño).
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 TAM=${1:-844x390}
 shift

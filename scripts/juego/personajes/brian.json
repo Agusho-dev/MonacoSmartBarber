@@ -39,7 +39,94 @@
      "ventanaTinte": 7,
      "pasos": 40
     }
-   }
+   },
+   "retoques": {
+    "0": {
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         44,
+         95
+        ],
+        [
+         50,
+         113
+        ],
+        [
+         37,
+         113
+        ]
+       ],
+       "lumMax": 26
+      }
+     ]
+    },
+    "1": {
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         98,
+         95
+        ],
+        [
+         104,
+         107
+        ],
+        [
+         92,
+         107
+        ]
+       ],
+       "lumMax": 26
+      }
+     ]
+    },
+    "2": {
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         149,
+         95
+        ],
+        [
+         156,
+         113
+        ],
+        [
+         142,
+         113
+        ]
+       ],
+       "lumMax": 26
+      }
+     ]
+    },
+    "4": {
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         258,
+         95
+        ],
+        [
+         265,
+         112
+        ],
+        [
+         251,
+         112
+        ]
+       ],
+       "lumMax": 26
+      }
+     ]
+    }
+   },
+   "_nota": "revisión 31/oct: el fondo negro entre las piernas, del ruedo de la remera hasta donde abre el hueco, quedaba pegado (una «pollera» que aparecía y desaparecía con la respiración): se saca lo más oscuro (el fondo) en un triángulo entre las piernas de cada cuadro"
   },
   "caminar": {
    "mascara": [
@@ -121,7 +208,238 @@
     0,
     1,
     2
-   ]
+   ],
+   "excluir": {
+    "0": [
+     [
+      [
+       687,
+       107
+      ],
+      [
+       700,
+       104
+      ],
+      [
+       700,
+       134
+      ],
+      [
+       681,
+       134
+      ],
+      [
+       681,
+       114
+      ],
+      [
+       684,
+       112
+      ]
+     ]
+    ],
+    "1": [
+     [
+      [
+       762,
+       107
+      ],
+      [
+       773,
+       104
+      ],
+      [
+       773,
+       134
+      ],
+      [
+       756,
+       134
+      ],
+      [
+       756,
+       114
+      ],
+      [
+       759,
+       111
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       835,
+       108
+      ],
+      [
+       851,
+       104
+      ],
+      [
+       851,
+       134
+      ],
+      [
+       829,
+       134
+      ],
+      [
+       829,
+       113
+      ]
+     ]
+    ]
+   },
+   "agregar": {
+    "1": [
+     [
+      [
+       687,
+       107
+      ],
+      [
+       700,
+       104
+      ],
+      [
+       700,
+       134
+      ],
+      [
+       681,
+       134
+      ],
+      [
+       681,
+       114
+      ],
+      [
+       684,
+       112
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       762,
+       107
+      ],
+      [
+       773,
+       104
+      ],
+      [
+       773,
+       134
+      ],
+      [
+       756,
+       134
+      ],
+      [
+       756,
+       114
+      ],
+      [
+       759,
+       111
+      ]
+     ],
+     [
+      [
+       762,
+       108
+      ],
+      [
+       768,
+       104
+      ],
+      [
+       778,
+       101
+      ],
+      [
+       788,
+       96
+      ],
+      [
+       794,
+       96
+      ],
+      [
+       797,
+       101
+      ],
+      [
+       790,
+       106
+      ],
+      [
+       780,
+       109
+      ],
+      [
+       772,
+       113
+      ],
+      [
+       765,
+       114
+      ]
+     ]
+    ]
+   },
+   "_nota": "revisión 31/oct: la zapatilla de atrás de cada corredor cae del lado del cuadro anterior en la hoja (las piernas se cruzan): cada una vuelve a su dueño (excluir en el anterior, agregar en el suyo); antes cada cuadro llevaba la del siguiente y le faltaba la propia; en el 2 vuelve también la canilla de atrás (el pelado del fondo se la comía: es del mismo negro)",
+   "retoques": {
+    "2": {
+     "restaurar": [
+      [
+       [
+        762,
+        108
+       ],
+       [
+        768,
+        104
+       ],
+       [
+        778,
+        101
+       ],
+       [
+        788,
+        96
+       ],
+       [
+        794,
+        96
+       ],
+       [
+        797,
+        101
+       ],
+       [
+        790,
+        106
+       ],
+       [
+        780,
+        109
+       ],
+       [
+        772,
+        113
+       ],
+       [
+        765,
+        114
+       ]
+      ]
+     ]
+    }
+   }
   },
   "dash": {
    "mascara": [
@@ -172,51 +490,108 @@
        "satMax": 0.17,
        "lumMin": 72,
        "lumMax": 214
+      },
+      {
+       "zona": [
+        1036,
+        67,
+        1060,
+        93
+       ],
+       "lumMax": 35
       }
      ],
      "restaurar": [
       [
        [
         936,
-        117
+        112
        ],
        [
-        953,
-        117
+        931,
+        116
        ],
        [
-        956,
+        931,
+        130
+       ],
+       [
+        934,
+        133
+       ],
+       [
+        941,
+        133
+       ],
+       [
+        943,
+        131
+       ],
+       [
+        940,
+        127
+       ],
+       [
+        942,
         124
        ],
        [
-        954,
-        131
+        942,
+        122
        ],
        [
-        936,
-        131
+        939,
+        119
+       ],
+       [
+        941,
+        115
        ]
       ],
       [
        [
-        978,
-        106
+        987,
+        120
        ],
        [
-        999,
-        106
+        993,
+        126
+       ],
+       [
+        994,
+        125
+       ],
+       [
+        1000,
+        131
+       ],
+       [
+        1006,
+        131
+       ],
+       [
+        1008,
+        129
+       ],
+       [
+        1004,
+        124
+       ],
+       [
+        1003,
+        118
        ],
        [
         1001,
         116
        ],
        [
-        998,
-        123
+        997,
+        117
        ],
        [
-        980,
-        123
+        995,
+        113
        ]
       ]
      ],
@@ -329,51 +704,138 @@
        "satMax": 0.17,
        "lumMin": 72,
        "lumMax": 214
+      },
+      {
+       "zona": [
+        1148,
+        67,
+        1175,
+        96
+       ],
+       "lumMax": 35
       }
      ],
      "restaurar": [
       [
        [
-        1048,
-        118
+        1052,
+        110
        ],
        [
-        1064,
-        118
+        1049,
+        113
        ],
        [
-        1066,
-        125
+        1047,
+        128
        ],
        [
-        1064,
-        131
+        1051,
+        133
        ],
        [
-        1048,
-        131
+        1056,
+        133
+       ],
+       [
+        1059,
+        130
+       ],
+       [
+        1057,
+        127
+       ],
+       [
+        1059,
+        123
+       ],
+       [
+        1057,
+        121
+       ],
+       [
+        1057,
+        115
+       ],
+       [
+        1059,
+        113
+       ],
+       [
+        1057,
+        111
        ]
       ],
       [
        [
-        1091,
-        102
+        1120,
+        110
        ],
        [
-        1113,
-        102
+        1120,
+        114
        ],
        [
-        1115,
-        112
+        1126,
+        121
        ],
        [
-        1112,
+        1131,
+        122
+       ],
+       [
+        1136,
+        121
+       ],
+       [
+        1138,
         119
        ],
        [
-        1093,
-        119
+        1132,
+        114
+       ],
+       [
+        1132,
+        109
+       ],
+       [
+        1130,
+        107
+       ],
+       [
+        1122,
+        108
+       ]
+      ],
+      [
+       [
+        1140,
+        96
+       ],
+       [
+        1150,
+        95
+       ],
+       [
+        1153,
+        99
+       ],
+       [
+        1147,
+        106
+       ],
+       [
+        1138,
+        113
+       ],
+       [
+        1132,
+        111
+       ],
+       [
+        1136,
+        103
        ]
       ]
      ],
@@ -400,19 +862,19 @@
         92
        ],
        [
-        1150,
+        1156,
         94
        ],
        [
+        1152,
+        100
+       ],
+       [
+        1146,
+        106
+       ],
+       [
         1140,
-        98
-       ],
-       [
-        1132,
-        104
-       ],
-       [
-        1136,
         112
        ],
        [
@@ -494,51 +956,120 @@
        "satMax": 0.17,
        "lumMin": 72,
        "lumMax": 214
+      },
+      {
+       "zona": [
+        [
+         1254,
+         42
+        ],
+        [
+         1275,
+         42
+        ],
+        [
+         1275,
+         98
+        ],
+        [
+         1250,
+         98
+        ],
+        [
+         1250,
+         69
+        ],
+        [
+         1254,
+         68
+        ]
+       ],
+       "lumMax": 35
       }
      ],
      "restaurar": [
       [
        [
-        1158,
+        1159,
+        112
+       ],
+       [
+        1155,
+        115
+       ],
+       [
+        1154,
+        127
+       ],
+       [
+        1159,
+        133
+       ],
+       [
+        1165,
+        133
+       ],
+       [
+        1167,
+        130
+       ],
+       [
+        1164,
+        125
+       ],
+       [
+        1167,
+        122
+       ],
+       [
+        1163,
         119
        ],
        [
-        1172,
-        119
-       ],
-       [
-        1173,
-        126
-       ],
-       [
-        1171,
-        131
-       ],
-       [
-        1158,
-        131
+        1164,
+        115
        ]
       ],
       [
        [
-        1210,
-        107
+        1208,
+        120
        ],
        [
-        1230,
-        107
+        1221,
+        131
        ],
        [
-        1233,
-        118
+        1226,
+        131
        ],
        [
-        1229,
+        1228,
+        129
+       ],
+       [
+        1228,
         127
        ],
        [
-        1211,
-        127
+        1224,
+        124
+       ],
+       [
+        1225,
+        120
+       ],
+       [
+        1222,
+        116
+       ],
+       [
+        1218,
+        117
+       ],
+       [
+        1214,
+        114
        ]
       ]
      ],
@@ -639,6 +1170,101 @@
       ]
      ]
     }
+   },
+   "_nota": "revisión 31/oct: los «restaurar» de las zapatillas siguen cada zapatilla (en el cuadro 1 el de la de adelante estaba corrido 25 px a la izquierda y devolvía el fondo negro bajo la panza, un bloque recto; los de atrás devolvían humo con la zapatilla); las zapatillas de atrás de los cuadros 0 y 2 vuelven enteras con incluir (el modelo las fundía con el humo blanco); sin el fondo negro alrededor del puño de adelante y de la cara (un guante negro sobre la arena clara)",
+   "incluir": {
+    "0": [
+     [
+      [
+       936,
+       112
+      ],
+      [
+       931,
+       116
+      ],
+      [
+       931,
+       130
+      ],
+      [
+       934,
+       133
+      ],
+      [
+       941,
+       133
+      ],
+      [
+       943,
+       131
+      ],
+      [
+       940,
+       127
+      ],
+      [
+       942,
+       124
+      ],
+      [
+       942,
+       122
+      ],
+      [
+       939,
+       119
+      ],
+      [
+       941,
+       115
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       1159,
+       112
+      ],
+      [
+       1155,
+       115
+      ],
+      [
+       1154,
+       127
+      ],
+      [
+       1159,
+       133
+      ],
+      [
+       1165,
+       133
+      ],
+      [
+       1167,
+       130
+      ],
+      [
+       1164,
+       125
+      ],
+      [
+       1167,
+       122
+      ],
+      [
+       1163,
+       119
+      ],
+      [
+       1164,
+       115
+      ]
+     ]
+    ]
    }
   },
   "guardia": {
@@ -708,7 +1334,7 @@
   "saltar": {
    "mascara": [
     544,
-    164,
+    148,
     844,
     260
    ],
@@ -735,7 +1361,86 @@
      "ventanaTinte": 7,
      "pasos": 40
     }
-   }
+   },
+   "retoques": {
+    "0": {
+     "quitar": [
+      [
+       544,
+       140,
+       604,
+       165
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        544,
+        140,
+        844,
+        165
+       ],
+       "tono": [
+        190,
+        270
+       ],
+       "satMin": 0.55
+      }
+     ]
+    },
+    "1": {
+     "quitarColor": [
+      {
+       "zona": [
+        544,
+        140,
+        844,
+        165
+       ],
+       "tono": [
+        190,
+        270
+       ],
+       "satMin": 0.55
+      }
+     ]
+    },
+    "2": {
+     "quitarColor": [
+      {
+       "zona": [
+        544,
+        140,
+        844,
+        165
+       ],
+       "tono": [
+        190,
+        270
+       ],
+       "satMin": 0.55
+      }
+     ]
+    },
+    "3": {
+     "quitarColor": [
+      {
+       "zona": [
+        544,
+        140,
+        844,
+        165
+       ],
+       "tono": [
+        190,
+        270
+       ],
+       "satMin": 0.55
+      }
+     ]
+    }
+   },
+   "_nota": "revisión 31/oct: la gorra del cuadro 2 sube a la barra del título (y 150-163): la región arranca en 148 y la franja azul (y las letras, en el cuadro 0) se sacan por color"
   },
   "caer": {
    "mascara": [
@@ -810,8 +1515,8 @@
      241
     ],
     [
-     300,
-     306
+     311,
+     313
     ]
    ],
    "inferencia": "ancho",
@@ -832,7 +1537,154 @@
     1,
     2,
     3
-   ]
+   ],
+   "agregar": {
+    "2": [
+     [
+      [
+       205,
+       321
+      ],
+      [
+       214,
+       320
+      ],
+      [
+       220,
+       319
+      ],
+      [
+       232,
+       318
+      ],
+      [
+       236,
+       317
+      ],
+      [
+       242,
+       318
+      ],
+      [
+       243,
+       322
+      ],
+      [
+       242,
+       326
+      ],
+      [
+       236,
+       328
+      ],
+      [
+       228,
+       330
+      ],
+      [
+       219,
+       332
+      ],
+      [
+       205,
+       332
+      ]
+     ]
+    ]
+   },
+   "excluir": {
+    "3": [
+     [
+      [
+       205,
+       321
+      ],
+      [
+       214,
+       320
+      ],
+      [
+       220,
+       319
+      ],
+      [
+       232,
+       318
+      ],
+      [
+       236,
+       317
+      ],
+      [
+       242,
+       318
+      ],
+      [
+       243,
+       322
+      ],
+      [
+       242,
+       326
+      ],
+      [
+       236,
+       328
+      ],
+      [
+       228,
+       330
+      ],
+      [
+       219,
+       332
+      ],
+      [
+       205,
+       332
+      ]
+     ]
+    ]
+   },
+   "_nota": "revisión 31/oct: el antebrazo y el puño del impacto (golpe[2] = combo[1]) los perdía la inferencia del cuadro y la costura le daba el puño al cuadro 3; se suman al 2 desde la máscara de la región (agregar) y se sacan del 3; sin el destello naranja pegado detrás de la cabeza (cuadros 0, 1 y 3); la última costura pasa a 311-313 (en 300-306 partía al medio el puño de golpe[3]; el cuadro 4, el del destello, no se usa); en golpe[0], sin la raya del piso entre los pies",
+   "retoques": {
+    "0": {
+     "quitar": [
+      [
+       37,
+       313,
+       44,
+       323
+      ],
+      [
+       27,
+       391,
+       60,
+       395
+      ]
+     ]
+    },
+    "1": {
+     "quitar": [
+      [
+       106,
+       312,
+       113,
+       320
+      ]
+     ]
+    },
+    "3": {
+     "quitar": [
+      [
+       252,
+       311,
+       259,
+       320
+      ]
+     ]
+    }
+   }
   },
   "patada": {
    "mascara": [
@@ -863,6 +1715,95 @@
      "ventanaTinte": 7,
      "pasos": 40
     }
+   },
+   "retoques": {
+    "0": {
+     "quitar": [
+      [
+       404,
+       312,
+       412,
+       321
+      ]
+     ]
+    },
+    "2": {
+     "restaurar": [
+      [
+       [
+        626,
+        322
+       ],
+       [
+        636,
+        322
+       ],
+       [
+        646,
+        323
+       ],
+       [
+        650,
+        325
+       ],
+       [
+        646,
+        331
+       ],
+       [
+        640,
+        334
+       ],
+       [
+        630,
+        335
+       ],
+       [
+        625,
+        330
+       ]
+      ]
+     ]
+    }
+   },
+   "_nota": "revisión 31/oct: sin el destello naranja pegado detrás de la cabeza (cuadro 0); la manga del brazo estirado del impacto (cuadro 2 = herramienta2[2]) vuelve con incluir + restaurar: el modelo y el pelado del fondo la dejaban en una raya negra a la altura de la boca",
+   "incluir": {
+    "2": [
+     [
+      [
+       626,
+       322
+      ],
+      [
+       636,
+       322
+      ],
+      [
+       646,
+       323
+      ],
+      [
+       650,
+       325
+      ],
+      [
+       646,
+       331
+      ],
+      [
+       640,
+       334
+      ],
+      [
+       630,
+       335
+      ],
+      [
+       625,
+       330
+      ]
+     ]
+    ]
    }
   },
   "combo": {
@@ -912,6 +1853,61 @@
      "pasos": 40
     }
    },
+   "retoques": {
+    "2": {
+     "quitar": [
+      [
+       893,
+       345,
+       904,
+       349
+      ],
+      [
+       [
+        896,
+        365
+       ],
+       [
+        905,
+        365
+       ],
+       [
+        905,
+        388
+       ],
+       [
+        902,
+        388
+       ],
+       [
+        897,
+        373
+       ],
+       [
+        896,
+        372
+       ]
+      ]
+     ],
+     "sumarColor": [
+      {
+       "caja": [
+        904,
+        327,
+        909,
+        345
+       ],
+       "tono": [
+        0,
+        45
+       ],
+       "satMin": 0.2,
+       "lumMin": 15
+      }
+     ]
+    }
+   },
+   "_nota": "revisión 31/oct (combo[2] = herramienta1[0]): la costura [904,924] cortaba el puño derecho en recta y dejaba pegada a la pierna derecha una cuña de fondo y la estela del cuadro siguiente; se suma la piel del puño que cae del otro lado (sumarColor) y se sacan la cuña y el bloque oscuro de debajo del puño",
    "usar": [
     0,
     "golpe:2",
@@ -987,36 +1983,132 @@
      "quitar": [
       [
        [
-        214,
-        452
+        226,
+        440
        ],
        [
-        253,
-        452
+        256,
+        440
        ],
        [
-        253,
+        256,
         536
        ],
        [
-        197,
+        205,
         536
        ],
        [
-        197,
+        205,
+        507
+       ],
+       [
+        210,
         505
        ],
        [
-        203,
+        214,
+        503
+       ],
+       [
+        215,
+        491
+       ],
+       [
+        218,
         490
        ],
        [
-        212,
-        484
+        219,
+        481
        ],
        [
-        216,
-        478
+        229,
+        481
+       ],
+       [
+        230,
+        474
+       ],
+       [
+        227,
+        470
+       ],
+       [
+        226,
+        462
+       ]
+      ]
+     ],
+     "restaurar": [
+      [
+       [
+        180,
+        450
+       ],
+       [
+        176,
+        466
+       ],
+       [
+        171,
+        476
+       ],
+       [
+        168,
+        486
+       ],
+       [
+        164,
+        491
+       ],
+       [
+        161,
+        499
+       ],
+       [
+        160,
+        506
+       ],
+       [
+        204,
+        506
+       ],
+       [
+        210,
+        504
+       ],
+       [
+        213,
+        502
+       ],
+       [
+        214,
+        491
+       ],
+       [
+        217,
+        489
+       ],
+       [
+        218,
+        481
+       ],
+       [
+        228,
+        480
+       ],
+       [
+        229,
+        474
+       ],
+       [
+        214,
+        467
+       ],
+       [
+        212,
+        450
        ]
       ]
      ]
@@ -1025,32 +2117,88 @@
      "quitar": [
       [
        [
-        443,
-        455
+        458,
+        440
        ],
        [
-        478,
-        455
+        480,
+        440
        ],
        [
-        478,
+        480,
         536
        ],
        [
-        436,
+        430,
         536
        ],
        [
+        430,
+        519
+       ],
+       [
+        433,
+        515
+       ],
+       [
         436,
+        508
+       ],
+       [
+        438,
         505
        ],
        [
         440,
-        490
+        500
+       ],
+       [
+        441,
+        495
        ],
        [
         443,
-        483
+        492
+       ],
+       [
+        444,
+        489
+       ],
+       [
+        446,
+        487
+       ],
+       [
+        447,
+        485
+       ],
+       [
+        452,
+        485
+       ],
+       [
+        457,
+        484
+       ],
+       [
+        457,
+        477
+       ],
+       [
+        455,
+        476
+       ],
+       [
+        458,
+        473
+       ],
+       [
+        460,
+        470
+       ],
+       [
+        460,
+        440
        ]
       ]
      ]
@@ -1059,15 +2207,15 @@
      "quitar": [
       [
        [
-        848,
-        428
+        846,
+        425
        ],
        [
-        881,
-        428
+        882,
+        425
        ],
        [
-        881,
+        882,
         536
        ],
        [
@@ -1076,15 +2224,47 @@
        ],
        [
         828,
+        478
+       ],
+       [
+        833,
+        474
+       ],
+       [
+        835,
         470
        ],
        [
+        836,
+        465
+       ],
+       [
+        838,
+        461
+       ],
+       [
         840,
-        462
+        458
+       ],
+       [
+        846,
+        456
+       ],
+       [
+        851,
+        454
+       ],
+       [
+        852,
+        448
        ],
        [
         848,
-        455
+        446
+       ],
+       [
+        846,
+        440
        ]
       ]
      ]
@@ -1093,15 +2273,15 @@
      "quitar": [
       [
        [
-        1012,
-        428
+        1008,
+        425
        ],
        [
-        1051,
-        428
+        1052,
+        425
        ],
        [
-        1051,
+        1052,
         536
        ],
        [
@@ -1110,15 +2290,43 @@
        ],
        [
         995,
-        470
+        479
        ],
        [
-        1000,
-        450
+        1004,
+        478
        ],
        [
-        1012,
-        445
+        1005,
+        464
+       ],
+       [
+        1008,
+        460
+       ],
+       [
+        1011,
+        455
+       ],
+       [
+        1014,
+        451
+       ],
+       [
+        1022,
+        449
+       ],
+       [
+        1024,
+        444
+       ],
+       [
+        1023,
+        440
+       ],
+       [
+        1008,
+        440
        ]
       ]
      ]
@@ -1199,7 +2407,8 @@
    "impactos": [
     1,
     5
-   ]
+   ],
+   "_nota": "revisión 31/oct (el Agarre): la víctima se saca con polígonos que siguen su contorno (los de antes tenían lados rectos que se llevaban la cintura, el costado y la pierna de adelante de Brian, y en el cuadro 4 la mano que sostiene); en el 1, «restaurar» devuelve el torso que el pelado del fondo se comía por el hueco que abría el polígono (las bandas transparentes en la cintura)"
   },
   "especial2": {
    "cajas": [
@@ -1218,7 +2427,7 @@
     [
      232,
      566,
-     362,
+     374,
      669
     ]
    ],
@@ -1282,23 +2491,43 @@
        ],
        [
         330,
-        578
+        575
        ],
        [
-        352,
-        578
+        356,
+        575
+       ],
+       [
+        362,
+        582
+       ],
+       [
+        364,
+        596
+       ],
+       [
+        361,
+        606
+       ],
+       [
+        354,
+        612
        ],
        [
         354,
         640
        ],
        [
-        350,
-        669
+        356,
+        662
        ],
        [
-        328,
-        669
+        350,
+        665
+       ],
+       [
+        330,
+        665
        ],
        [
         326,
@@ -1326,7 +2555,8 @@
    },
    "impactos": [
     2
-   ]
+   ],
+   "_nota": "revisión 31/oct (especial2[2] = el impacto del Puño Sísmico y el final del Agarre): la caja y el límite llegan a x 364 alrededor de la cabeza (la cara terminaba en una recta en 352) y el límite sube a y 665 bajo el puño (quedaba la franja violeta del piso)"
   },
   "danio": {
    "mascara": [
@@ -1374,7 +2604,234 @@
        734
       ]
      ]
+    },
+    "1": {
+     "quitarColor": [
+      {
+       "zona": [
+        100,
+        731,
+        114,
+        738
+       ],
+       "satMin": 0.42,
+       "lumMin": 25
+      },
+      {
+       "zona": [
+        121,
+        729,
+        126,
+        743
+       ],
+       "tono": [
+        0,
+        45
+       ],
+       "satMin": 0.25,
+       "lumMin": 30
+      },
+      {
+       "zona": [
+        123,
+        733,
+        126,
+        741
+       ],
+       "lumMin": 100
+      },
+      {
+       "zona": [
+        [
+         126,
+         745
+        ],
+        [
+         126,
+         758
+        ],
+        [
+         121,
+         758
+        ],
+        [
+         121,
+         752
+        ],
+        [
+         123,
+         750
+        ],
+        [
+         125,
+         748
+        ]
+       ],
+       "lumMax": 45
+      },
+      {
+       "zona": [
+        [
+         76,
+         729
+        ],
+        [
+         117,
+         729
+        ],
+        [
+         117,
+         734
+        ],
+        [
+         112,
+         735
+        ],
+        [
+         110,
+         737
+        ],
+        [
+         100,
+         737
+        ],
+        [
+         95,
+         738
+        ],
+        [
+         93,
+         739
+        ],
+        [
+         91,
+         741
+        ],
+        [
+         89,
+         743
+        ],
+        [
+         87,
+         746
+        ],
+        [
+         85,
+         748
+        ],
+        [
+         83,
+         750
+        ],
+        [
+         81,
+         752
+        ],
+        [
+         79,
+         755
+        ],
+        [
+         76,
+         755
+        ]
+       ],
+       "lumMax": 50
+      },
+      {
+       "zona": [
+        [
+         76,
+         729
+        ],
+        [
+         117,
+         729
+        ],
+        [
+         117,
+         734
+        ],
+        [
+         112,
+         735
+        ],
+        [
+         110,
+         737
+        ],
+        [
+         100,
+         737
+        ],
+        [
+         95,
+         738
+        ],
+        [
+         93,
+         739
+        ],
+        [
+         91,
+         741
+        ],
+        [
+         89,
+         743
+        ],
+        [
+         87,
+         746
+        ],
+        [
+         85,
+         748
+        ],
+        [
+         83,
+         750
+        ],
+        [
+         81,
+         752
+        ],
+        [
+         79,
+         755
+        ],
+        [
+         76,
+         755
+        ]
+       ],
+       "tono": [
+        0,
+        50
+       ],
+       "satMin": 0.4
+      }
+     ],
+     "quitar": [
+      [
+       119,
+       729,
+       126,
+       734
+      ]
+     ]
     }
+   },
+   "_nota": "revisión 31/oct (danio[1], el cuadro que queda fijo con el congelado): sin el destello naranja del golpe (el de arriba de la espalda y la mitad que caía dentro del cuadro, sobre la gorra) y sin el fondo oscuro que quedaba encima de la franja del hombro, así que la espalda sigue la franja en vez de terminar en una recta; la gorra conserva su cuerpo hasta la costura y el borde de abajo redondeado; en danio[3], sin la tira negra del cuadro siguiente pegada a la zapatilla (un gancho colgando)",
+   "excluir": {
+    "3": [
+     [
+      222,
+      798,
+      230,
+      822
+     ]
+    ]
    }
   },
   "ko": {
@@ -1517,7 +2974,44 @@
      "pasos": 40
     }
    },
-   "escala": 0.87
+   "escala": 0.87,
+   "retoques": {
+    "0": {
+     "restaurar": [
+      [
+       [
+        1066,
+        786
+       ],
+       [
+        1078,
+        786
+       ],
+       [
+        1083,
+        794
+       ],
+       [
+        1085,
+        806
+       ],
+       [
+        1081,
+        811
+       ],
+       [
+        1072,
+        809
+       ],
+       [
+        1066,
+        798
+       ]
+      ]
+     ]
+    }
+   },
+   "_nota": "revisión 31/oct (burla[0], la presentación): vuelve la rodilla de la pierna derecha (el pelado del fondo se la comía y la pantorrilla quedaba suelta del muslo)"
   },
   "herramienta1": {
    "alias": "combo",
@@ -1546,12 +3040,17 @@
   "cuadro": 2,
   "alto": 720,
   "cara": [
-   953,
-   705,
-   995,
-   747
+   774,
+   422,
+   812,
+   460
   ],
-  "nitidez": 70
+  "nitidez": 70,
+  "caraDesde": {
+   "anim": "especial1",
+   "cuadro": 3
+  },
+  "_nota": "revisión 31/oct: la cara sale de la fila del Agarre, dibujada ~1,35 veces más grande (más nítida), con un recorte cerrado en la cabeza (antes la cara ocupaba ~10 % del cuadro, contra 21-26 % en Simón y Chipi)"
  },
  "efectos": {
   "roca": {

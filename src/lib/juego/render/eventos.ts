@@ -708,7 +708,7 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
       case 'final_al_cero': {
         const perdedor = otro(e.ganador)
         const v = M.vis[perdedor]
-        // la voladura de pelo: el remate deja al rival pelado (sprites de rapado.png)
+        // la voladura de pelo: el remate deja al rival pelado (sprites de su hoja de rapado)
         const cabeza = M.rapar?.(perdedor) ?? null
         const cx = cabeza ? cabeza.x : centroX(v)
         const cy = cabeza ? cabeza.y : v.cajaY + 20

@@ -111,7 +111,9 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
       if (!esp.embestida && a.t === Math.max(0, v.desde - 2)) {
         emitir(p, { tipo: 'swing', quien: lado, fuerza: v.fuerza, herramienta: mov.herramienta })
       }
-      if (a.t === v.desde) p.estadisticas[lado].golpesIntentados++
+      // Un intento por cada golpe que la ventana puede dar (el molino, la Patada del Dragón): los
+      // aciertos se cuentan por contacto, y contando uno por ventana la «Precisión» pasaba de 100 %.
+      if (a.t === v.desde) p.estadisticas[lado].golpesIntentados += v.golpes ?? 1
     }
   }
 
@@ -155,8 +157,11 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
     }
   }
 
-  // Curación: de a pedacitos (se corta sola si le pegan: interrumpir() saca la acción).
-  if (esp.cura && enPelea) {
+  // Curación: de a pedacitos (se corta sola si le pegan: interrumpir() saca la acción). Fuera de
+  // la pelea (¡TIEMPO!, KO, la fase final) no cura y el «curándose» se apaga: antes quedaba
+  // prendido en el HUD hasta el round siguiente.
+  if (esp.cura && !enPelea) l.efectos.curando = 0
+  else if (esp.cura) {
     const c = esp.cura
     const k = a.t - c.desde
     if (k >= 0 && k < c.ticks) {

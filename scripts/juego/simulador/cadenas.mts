@@ -11,7 +11,7 @@ import { CLAVES_ANIMACION, ENTRADA_VACIA } from '../../../src/lib/juego/tipos.ts
 import { avanzar, crearPartida } from '../../../src/lib/juego/motor/index.ts'
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
 import { puedeActuar } from '../../../src/lib/juego/motor/cuerpo.ts'
-import { EFECTO, X_MAX, X_MIN } from '../../../src/lib/juego/motor/constantes.ts'
+import { EFECTO, TOPE_ENCIERRO, X_MAX, X_MIN } from '../../../src/lib/juego/motor/constantes.ts'
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
 import { IDS_PERSONAJES, PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 import { hashPartida } from '../../../src/lib/juego/online/hash.ts'
@@ -297,6 +297,191 @@ for (const id of ['gabriel', 'simon', 'nico_u', 'luciano', 'joaquin'] as IdPerso
   ok(limpio && revisados >= 1 && p.round >= 2, 'round nuevo: sin estados, proyectiles, quemadura ni agarre del anterior', `round ${p.round}, ${revisados} revisado(s)`)
 }
 
+// ─── Encierros: la vara ───
+/**
+ * Ticks seguidos sin poder actuar, después de este tick: en el piso sin poder actuar ni un
+ * movimiento propio en curso, o en el aire cayendo derribado o agarrado. Sin contar el hitstop ni
+ * los super flash (el reloj de pelea del motor tampoco los cuenta: TOPE_ENCIERRO). Hasta el 30/oct
+ * los ticks congelados del agarrado SÍ se contaban (en el aire no se miraba el congelamiento): por
+ * eso el agarre de Brian medía ≈ 30 ticks de más que lo que mide el motor.
+ */
+function encierro(p: Partida, lado: Lado, seguidos: number): number {
+  if (p.fase !== 'pelea' || p.congelamientoGolpe > 0) return seguidos
+  const l = p.luchadores[lado]
+  const li = internoDe(p).luchadores[lado]
+  const sinControl = l.enSuelo ? !puedeActuar(l, li) && li.accion === null && li.dash === null : li.caidaDerribo > 0 || li.agarradoPor !== null
+  return sinControl ? seguidos + 1 : 0
+}
+
+// ─── El motor lleva la misma cuenta y la usa (TOPE_ENCIERRO) ───
+{
+  // Guardia rota y un golpe: el reloj del motor (sinControl) y el de acá cuentan lo mismo (el
+  // motor cuenta el tick del golpe y no el último del hitstop: a lo sumo uno de diferencia).
+  const p = nueva(['simon', 'brian'], 400, 470)
+  p.luchadores[1].guardia = 1
+  let mio = 0
+  let difMax = 0
+  let maxMotor = 0
+  let maxMio = 0
+  correr(p, 200, (t, q) => {
+    mio = encierro(q, 1, mio)
+    const motor = internoDe(q).luchadores[1].sinControl
+    difMax = Math.max(difMax, Math.abs(mio - motor))
+    maxMotor = Math.max(maxMotor, motor)
+    maxMio = Math.max(maxMio, mio)
+    return [{ herramienta: t < 2 || (t > 30 && t < 33) }, { guardia: t < 30 }]
+  })
+  ok(difMax <= 1 && maxMotor >= 60 && Math.abs(maxMotor - maxMio) <= 1, 'encierro: el motor cuenta lo mismo que cadenas', `máx motor ${maxMotor}, acá ${maxMio}, diferencia ≤ ${difMax}`)
+  // Inmune al control: con el reloj pasado del tope, el agarre no agarra, el congelado no entra y
+  // el golpe que derriba sólo pega.
+  const inmune = (pj: [IdPersonaje, IdPersonaje], n: 1 | 2, x1: number) => {
+    const q = nueva(pj, 400, x1)
+    q.luchadores[0].carga = 10
+    internoDe(q).luchadores[1].sinControl = TOPE_ENCIERRO.inmuneDesde
+    internoDe(q).luchadores[1].stun = 60
+    const evs = correr(q, 140, (t) => [{ [n === 1 ? 'especial1' : 'especial2']: t < 2 }, {}])
+    return evs
+  }
+  const ag = inmune(['brian', 'simon'], 1, 470)
+  ok(de(ag, 'agarre').length === 0, 'inmune al control: el agarre no agarra')
+  const fr = inmune(['chipi', 'simon'], 2, 520)
+  ok(de(fr, 'congelado').length === 0 && de(fr, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'spray'), 'inmune al control: la Fijación pega pero no congela')
+  const sl = inmune(['luciano', 'simon'], 1, 560)
+  ok(de(sl, 'derribo').length === 0 && de(sl, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'moto'), 'inmune al control: la Moto pega pero no derriba')
+}
+
+// ─── Encierros forzados por un JUGADOR después de una guardia rota (los 13) ───
+// Lo que encontró la verificación del 30/oct: con un guion a propósito, Brian dejaba 256 ticks sin
+// moverse (guardia rota → remate → agarre → derribo) y Chipi 298 (guardia rota → máquina → Fijación
+// → golpe → Sillonazo). Acá cada atacante le rompe la guardia al rival (guardia en 5 y un golpe de
+// MÁQUINA) y sigue con guiones al azar y con planes deliberados (esperar W ticks, acercarse y
+// encadenar hacia cada especial); la víctima quiere irse (arriba y atrás sostenidos, salta apenas
+// puede). Nada puede pasar de 240 ticks (TOPE_ENCIERRO). Se informa también el reloj CON
+// congelamientos (lo que ve el que mira la pantalla).
+type PasoGuion = ['golpe' | 'herramienta' | 'especial1' | 'especial2' | 'nada' | 'adelante', number] | ['acercar', number]
+const PASOS_AZAR = ['golpe', 'herramienta', 'especial1', 'especial2', 'nada', 'adelante'] as const
+
+function rngGuion(semilla: number) {
+  let s = semilla >>> 0
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0
+    let t = s
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Rompe la guardia y sigue el guion. Devuelve el encierro más largo (sin y con congelamientos). */
+function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: number, guionFijo: PasoGuion[] | null): { ticks: number; reloj: number } {
+  const r = rngGuion(semilla)
+  const p = crearPartida({ personajes: [atacante, victima], cpu: [false, false], dificultad: 'normal', arena: 'rondeau', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [meta(), meta()], semilla })
+  while (p.fase !== 'pelea') avanzar(p, [ENTRADA_VACIA, ENTRADA_VACIA])
+  p.eventos.length = 0
+  p.luchadores[0].x = 400
+  p.luchadores[1].x = 480 + Math.floor(r() * 30)
+  p.luchadores[0].carga = 10
+  p.luchadores[1].guardia = 5
+  const guion: PasoGuion[] = guionFijo ? [...guionFijo] : []
+  for (let total = 0; !guionFijo && total < 320; ) {
+    const b = PASOS_AZAR[Math.floor(r() * PASOS_AZAR.length)]
+    const d = 1 + Math.floor(r() * (b === 'nada' ? 40 : 18))
+    guion.push([b, d])
+    total += d
+  }
+  let rota = -1
+  let k = 0
+  let kT = 0
+  let seguidos = 0
+  let reloj = 0
+  let mejor = 0
+  let mejorReloj = 0
+  for (let t = 0; t < 1200 && p.fase === 'pelea'; t++) {
+    const a: EntradaJugador = { ...ENTRADA_VACIA }
+    const v: EntradaJugador = { ...ENTRADA_VACIA }
+    if (rota < 0) {
+      a.herramienta = t % 2 === 0
+      v.guardia = true
+    } else {
+      v.arriba = true
+      v.derecha = true
+      const paso = guion[k]
+      if (paso) {
+        const [b, d] = paso
+        if (b === 'acercar') {
+          if (Math.abs(p.luchadores[1].x - p.luchadores[0].x) > d) a.derecha = true
+          else {
+            k++
+            kT = 0
+          }
+        } else {
+          if (b === 'adelante') a.derecha = true
+          else if (b !== 'nada') a[b] = kT % 2 === 0
+          if (++kT >= d) {
+            k++
+            kT = 0
+          }
+        }
+      }
+    }
+    avanzar(p, [a, v])
+    const evs = p.eventos.splice(0)
+    if (rota < 0 && evs.some((e) => e.tipo === 'guardia_rota' && e.quien === 1)) rota = t
+    if (rota < 0) continue
+    seguidos = encierro(p, 1, seguidos)
+    const li = internoDe(p).luchadores[1]
+    const l = p.luchadores[1]
+    // El reloj de pantalla: cuenta también los congelamientos mientras no pueda actuar.
+    const atrapado = p.fase === 'pelea' && (l.enSuelo ? !puedeActuar(l, li) && li.accion === null && li.dash === null : li.caidaDerribo > 0 || li.agarradoPor !== null)
+    reloj = atrapado ? reloj + 1 : 0
+    mejor = Math.max(mejor, seguidos)
+    mejorReloj = Math.max(mejorReloj, reloj)
+    if (k >= guion.length && seguidos === 0 && t > rota + 5) break
+  }
+  return { ticks: mejor, reloj: mejorReloj }
+}
+
+{
+  const FUZZ = Number(process.argv.slice(2).find((a) => a.startsWith('--fuzz='))?.split('=')[1] ?? 400)
+  const victimas: IdPersonaje[] = ['simon', 'brian']
+  // Planes deliberados: esperar W ticks con la guardia rota, acercarse a 100 px y encadenar.
+  const planes: Record<string, PasoGuion[]> = {
+    e1: [['especial1', 14]],
+    e2: [['especial2', 14]],
+    'golpe→e1': [['golpe', 40], ['especial1', 30]],
+    'golpe→e2': [['golpe', 40], ['especial2', 30]],
+    'máquina→e1': [['herramienta', 2], ['especial1', 30]],
+    'máquina→e2': [['herramienta', 2], ['especial2', 30]],
+    'máquina×2→e1': [['herramienta', 34], ['especial1', 30]],
+    'máquina×2→e2': [['herramienta', 34], ['especial2', 30]],
+  }
+  const lineas: string[] = []
+  let peorTodo = { ticks: 0, reloj: 0, quien: '', como: '' }
+  for (const atacante of IDS_PERSONAJES) {
+    let peor = { ticks: 0, reloj: 0, como: '' }
+    for (const victima of victimas) {
+      for (let i = 0; i < FUZZ; i++) {
+        const semilla = (Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(atacante.length * 31 + victima.length, 0x5bd1e995)) >>> 0
+        const r = encierroForzado(atacante, victima, semilla, null)
+        if (r.ticks > peor.ticks) peor = { ...r, como: `azar ${semilla} contra ${victima}` }
+        else if (r.reloj > peor.reloj) peor.reloj = r.reloj
+      }
+      for (const [nombre, plan] of Object.entries(planes)) {
+        for (let w = 0; w <= 72; w += 3) {
+          const guion: PasoGuion[] = [...(w > 0 ? [['nada', w] as PasoGuion] : []), ['acercar', 100], ...plan]
+          const r = encierroForzado(atacante, victima, 12345 + w, guion)
+          if (r.ticks > peor.ticks) peor = { ...r, como: `«${nombre}» esperando ${w} contra ${victima}` }
+          else if (r.reloj > peor.reloj) peor.reloj = r.reloj
+        }
+      }
+    }
+    lineas.push(`${atacante} ${peor.ticks} (reloj ${peor.reloj}; ${peor.como})`)
+    if (peor.ticks > peorTodo.ticks) peorTodo = { ticks: peor.ticks, reloj: peor.reloj, quien: atacante, como: peor.como }
+  }
+  console.log(`     encierros forzados (${FUZZ} guiones al azar y ${Object.keys(planes).length} planes por atacante y víctima): ${lineas.join(' · ')}`)
+  ok(peorTodo.ticks <= 240, 'encierros forzados después de una guardia rota: nadie pasa de 4 s (los 13)', `${peorTodo.ticks} ticks con ${peorTodo.quien} (${peorTodo.como}; con congelamientos ${peorTodo.reloj})`)
+}
+
 // ─── Volumen: CPU contra CPU y bots, buscando encierros y bordes ───
 interface Encierro {
   ticks: number
@@ -318,7 +503,6 @@ for (const dif of ['facil', 'normal', 'dificil'] as const) {
       for (let s = 0; s < PARTIDAS; s++) {
         const semilla = 1 + s * 1009 + a.length * 31 + b.length * 7
         const p = crearPartida({ personajes: [a, b], cpu: [true, true], dificultad: dif, arena: 'rondeau', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [meta(), meta()], semilla })
-        const I = internoDe(p)
         const seguidos: [number, number] = [0, 0]
         let h = 0
         while (p.fase !== 'terminada' && p.tick < 6 * 3600) {
@@ -328,14 +512,11 @@ for (const dif of ['facil', 'normal', 'dificil'] as const) {
           maxProy = Math.max(maxProy, p.proyectiles.length)
           for (const lado of [0, 1] as const) {
             const l = p.luchadores[lado]
-            const li = I.luchadores[lado]
             if (l.x < X_MIN || l.x > X_MAX || l.y < 0 || !Number.isFinite(l.x)) fueraDeBorde++
             if (l.vida > l.vidaMax || l.vida < 0 || !Number.isFinite(l.vida)) vidaMala++
-            const sinControl = p.fase === 'pelea' && p.congelamientoGolpe === 0 && !puedeActuar(l, li) && li.accion === null && li.dash === null && l.enSuelo !== false
-            const enElAire = p.fase === 'pelea' && !l.enSuelo && (li.caidaDerribo > 0 || li.agarradoPor !== null)
-            if (sinControl || enElAire) seguidos[lado]++
-            else if (p.fase === 'pelea' && p.congelamientoGolpe === 0) seguidos[lado] = 0
-            if (seguidos[lado] > peor.ticks) peor = { ticks: seguidos[lado], quien: l.id, contra: p.luchadores[(1 - lado) as Lado].id, semilla }
+            const n = encierro(p, lado, seguidos[lado])
+            seguidos[lado] = n
+            if (n > peor.ticks) peor = { ticks: n, quien: l.id, contra: p.luchadores[(1 - lado) as Lado].id, semilla }
           }
         }
         if (p.fase !== 'terminada') noTerminan++

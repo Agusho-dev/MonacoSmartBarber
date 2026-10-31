@@ -3,7 +3,8 @@
 import { Flag, LoaderCircle, Menu, Play, Zap } from 'lucide-react'
 import { useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
-import { LENTA_MS, ABANDONO_MS, type Lockstep } from '@/lib/juego/online/lockstep'
+import type { Lockstep } from '@/lib/juego/online/lockstep'
+import { cartelEspera } from '@/lib/juego/online/textos'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { VISTA_ANCHO } from '@/lib/juego/tipos'
 import type { FichaPersonaje, IdArena, IdPersonaje, Lado, Partida } from '@/lib/juego/tipos'
@@ -145,14 +146,19 @@ export interface CapasOnlineControl {
     p: Partida,
     lock: Lockstep,
     lienzo: { x: number; y: number; w: number; h: number } | null,
-    /** El canal de la pelea está unido: si no, el que se quedó sin red es este celular. */
+    /**
+     * Este celular tiene red (Duelo.estaConectado: el canal unido y, mientras espera, el último
+     * sondeo de ida y vuelta con respuesta). Si no, el que se quedó sin red es él.
+     */
     conectado: boolean,
   ): void
 }
 
 /**
  * Lo de cada cuadro de la pelea online, por refs (nada de setState): dónde va el «VOS», si se
- * muestra «Conexión lenta…» (y cuánto falta para ganar por abandono) o «Sin conexión», y la señal.
+ * muestra «Conexión lenta…» (y cuánto falta para ganar por abandono) o «Sin conexión /
+ * Reconectando…» (el que no tiene red es este celular: con el 4G trabado el canal sigue unido y
+ * antes contaba hacia una victoria que no iba a tener), y la señal. Los textos: `cartelEspera`.
  */
 export function crearCapasOnline(
   raiz: HTMLElement,
@@ -199,24 +205,18 @@ export function crearCapasOnline(
       }
 
       const espera = p.fase === 'terminada' ? 0 : lock.msEsperando()
-      const verLenta = espera >= LENTA_MS
+      const cartel = cartelEspera(espera, conectado)
+      const verLenta = cartel !== null
       if (verLenta !== lentaVisible) {
         lentaVisible = verLenta
         marcar(lenta, 'data-visible', verLenta)
       }
-      if (verLenta && lentaTexto) {
-        const faltan = Math.ceil((ABANDONO_MS - espera) / 1000)
-        // Sin red de este lado no hay cuenta: el que se fue es este celular, no el otro.
-        const t = !conectado
-          ? 'Sin conexión'
-          : espera > 3000
-            ? `Conexión lenta… ${Math.max(0, faltan)}`
-            : 'Conexión lenta…'
-        if (t !== textoLenta) {
-          textoLenta = t
-          lentaTexto.textContent = t
+      if (cartel && lentaTexto) {
+        if (cartel.texto !== textoLenta) {
+          textoLenta = cartel.texto
+          lentaTexto.textContent = cartel.texto
         }
-        const segundo = conectado ? textoEsperando : 'Reconectando…'
+        const segundo = cartel.reconectando ? 'Reconectando…' : textoEsperando
         if (lentaRival && segundo !== textoSegundo) {
           textoSegundo = segundo
           lentaRival.textContent = segundo

@@ -84,6 +84,27 @@ export const ESCALADO_COMBO = { desde: 4, factor: 0.88, minimo: 0.45 } as const
  */
 export const ESCALADO_STUN = { desde: 8, factor: 0.8, minimo: 0.3 } as const
 
+/**
+ * Tope del encierro (revisión del 30/oct, segunda tanda): nadie queda más de 4 s (240 ticks de
+ * pelea, sin contar el hitstop ni los super flash) seguidos sin poder hacer nada. Se medían 256
+ * ticks con Brian (guardia rota → remate → agarre → derribo) y 298 forzándolo con Chipi (guardia
+ * rota → máquina → Fijación → golpe → Sillonazo). InternoLuchador.sinControl cuenta esos ticks y
+ * desde `inmuneDesde` el luchador queda INMUNE AL CONTROL hasta que vuelva a poder actuar: los
+ * golpes le siguen pegando, pero ninguno lo agarra, lo congela, lo aturde, lo electrocuta, le rompe
+ * la guardia, lo derriba ni lo arrastra, y el aturdimiento de cada golpe queda en el piso de
+ * ESCALADO_STUN (el combo se cae enseguida). Lo que ya tenía encima termina normal.
+ *
+ * Por qué 135: lo más largo que puede arrancar en el último tick sin inmunidad es un congelado
+ * (100 ticks) o un derribo (≈ 16 de caída + 50 en el piso + 26 al levantarse ≈ 92; el tirón del
+ * agarre da lo mismo): 135 + 100 ≤ 240 queda garantizado por construcción. Con 150 el congelado
+ * pasaba de 4 s. Es un tope del motor (entra en el hash online), no del simulador.
+ *
+ * Se eligió esto y no «la guardia rota termina con el primer golpe»: eso no acotaba el encierro
+ * (esperar la ventana entera y recién ahí pegar y agarrar daba lo mismo, ≈ 240) y le sacaba casi
+ * todo el premio a romper la guardia, que es parte del balance de varios kits.
+ */
+export const TOPE_ENCIERRO = { inmuneDesde: 135 } as const
+
 // ─── Guardia («romper escudos») ──────────────────────────────────────────────
 
 export const GUARDIA = {

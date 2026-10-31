@@ -121,7 +121,9 @@ export function PantallaInicio({ datos, luchadores, turno, prefs, onJugar, onRan
               <CircleHelp aria-hidden="true" />
               <span>Cómo se juega</span>
             </button>
-            <button type="button" className="cf-boton-icono" onClick={onSonido} aria-pressed={prefs.sonido}>
+            {/* data-audio-propio: el audio se destraba en el click, ya con la preferencia nueva
+                (ver alGesto en audio/index.ts). */}
+            <button type="button" className="cf-boton-icono" onClick={onSonido} aria-pressed={prefs.sonido} data-audio-propio="">
               {prefs.sonido ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
               <span>{prefs.sonido ? 'Sonido' : 'Silencio'}</span>
             </button>

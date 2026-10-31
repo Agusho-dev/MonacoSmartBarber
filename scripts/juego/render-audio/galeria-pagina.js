@@ -261,6 +261,23 @@
       l0.x = Math.min(860, l0.x + l0.vx)
     }
   }
+  /**
+   * Dos especiales casi juntos (el del jugador y, 100 ms después, el del rival): tienen que verse
+   * las dos bandas, una arriba y otra abajo, y los dos encendidos (render/pantalla.ts).
+   */
+  ESCENAS.dosEspeciales = function () {
+    var l0 = p.luchadores[0], l1 = p.luchadores[1]
+    l0.x = 330; l1.x = 630
+    var reloj = 0
+    return function () {
+      reloj++
+      var k = reloj % 120
+      if (k === 1) ev({ tipo: 'especial', quien: 0, numero: 2, nombre: PJ[l0.id].especiales[1].nombre })
+      if (k === 7) ev({ tipo: 'especial', quien: 1, numero: 1, nombre: PJ[l1.id].especiales[0].nombre })
+      l0.anim = 'especial2'; l0.estado = 'atacando'; l0.cuadro = Math.min(nCuadros(l0.id, 'especial2') - 1, Math.floor(k / 6))
+      l1.anim = 'especial1'; l1.estado = 'atacando'; l1.cuadro = Math.min(nCuadros(l1.id, 'especial1') - 1, Math.floor(k / 6))
+    }
+  }
   /** Golpes de cada herramienta nueva sobre el luchador 1. */
   ESCENAS.golpes = function () {
     var HERR = ['bombo', 'navaja', 'celular', 'anteojos', 'guante', 'moto', 'bala', 'graffiti', 'break', 'trago', 'botella', 'baile', 'onda', 'gorro', 'dragon', 'pelota', 'leche', 'panal', 'mate', 'agua', 'sismo', 'agarre', 'pesado']

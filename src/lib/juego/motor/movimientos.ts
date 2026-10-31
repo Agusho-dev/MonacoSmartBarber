@@ -32,7 +32,7 @@
  *    golpear, no se bloquea: lo levanta ('agarrado'), lo aprieta y lo tira al piso. Si no agarra
  *    nada, el especial dura `total` (recuperación larga: queda regalado).
  *  - Cura (DefEspecial.cura): desde `desde`, cada `cada` ticks se cura un pedacito hasta `fraccion`
- *    de su vida; se corta si le pegan; nunca pasa de vidaMax.
+ *    de su vida; se corta si le pegan (salvo lo que aguante su `armadura`); nunca pasa de vidaMax.
  *  - Efectos con duración (`ticksEfecto`): aturde (no se mueve), marea (no se cubre, camina lento),
  *    quema (`quema`: daño cada `cada` ticks). El efecto 'critico' de la ficha = siempre crítico.
  *  - Pasivas (KitPersonaje.pasiva): perillas que el motor mira en cada lugar (ver PasivaKit).
@@ -238,13 +238,29 @@ export interface EstiloCpu {
    * de abajo (−). Empareja lo que el daño no puede: la CPU fácil casi no se cubre ni castiga y la
    * difícil castiga casi todo, y con cada una rinden kits distintos. Sólo cambia cómo juega la CPU
    * con ese barbero, nunca el kit (el humano y el online no lo notan), y normal queda en 0: es la
-   * dificultad que mide el balance de los kits. Es una perilla MUY sensible: la reacción se
+   * dificultad que mide el balance de los kits (contra una persona, ver `periciaHumano` y
+   * `asistencia`). Es una perilla MUY sensible: la reacción se
    * redondea a ticks (en fácil, 26, cambia un tick cada ≈ 0,03; en difícil, 6, pasa a 5 desde
    * +0,17 y a 7 desde −0,17) y un tick de reacción mueve 10 a 20 puntos de victorias. Afinada con
    * balance.mts (--ajuste con «pericia», 30/oct): sin ella, en fácil iban de 38 a 62 % y en difícil
    * de 36 a 57 %.
    */
   pericia?: Partial<Record<Dificultad, number>>
+  /**
+   * Contra una PERSONA (el otro lado es humano), la pericia de la CPU con este barbero reemplaza a
+   * `pericia` en esa dificultad (si falta, vale `pericia`). CPU contra CPU y el online no la ven.
+   * Existe porque la CPU de cada barbero no le cuesta lo mismo a una persona que a otra CPU: medido
+   * con los dos humanos de balance.mts (el simple y el novato), en normal el mismo humano le ganaba
+   * 10 % a la CPU de Lucas y 70 % a la de Nahuel, con la CPU contra CPU pareja (revisión del 30/oct).
+   */
+  periciaHumano?: Partial<Record<Dificultad, number>>
+  /**
+   * Asistencia a la persona que juega con ESTE barbero contra la CPU (−1..1): se le resta a la
+   * pericia de la CPU rival en esa dificultad (positiva = la CPU juega peor). Empareja lo que cada
+   * kit le cuesta a alguien que recién empieza (con Chipi, que camina y pega lento, el humano simple
+   * ganaba 0,4 %; con Luciano, 64 %). Sólo cuando exactamente un lado es humano.
+   */
+  asistencia?: Partial<Record<Dificultad, number>>
 }
 
 /** Pasivas como perillas del kit (las que no son de daño o crítico). */
@@ -504,15 +520,21 @@ const SIMON: KitPersonaje = {
     ],
     especialDeCombo: 1,
     preferencia: [0.5, 0.5],
-    pericia: { facil: 0.1, dificil: -0.14 },
+    pericia: { facil: 0.13, dificil: 0.02 },
+    periciaHumano: { normal: 0.026 },
+    asistencia: { normal: -0.061, dificil: -0.1 },
   },
 }
 
 // ─── Chipi «El Fijador»: pesado, aguanta, pega fuerte ───────────────────────
 
 const CHIPI: KitPersonaje = {
-  caminar: 2.85,
-  caminarAtras: 2.3,
+  // 3,2 (era 2,85) y los golpes al ritmo de los demás (el puño era 6/21): con el GOLPE y la marcha
+  // más lentos del elenco, el que sólo aprieta GOLPE (el «humano simple» de balance.mts) le ganaba
+  // 0,4 % a la CPU normal con Chipi. Lo pesado sigue en la MÁQUINA con armadura, la vida y la pasiva
+  // (revisión del 30/oct, segunda tanda).
+  caminar: 3.2,
+  caminarAtras: 2.6,
   correr: 5.2,
   saltoVx: 3.6,
   dash: { adelante: 150, atras: 120, ticks: 18 },
@@ -527,10 +549,10 @@ const CHIPI: KitPersonaje = {
       boton: 'golpe',
       siguiente: 'patada',
       critico: 0,
-      total: 21,
+      total: 16,
       ventanas: [
         {
-          desde: 6,
+          desde: 5,
           ticks: 3,
           danio: 40,
           danioGuardia: 10,
@@ -548,10 +570,10 @@ const CHIPI: KitPersonaje = {
       boton: 'golpe',
       siguiente: 'combo',
       critico: 0,
-      total: 26,
+      total: 21,
       ventanas: [
         {
-          desde: 8,
+          desde: 7,
           ticks: 4,
           danio: 55,
           danioGuardia: 14,
@@ -568,11 +590,11 @@ const CHIPI: KitPersonaje = {
       herramienta: 'patada',
       boton: 'golpe',
       critico: 0,
-      total: 37,
-      avance: { desde: 0, hasta: 13, vel: 1.5 },
+      total: 32,
+      avance: { desde: 0, hasta: 12, vel: 1.5 },
       ventanas: [
         {
-          desde: 7,
+          desde: 6,
           ticks: 2,
           danio: 35,
           danioGuardia: 8,
@@ -583,7 +605,7 @@ const CHIPI: KitPersonaje = {
           hitstun: 20,
         },
         {
-          desde: 13,
+          desde: 12,
           ticks: 3,
           danio: 55,
           danioGuardia: 10,
@@ -608,7 +630,8 @@ const CHIPI: KitPersonaje = {
         {
           desde: 13,
           ticks: 4,
-          danio: 80,
+          // 72 (era 80) y el peine 59 (era 65): el daño que pasó al GOLPE más rápido.
+          danio: 72,
           danioGuardia: 30,
           fuerza: 'fuerte',
           caja: { x0: 25, x1: 122, y0: 60, y1: 178 },
@@ -628,7 +651,7 @@ const CHIPI: KitPersonaje = {
         {
           desde: 11,
           ticks: 4,
-          danio: 65,
+          danio: 59,
           danioGuardia: 25,
           fuerza: 'fuerte',
           caja: { x0: 28, x1: 130, y0: 70, y1: 175 },
@@ -685,7 +708,11 @@ const CHIPI: KitPersonaje = {
         vida: 120,
         golpes: 1,
         intervalo: 0,
-        danio: 190,
+        // 125 (era 190): es el especial que más acierta (≈ 89 % CPU contra CPU) y, tirado sin
+        // apuntar apenas se enciende, era lo que más le daba a Chipi: el que aprieta los especiales le
+        // ganaba 2 de 3 a la CPU normal y el que sólo aprieta GOLPE, 1 de 4 (revisión del 30/oct,
+        // segunda tanda). Lo que pierde acá lo recupera en los golpes (DANIO_KIT).
+        danio: 125,
         danioGuardia: 0,
         fuerza: 'especial',
         hitstun: 30,
@@ -736,7 +763,9 @@ const CHIPI: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [1.2, 0.8],
-    pericia: { facil: -0.04, dificil: -0.16 },
+    pericia: { facil: -0.075, dificil: -0.165 },
+    periciaHumano: { normal: 0.095 },
+    asistencia: { normal: -0.116, dificil: -0.16 },
   },
 }
 
@@ -814,7 +843,15 @@ function normales(o: { ritmo: number; danio: number; alcance: number }): Record<
   }
 }
 
-/** Un golpe de la cadena de HERRAMIENTA (lento, mucho daño a la guardia, +5 % de crítico). */
+/**
+ * Un golpe de la cadena de HERRAMIENTA (lento, mucho daño a la guardia, +5 % de crítico).
+ *
+ * El primero (el que sale con el botón MÁQUINA) arranca a los 12 ticks en todos (Chipi, a los 13 con
+ * armadura): lo que cambia entre barberos es el alcance y el daño. Revisión del 30/oct, segunda
+ * tanda: iba de 10 (Gabriel) a 14 (Brian) y un tick decidía casi todo el cambio de golpes entre dos
+ * personas que machacan GOLPE y MÁQUINA (el «novato» de balance.mts): novato contra novato, Gabriel
+ * y Luciano ganaban 85 % y Brian 3 %; con Gabriel a 11, su CPU pasaba de 41 a 30 % contra las otras.
+ */
 function pesado(
   id: string,
   anim: 'herramienta1' | 'herramienta2',
@@ -902,7 +939,10 @@ const NICO_U: KitPersonaje = {
         hitstop: 9,
         empuje: 3,
         rastrero: true,
-        ticksEfecto: 70,
+        // Aturde 56 ticks (eran 70): con 1,2 s entraba una cadena entera atrás del bombo y, tirado
+        // sin apuntar, era lo que hacía a Nico U. el más fuerte entre dos personas (revisión del
+        // 30/oct, segunda tanda).
+        ticksEfecto: 56,
       },
     },
     {
@@ -925,7 +965,9 @@ const NICO_U: KitPersonaje = {
     ],
     especialDeCombo: 2,
     preferencia: [1, 0.6],
-    pericia: { facil: -0.07, dificil: 0.06 },
+    pericia: { facil: -0.033, dificil: 0.083 },
+    periciaHumano: { normal: 0.044 },
+    asistencia: { normal: -0.123, dificil: -0.06 },
   },
 }
 
@@ -944,8 +986,9 @@ const FABRI: KitPersonaje = {
   movimientos: {
     ...normales({ ritmo: 1.05, danio: 1, alcance: 0 }),
     celular: pesado('celular', 'herramienta1', 'celular', {
-      desde: 13,
-      total: 31,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 30,
       danio: 70,
       guardia: 28,
       caja: [30, 148, 70, 180],
@@ -961,6 +1004,10 @@ const FABRI: KitPersonaje = {
       numero: 1,
       anim: 'especial1',
       herramienta: 'celular',
+      // Los golpes leves y medios no la cortan (pegan igual): sólo un golpe fuerte o un especial.
+      // Sin esto no había un momento seguro para curarse contra alguien que pega sin parar, y la CPU
+      // casi no la usaba (revisión del 30/oct, segunda tanda).
+      armadura: { hasta: 70, contra: ['leve', 'medio'] },
       total: 82,
       ventanas: [],
       cura: { desde: 10, ticks: 60, cada: 10, fraccion: 0.165 },
@@ -1005,7 +1052,9 @@ const FABRI: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [1, 0.8],
-    pericia: { facil: 0.04 },
+    pericia: { facil: -0.02, dificil: 0.075 },
+    periciaHumano: { normal: 0.361 },
+    asistencia: { normal: 0.174 },
   },
 }
 
@@ -1023,8 +1072,9 @@ const LUCIANO: KitPersonaje = {
   movimientos: {
     ...normales({ ritmo: 0.98, danio: 0.95, alcance: 0 }),
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 11,
-      total: 28,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 29,
       danio: 75,
       guardia: 26,
       caja: [24, 124, 60, 178],
@@ -1088,7 +1138,9 @@ const LUCIANO: KitPersonaje = {
     ],
     especialDeCombo: 1,
     preferencia: [1, 1],
-    pericia: { facil: 0.05, dificil: 0.14 },
+    pericia: { facil: 0.05, dificil: 0.166 },
+    periciaHumano: { normal: 0.061 },
+    asistencia: { normal: -0.133 },
   },
 }
 
@@ -1109,8 +1161,9 @@ const GABRIEL: KitPersonaje = {
     // CPU normal. Ojo: Gabriel es muy sensible al ritmo de su MÁQUINA y de su molino (con arranque
     // 11/28 o un molino de 4 golpes, la CPU normal con Gabriel bajaba de 50 % a 30 %): simular.
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 10,
-      total: 27,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 29,
       danio: 70,
       guardia: 26,
       caja: [24, 122, 60, 178],
@@ -1171,7 +1224,10 @@ const GABRIEL: KitPersonaje = {
         ancho: 130,
         alto: 150,
         vida: 40,
-        golpes: 5,
+        // UN contacto por estallido (sigue activo los 8 ticks para el que entra tarde). Con 5 e
+        // intervalo 0 volvía a pegar en cada tick al que se cubría: rompía la guardia al 2.º contacto
+        // y el 3.º entraba limpio, y cubrirse costaba 310 contra 182 sin cubrirse (revisión del 30/oct).
+        golpes: 1,
         intervalo: 0,
         danio: 140,
         danioGuardia: 45,
@@ -1192,7 +1248,9 @@ const GABRIEL: KitPersonaje = {
     ],
     especialDeCombo: 1,
     preferencia: [1, 1],
-    pericia: { dificil: 0.18 },
+    pericia: { facil: -0.09, dificil: -0.075 },
+    periciaHumano: { normal: 0.045 },
+    asistencia: { normal: -0.27, dificil: -0.22 },
   },
 }
 
@@ -1296,7 +1354,9 @@ const GUILLERMO: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [0.9, 0.9],
-    pericia: { dificil: -0.15 },
+    pericia: { facil: -0.004, dificil: -0.137 },
+    periciaHumano: { normal: 0.147 },
+    asistencia: { normal: 0.035 },
   },
 }
 
@@ -1315,8 +1375,9 @@ const RODRIGO: KitPersonaje = {
   movimientos: {
     ...normales({ ritmo: 1.08, danio: 1.05, alcance: 4 }),
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 13,
-      total: 32,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 31,
       danio: 82,
       guardia: 30,
       caja: [24, 136, 60, 180],
@@ -1335,7 +1396,9 @@ const RODRIGO: KitPersonaje = {
       herramienta: 'baile',
       armadura: { hasta: 8, contra: TODO },
       total: 58,
-      ventanas: [ventana(38, 6, 115, 32, 'especial', [10, 125, 40, 200], 18, 9, { hitstun: 32 })],
+      // Pega desde la mitad del baile hasta el final (era sólo al final, 38–44): el que estaba en el
+      // camino quedaba atrás del empujón y el Paso acertaba 12–14 % (revisión del 30/oct, segunda tanda).
+      ventanas: [ventana(22, 22, 115, 32, 'especial', [10, 125, 40, 200], 18, 9, { hitstun: 32 })],
       embestida: { desde: 6, ticks: 32, distancia: 230, recuperacionGolpe: 18, recuperacionBloqueo: 22, atraviesa: true },
     },
     {
@@ -1380,7 +1443,9 @@ const RODRIGO: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [1.4, 1.4],
-    pericia: { facil: -0.09, dificil: -0.15 },
+    pericia: { facil: -0.107, dificil: -0.2 },
+    periciaHumano: { normal: 0.087 },
+    asistencia: { normal: 0.083 },
   },
 }
 
@@ -1399,8 +1464,9 @@ const JOAQUIN: KitPersonaje = {
   movimientos: {
     ...normales({ ritmo: 0.98, danio: 1, alcance: 4 }),
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 11,
-      total: 28,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 29,
       danio: 76,
       guardia: 28,
       caja: [24, 126, 60, 178],
@@ -1480,15 +1546,20 @@ const JOAQUIN: KitPersonaje = {
     ],
     especialDeCombo: 2,
     preferencia: [1, 1],
-    pericia: { dificil: -0.1 },
+    pericia: { facil: 0.003, dificil: -0.13 },
+    periciaHumano: { normal: 0.059 },
+    asistencia: { normal: -0.07 },
   },
 }
 
 // ─── Nahuel «El 10»: rápido a distancia; pelotazo recto y una chilena que también pega arriba ────
 
 const NAHUEL: KitPersonaje = {
-  caminar: 4.4,
-  caminarAtras: 3.6,
+  // 4,2 / 3,5 (eran 4,4 / 3,6; sigue siendo de los que más caminan): con lo más rápido del elenco,
+  // el que sólo aprieta GOLPE ganaba con Nahuel el doble que el que usa todo (revisión del 30/oct,
+  // segunda tanda).
+  caminar: 4.2,
+  caminarAtras: 3.5,
   correr: 6.8,
   saltoVx: 5.2,
   dash: { adelante: 150, atras: 120, ticks: 15 },
@@ -1498,8 +1569,9 @@ const NAHUEL: KitPersonaje = {
   movimientos: {
     ...normales({ ritmo: 0.95, danio: 0.95, alcance: 2 }),
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 11,
-      total: 28,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 29,
       danio: 72,
       guardia: 26,
       caja: [24, 124, 60, 178],
@@ -1561,7 +1633,9 @@ const NAHUEL: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [0.9, 0.9],
-    pericia: { dificil: -0.11 },
+    pericia: { facil: 0.043, dificil: 0.03 },
+    periciaHumano: { normal: 0.545 },
+    asistencia: { normal: 0.076, dificil: -0.06 },
   },
 }
 
@@ -1671,7 +1745,9 @@ const LUCAS: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [0.55, 1],
-    pericia: { facil: 0.1, dificil: -0.06 },
+    pericia: { facil: 0.105, dificil: -0.06 },
+    periciaHumano: { normal: 0.098 },
+    asistencia: { normal: 0.149 },
   },
 }
 
@@ -1779,15 +1855,19 @@ const STEFANO: KitPersonaje = {
     ],
     especialDeCombo: 2,
     preferencia: [1.6, 1.6],
-    pericia: { facil: -0.08, dificil: 0.22 },
+    pericia: { facil: -0.111, dificil: 0.162 },
+    periciaHumano: { normal: 0.329 },
+    asistencia: { normal: 0.045 },
   },
 }
 
 // ─── Brian «El Tanque»: grappler; agarre imbloqueable y un sismo que hay que saltar ──────
 
 const BRIAN: KitPersonaje = {
-  caminar: 3,
-  caminarAtras: 2.2,
+  // 3,3 / 2,4 (eran 3 / 2,2): el más lento del elenco quedaba a merced de cualquiera que lo
+  // esperara o se le fuera (revisión del 30/oct, segunda tanda).
+  caminar: 3.3,
+  caminarAtras: 2.4,
   correr: 4.8,
   saltoVx: 3.3,
   dash: { adelante: 140, atras: 110, ticks: 19 },
@@ -1799,8 +1879,9 @@ const BRIAN: KitPersonaje = {
     ...normales({ ritmo: 1.03, danio: 1.08, alcance: -4 }),
     // Neutra bloqueada (era −2: la CPU difícil, que castiga 9 de 10, le ganaba el juego neutro).
     remate: pesado('remate', 'herramienta1', 'pesado', {
-      desde: 14,
-      total: 32,
+      // Arranca a los 12, como la MÁQUINA de los demás (ver pesado()).
+      desde: 12,
+      total: 30,
       danio: 92,
       guardia: 34,
       caja: [24, 120, 60, 182],
@@ -1817,7 +1898,11 @@ const BRIAN: KitPersonaje = {
       numero: 1,
       anim: 'especial1',
       herramienta: 'agarre',
-      total: 52,
+      // Se estira para agarrar (24 px en los primeros 8 ticks) y, si falla, queda regalado 46 ticks
+      // (eran 52 sin estirarse): apretado sin apuntar fallaba casi siempre y entre dos personas
+      // Brian ganaba 3 % (revisión del 30/oct, segunda tanda).
+      avance: { desde: 0, hasta: 8, vel: 3 },
+      total: 46,
       ventanas: [ventana(8, 6, 0, 0, 'especial', [12, 92, 20, 190], 0, 0)],
       agarre: { sostener: 64, apretones: { cada: 16, danio: 22 }, tiron: { danio: 105, empuje: 7 }, adelante: 66, alto: 46, recuperacion: 20 },
     },
@@ -1863,7 +1948,9 @@ const BRIAN: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [1, 1],
-    pericia: { dificil: 0.17 },
+    pericia: { facil: 0.15, dificil: 0.31 },
+    periciaHumano: { normal: 0.875 },
+    asistencia: { normal: 0.138 },
   },
 }
 
@@ -1926,21 +2013,27 @@ export function conDanio(kit: KitPersonaje, fn: number, fe: number, fg = 1, fge 
 /**
  * Factores [normales, especiales, guardia de los normales, guardia de los especiales] de cada barbero
  * (balance con el simulador, 30/oct/2026; la guardia de los normales va entre 0,8 y 1,3).
+ *
+ * Revisión del 30/oct, segunda tanda: el nivel lo pone normal (afinar.mts --peso=0,1,0 --dif=normal;
+ * fácil y difícil los empareja la `pericia`) y la proporción especiales/normales es una decisión:
+ * apretados sin apuntar, los especiales decidían las peleas entre dos personas (el «novato» de
+ * balance.mts), así que bajó en Simón (0,9), Chipi (0,85), Nico U. (0,9), Luciano (1,3), Gabriel
+ * (1,2) y Joaquín (1,25), y subió en Fabri (1,15), Nahuel (1,45) y Brian (1,1).
  */
 export const DANIO_KIT: Readonly<Record<IdPersonaje, readonly [number, number, number, number]>> = {
-  simon: [0.83, 0.83, 0.8, 0.8],
-  chipi: [0.769, 0.769, 0.8, 0.8],
-  nico_u: [0.906, 0.906, 0.8, 0.8],
-  fabri: [0.817, 0.817, 0.951, 0.951],
-  luciano: [0.989, 1.372, 1.3, 2],
-  gabriel: [0.941, 1.303, 1.3, 2],
-  guillermo: [1.206, 1.206, 0.8, 0.8],
-  rodrigo: [1.028, 1.028, 0.8, 0.8],
-  joaquin: [0.885, 1.227, 0.814, 0.814],
-  nahuel: [0.856, 1.186, 0.88, 0.88],
-  lucas: [0.959, 0.959, 0.8, 0.8],
-  stefano: [0.974, 0.974, 1.3, 2],
-  brian: [0.866, 0.866, 1.3, 2],
+  simon: [0.837, 0.753, 1.114, 1.114],
+  chipi: [0.88, 0.749, 1.196, 1.196],
+  nico_u: [0.952, 0.857, 0.8, 0.8],
+  fabri: [0.787, 0.903, 1.3, 2],
+  luciano: [0.985, 1.281, 1.3, 2],
+  gabriel: [1.137, 1.363, 1.032, 1.587],
+  guillermo: [1.146, 1.146, 1.3, 1.416],
+  rodrigo: [1.041, 1.041, 0.8, 0.8],
+  joaquin: [0.936, 1.17, 0.8, 0.8],
+  nahuel: [0.827, 1.197, 0.818, 0.818],
+  lucas: [0.918, 0.918, 1.062, 1.062],
+  stefano: [1.04, 1.04, 0.864, 1.328],
+  brian: [0.698, 0.768, 0.838, 1.29],
 }
 
 /** Los kits con los números de diseño, antes del factor de daño (los usa el simulador para afinar). */

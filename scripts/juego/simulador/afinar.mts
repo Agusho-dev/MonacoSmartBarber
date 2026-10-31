@@ -18,6 +18,10 @@
  *                              'dn' (difícil − normal, cuando la división ya se ocupa de fácil).
  *     [--peso=0.25,0.5,0.25]   peso de fácil, normal y difícil en el nivel de daño (def. parejo). Normal
  *                              es la dificultad por defecto: conviene que sea la que queda más pareja.
+ *     [--dif=normal]           sólo corre esas dificultades (las que faltan cuentan como 50 %): con
+ *                              --peso=0,1,0 --brecha=0 empareja normal con el daño y deja fácil y
+ *                              difícil para la `pericia` de la CPU (revisión del 30/oct, segunda tanda).
+ *     [--hilos=7]              hilos de balance.mts
  *
  * Es una herramienta para iterar: los factores que salen se copian a mano a DANIO_KIT
  * (motor/movimientos.ts) y se confirma con balance.mts con más semillas.
@@ -44,6 +48,8 @@ const [pf, pn, pd] = (arg('peso') ?? '1,1,1').split(',').map(Number)
 const gmin = Number(arg('gmin') ?? 0.35)
 const gmax = Number(arg('gmax') ?? 2.6)
 const gemax = Number(arg('gemax') ?? gmax)
+const difs = arg('dif')
+const hilos = arg('hilos') ?? '7'
 // Los intermedios van al temporal del sistema (no ensucian el repo).
 const tmp = join(tmpdir(), 'corte-final-afinar.json')
 const crudo = join(tmpdir(), 'corte-final-afinar-crudo.json')
@@ -66,7 +72,8 @@ const acotar = (x: number, min = 0.55, max = 1.7) => Math.round(Math.min(max, Ma
 
 for (let v = 1; v <= vueltas; v++) {
   writeFileSync(tmp, JSON.stringify(ajuste))
-  execFileSync(process.execPath, ['--import', './cargador.mjs', 'balance.mts', `--semillas=${semillas}`, '--humano=0', '--hilos=7', `--ajuste=${tmp}`, `--json=${crudo}`], {
+  const extra = difs ? [`--dif=${difs}`] : []
+  execFileSync(process.execPath, ['--import', './cargador.mjs', 'balance.mts', `--semillas=${semillas}`, '--humano=0', '--novatos=0', `--hilos=${hilos}`, ...extra, `--ajuste=${tmp}`, `--json=${crudo}`], {
     cwd: import.meta.dirname,
     stdio: ['ignore', 'ignore', 'inherit'],
   })

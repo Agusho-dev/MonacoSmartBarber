@@ -1,9 +1,14 @@
 #!/bin/bash
 # Las 11 peleas contra la CPU del elenco nuevo: cada barbero una vez como jugador y una como rival.
-# Uso (desde MonacoSmartBarber/, con el dev server en :3100):
-#   TURNO=chrome <scratchpad>/herramientas/turno.sh scripts/juego/integracion/todas-cpu.sh
+# Uso (desde MonacoSmartBarber/, contra un servidor de DESARROLLO —el gancho de pruebas sólo existe
+# ahí— que se pasa en URL_BASE; el :3100 es el del dueño):
+#   URL_BASE=http://localhost:3210 TURNO=chrome <scratchpad>/herramientas/turno.sh scripts/juego/integracion/todas-cpu.sh
 # Informes y capturas en SALIDA (por defecto, <tmp>/corte-final-integracion).
 cd "$(dirname "$0")"
+if [ -z "$URL_BASE" ]; then
+  echo "Falta URL_BASE (p. ej. URL_BASE=http://localhost:3210). El :3100 es el servidor del dueño: usalo sólo a propósito." >&2
+  exit 2
+fi
 SAL="${SALIDA:-${TMPDIR:-/tmp}/corte-final-integracion}"
 OK=0; MAL=0
 while read -r a b arena tam; do

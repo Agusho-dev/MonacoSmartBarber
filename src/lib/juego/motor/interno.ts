@@ -156,6 +156,11 @@ export interface InternoLuchador {
   quema: { cada: number; danio: number; de: Lado; t: number } | null
   /** Lo tiene agarrado ese lado (el Agarre de Brian). */
   agarradoPor: Lado | null
+  /**
+   * Ticks de pelea seguidos sin poder actuar (sin contar el hitstop ni los super flash; ver
+   * `sinControl` en cuerpo.ts). Desde TOPE_ENCIERRO.inmuneDesde queda inmune al control.
+   */
+  sinControl: number
 }
 
 export interface EstadoFinal {
