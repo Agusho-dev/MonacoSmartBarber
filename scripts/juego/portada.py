@@ -3,7 +3,7 @@
 Retrato de cuerpo entero de un barbero de «Corte Final» a partir de la «portada» en pixel art que mandó
 el dueño: juego-fuentes/<id>_retrato.png (o .jpg) → public/juego/personajes/<id>/retrato.webp.
 
-    python3 scripts/juego/portada.py <id> [<id> ...] [--alto 1080] [--revision <carpeta FUERA de public/>]
+    python3 scripts/juego/portada.py <id> [<id> ...] [--cara] [--alto 1080] [--revision <carpeta FUERA de public/>]
 
 Sin modelo y sin candado: tarda 1–5 s por barbero y sale igual byte a byte en cada corrida (misma
 fuente, mismo Pillow). Requiere numpy, scipy y Pillow.
@@ -57,7 +57,14 @@ existen las dos fuentes de un barbero, manda el PNG.
 
 OJO: los extractores con --retrato (o --solo retrato) reescriben retrato.webp desde un cuadro de la
 hoja y pisan la portada: después de correrlos con esa opción, volver a correr este script con los
-barberos que tienen portada. La cara (cara.webp) no la toca este script.
+barberos que tienen portada (con --cara).
+
+Con --cara escribe también cara.webp (la grilla de «Elegí tu barbero», la barra VOS/RIVAL, el HUD y la
+banda del especial), 256×256 como las de siempre: el dueño (1/nov) quiso las caras chicas en el mismo
+estilo que la portada. El cuadrado se mide desde la mancha de piel de la cara (la más grande y centrada
+de la parte de arriba): su ancho da el tamaño (CARA_LADO) y su borde de arriba la altura (CARA_ARRIBA);
+lo que no salga bien solo va en CARA_AJUSTES. Los extractores con --retrato también reescriben
+cara.webp desde la hoja.
 """
 import argparse
 import os
@@ -88,6 +95,17 @@ MANCHA_AREA = 60       # restos del damero pegados al borde, metidos en el conto
 # Portadas PNG con transparencia
 ALFA_DIBUJO = 253      # el alfa con que vienen los píxeles del dibujo (se lleva a 255)
 MOTA = 200             # manchas sueltas más chicas que esto (px de la fuente) se borran; las de hoy, ≤ 14
+
+# La cara (cara.webp, con --cara): un cuadrado de CARA px medido desde la mancha de la cara y el cuello
+CARA = 256             # como las caras de siempre
+CARA_LADO = 2.0        # el lado del cuadrado, en anchos de la mancha de la cara (el alto varía: a
+                       # veces suma el cuello o una mano, y en Rodrigo los lentes la cortan)
+CARA_ARRIBA = 0.55     # cuánto pelo o gorra entra arriba de la frente, en anchos de la mancha
+# Corrimientos (dx, dy en fracción del lado) y escala del cuadrado, por barbero, si hace falta.
+CARA_AJUSTES = {
+    # la mancha de Luciano suma la mano de la máquina: sin esto queda medio cuerpo
+    'luciano': (0.0, 0.0, 0.85),
+}
 
 # Lo que no sale solo, en px de la fuente.
 #   huecos: un punto adentro de un asomo chico del damero (fondo encerrado de menos de HUECO_AREA px)
@@ -290,10 +308,58 @@ def revision(carpeta, nombre, fuente, partes, retrato):
     lamina.convert('RGB').save(os.path.join(carpeta, f'{nombre}_retrato.png'))
 
 
+def buscar_cara(alfa, color):
+    """La cara: la mancha de piel más grande y más centrada de la parte de arriba del cuerpo (las manos
+    que levantan las herramientas también son piel, pero quedan a los costados). Devuelve y0, y1, x0, x1."""
+    ys, xs = np.nonzero(alfa > 0.5)
+    y0, y1, x0, x1 = ys.min(), ys.max(), xs.min(), xs.max()
+    r, g, b = color[..., 0], color[..., 1], color[..., 2]
+    piel = ((alfa > 0.5) & (r > 95) & (g > 40) & (b > 20) & (r > g) & (r > b)
+            & (r - np.minimum(g, b) > 15) & (np.abs(r - g) > 15))
+    piel[int(y0 + 0.42 * (y1 - y0)):] = False
+    piel = ndimage.binary_opening(piel, structure=_disco(2))
+    lab, n = ndimage.label(piel)
+    if n == 0:
+        sys.exit('no encontré la cara')
+    centro = (x0 + x1) / 2
+    mejor, puntaje = None, -1.0
+    for i, sl in enumerate(ndimage.find_objects(lab), start=1):
+        area = float((lab[sl] == i).sum())
+        medio = (sl[1].start + sl[1].stop) / 2
+        p = area / (1 + ((medio - centro) / (0.18 * (x1 - x0))) ** 2)
+        if p > puntaje:
+            mejor, puntaje = sl, p
+    return mejor[0].start, mejor[0].stop, mejor[1].start, mejor[1].stop
+
+
+def cara(alfa, color, nombre):
+    """cara.webp desde la portada: un cuadrado con la cabeza arriba y el comienzo de los hombros, como
+    las de Simón y Chipi. Se mide desde el ancho y el borde de arriba de la mancha de la cara."""
+    fy0, _, fx0, fx1 = buscar_cara(alfa, color)
+    ancho_c = fx1 - fx0
+    dx, dy, esc = CARA_AJUSTES.get(nombre, (0.0, 0.0, 1.0))
+    lado = int(round(CARA_LADO * ancho_c * esc))
+    x0 = int(round((fx0 + fx1) / 2 - lado / 2 + dx * lado))
+    y0 = int(round(fy0 - CARA_ARRIBA * ancho_c + dy * lado))
+    alto_f, ancho_f = alfa.shape
+    pad = max(0, -x0, -y0, x0 + lado - ancho_f, y0 + lado - alto_f)
+    alfa_p = np.pad(alfa, pad)
+    color_p = np.pad(color, [(pad, pad), (pad, pad), (0, 0)], mode='edge')
+    alfa_c = alfa_p[y0 + pad:y0 + pad + lado, x0 + pad:x0 + pad + lado]
+    color_c = color_p[y0 + pad:y0 + pad + lado, x0 + pad:x0 + pad + lado]
+    _, (iy, ix) = ndimage.distance_transform_edt(alfa_c < 0.5, return_indices=True)
+    rgb = Image.fromarray(np.clip(color_c[iy, ix] + 0.5, 0, 255).astype(np.uint8)).resize((CARA, CARA), Image.LANCZOS)
+    a = Image.fromarray(np.clip(alfa_c * 255 + 0.5, 0, 255).astype(np.uint8)).resize((CARA, CARA), Image.LANCZOS)
+    a = np.asarray(a).copy()
+    a[a < 4] = 0
+    return Image.fromarray(np.ascontiguousarray(np.dstack([np.asarray(rgb), a])))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('ids', nargs='+', help='ids del juego (fabri, luciano, nico_u…)')
     ap.add_argument('--alto', type=int, default=ALTO, help=f'alto del retrato en px (default {ALTO})')
+    ap.add_argument('--cara', action='store_true', help='también cara.webp (la grilla, el HUD y la banda del especial)')
     ap.add_argument('--revision', help='carpeta para las imágenes de revisión (NUNCA dentro de public/)')
     args = ap.parse_args()
     if args.revision and os.path.abspath(args.revision).startswith(os.path.join(REPO, 'public')):
@@ -321,6 +387,10 @@ def main():
               f'{os.path.getsize(destino) / 1024:.1f} KB')
         if args.revision:
             revision(args.revision, nombre, fuente, partes, Image.open(destino).convert('RGBA'))
+        if args.cara:
+            destino = os.path.join(carpeta, 'cara.webp')
+            cara(alfa, color, nombre).save(destino, 'WEBP', quality=CALIDAD, method=6)
+            print(f'{nombre}: {os.path.relpath(destino, REPO)} {CARA}×{CARA}, {os.path.getsize(destino) / 1024:.1f} KB')
 
 
 if __name__ == '__main__':
