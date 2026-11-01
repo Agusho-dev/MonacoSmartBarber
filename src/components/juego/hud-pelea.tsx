@@ -2,6 +2,7 @@
 
 import { Pause, Zap } from 'lucide-react'
 import type { CSSProperties } from 'react'
+import { espejarRetrato } from '@/lib/juego/personajes'
 import type { FichaPersonaje, Lado } from '@/lib/juego/tipos'
 import { alTocar } from '@/lib/juego/ui/toque'
 import { EstadosHud } from './estados-hud'
@@ -55,7 +56,7 @@ function LadoHud({ lado, ficha, rondas }: { lado: Lado; ficha: FichaPersonaje; r
       aria-hidden="true"
     >
       <div className="cf-hud__cara" data-hud={`cara-${lado}`}>
-        <ImagenJuego src={ficha.rutas.cara} alt="" tipo="cara" color={ficha.color} espejar={lado === 1} prioridad />
+        <ImagenJuego src={ficha.rutas.cara} alt="" tipo="cara" color={ficha.color} espejar={espejarRetrato(ficha, lado === 1)} prioridad />
       </div>
       <div className="cf-hud__barras">
         <div className="cf-hud__fila">

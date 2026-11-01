@@ -3,7 +3,7 @@
 import { ChevronLeft, SignalHigh, SignalLow, SignalMedium, Swords } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
-import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
 import type {
   DatosEntradaJuego,
   Dificultad,
@@ -277,7 +277,7 @@ export function PantallaSeleccion({
               <b>{rival.nombre}</b>
             </span>
             <span className="cf-duelo__cara">
-              <ImagenJuego src={rival.rutas.cara} alt="" tipo="cara" color={rival.color} espejar />
+              <ImagenJuego src={rival.rutas.cara} alt="" tipo="cara" color={rival.color} espejar={espejarRetrato(rival)} />
             </span>
           </button>
         </div>

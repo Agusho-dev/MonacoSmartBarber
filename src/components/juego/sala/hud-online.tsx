@@ -5,7 +5,7 @@ import { useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import type { Lockstep } from '@/lib/juego/online/lockstep'
 import { cartelEspera } from '@/lib/juego/online/textos'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import { VISTA_ANCHO } from '@/lib/juego/tipos'
 import type { FichaPersonaje, IdArena, IdPersonaje, Lado, Partida } from '@/lib/juego/tipos'
 import { alTocar } from '@/lib/juego/ui/toque'
@@ -88,7 +88,7 @@ function LadoOnline({
       aria-hidden="true"
     >
       <div className="cf-hud__cara" data-hud={`cara-${v}`}>
-        <ImagenJuego src={ficha.rutas.cara} alt="" tipo="cara" color={ficha.color} espejar={fisico === 1} prioridad />
+        <ImagenJuego src={ficha.rutas.cara} alt="" tipo="cara" color={ficha.color} espejar={espejarRetrato(ficha, fisico === 1)} prioridad />
       </div>
       <div className="cf-hud__barras">
         <div className="cf-hud__fila">
