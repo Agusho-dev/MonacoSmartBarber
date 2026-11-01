@@ -2,7 +2,7 @@
 
 import { Heart, Lock, MapPin, Scissors, Sparkles, Trophy } from 'lucide-react'
 import type { CSSProperties, Ref } from 'react'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import type { Atributos, EstadisticaPersonaje, FichaPersonaje, FichaProximamente, IdPersonaje } from '@/lib/juego/tipos'
 import type { SucursalPlantel } from '@/lib/juego/ui/plantel'
 import { nombreSucursal } from '@/lib/juego/ui/plantel'
@@ -194,8 +194,15 @@ export function HeroeLuchador({
 }) {
   return (
     <div className="cf-heroe" key={ficha.id}>
-      <div className="cf-heroe__retrato">
-        <ImagenJuego src={ficha.rutas.retrato} alt={ficha.nombre} tipo="cuerpo" color={ficha.color} espejar={espejar} prioridad />
+      <div className="cf-heroe__retrato" data-fijo={ficha.retratoFijo ? '' : undefined}>
+        <ImagenJuego
+          src={ficha.rutas.retrato}
+          alt={ficha.nombre}
+          tipo="cuerpo"
+          color={ficha.color}
+          espejar={espejarRetrato(ficha, espejar)}
+          prioridad
+        />
       </div>
       <div className="cf-heroe__placa" style={{ '--cf-letras': Math.max(4, ficha.nombre.length) } as CSSProperties}>
         {(rol || esBarbero) && (

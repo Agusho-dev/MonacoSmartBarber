@@ -27,6 +27,12 @@ const ruta = (id: IdPersonaje, conRapado = false): FichaPersonaje['rutas'] => ({
     : null,
 })
 
+/**
+ * Si el retrato de cuerpo entero se espeja. La UI da vuelta el del jugador para que mire al rival, pero
+ * las portadas del dueño (`retratoFijo`) traen texto en la ropa y van siempre como vinieron.
+ */
+export const espejarRetrato = (ficha: FichaPersonaje, quiere = true) => quiere && !ficha.retratoFijo
+
 export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
   simon: {
     id: 'simon',
@@ -134,6 +140,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Con menos de 35 % de vida pega 20 % más fuerte.',
     },
     frases: ['Dale, que el bombo no para.', 'Esto no es un corte, es un clásico.', 'Te hago el degradé en dos tiempos.'],
+    retratoFijo: true,
     rutas: ruta('nico_u'),
   },
   fabri: {
@@ -169,6 +176,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'La carga de la máquina se le llena 15 % más rápido.',
     },
     frases: ['Esperá que subo una historia.', 'Con estilo hasta para pelear.', 'Me curo y sigo como si nada.'],
+    retratoFijo: true,
     rutas: ruta('fabri'),
   },
   luciano: {
@@ -204,6 +212,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Corre 15 % más rápido y su esquiva llega más lejos.',
     },
     frases: ['Agarrate, que acelero.', 'Te paso por arriba con la moto.', 'Corte rápido, como la moto.'],
+    retratoFijo: true,
     rutas: ruta('luciano'),
   },
   gabriel: {
@@ -239,6 +248,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Su esquiva lo deja intocable más tiempo y se recupera antes.',
     },
     frases: ['El flow no se enseña.', 'Te hago un molino y quedás mareado.', 'Firmé tu derrota con aerosol.'],
+    retratoFijo: true,
     rutas: ruta('gabriel'),
   },
   guillermo: {
@@ -274,6 +284,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Arranca cada round con 2 de carga de más.',
     },
     frases: ['¿Te sirvo algo? Una derrota.', 'Este trago marea.', 'La casa invita… a perder.'],
+    retratoFijo: true,
     rutas: ruta('guillermo'),
   },
   rodrigo: {
@@ -309,6 +320,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Su guardia aguanta 25 % más.',
     },
     frases: ['¡Y ahora, el cuarteto!', 'Bailá conmigo, que igual te gano.', 'Este grito se escucha en todo Córdoba.'],
+    retratoFijo: true,
     rutas: ruta('rodrigo'),
   },
   joaquin: {
@@ -379,6 +391,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Camina más rápido y salta más lejos.',
     },
     frases: ['La pido y la meto.', 'De chilena, como en el potrero.', 'Te tiré un caño.'],
+    retratoFijo: true,
     rutas: ruta('nahuel'),
   },
   lucas: {
@@ -414,6 +427,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Congelado, aturdido, mareado, quemado y los demás estados le duran 30 % menos.',
     },
     frases: ['Shh, que se duerme el nene.', 'Papá no pierde.', 'Te cambio como a un pañal.'],
+    retratoFijo: true,
     rutas: ruta('lucas'),
   },
   stefano: {
@@ -449,6 +463,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Cada especial que acierta le devuelve 1 de carga.',
     },
     frases: ['¿Un mate? Arranca la ronda.', 'Cuidado, que está caliente.', 'Amargo como tu derrota.'],
+    retratoFijo: true,
     rutas: ruta('stefano'),
   },
   brian: {
@@ -484,6 +499,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Los golpes leves no lo frenan mientras pega con la herramienta o un especial.',
     },
     frases: ['Vení, que te doy un abrazo.', 'Quedate quieto, que te aprieto.', 'Puño al piso, y vos también.'],
+    retratoFijo: true,
     rutas: ruta('brian'),
   },
 }

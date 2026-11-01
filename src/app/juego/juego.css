@@ -2256,8 +2256,9 @@ html.cf-html body {
   }
 
   /* Acostado, la columna de la ficha queda siempre a la izquierda: el rival también mira hacia
-     el centro (la grilla). `scale` y no `transform`, que lo usa la animación de entrada. */
-  .cf-seleccion[data-modo='rival'] .cf-heroe__retrato {
+     el centro (la grilla). `scale` y no `transform`, que lo usa la animación de entrada. Las
+     portadas (`data-fijo`, con texto en la ropa) no se dan vuelta. */
+  .cf-seleccion[data-modo='rival'] .cf-heroe__retrato:not([data-fijo]) {
     scale: -1 1;
   }
 

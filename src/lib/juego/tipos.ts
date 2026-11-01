@@ -186,6 +186,11 @@ export interface FichaPersonaje {
   especiales: [FichaEspecial, FichaEspecial]
   pasiva: { nombre: string; descripcion: string }
   frases: string[]
+  /**
+   * El retrato es una «portada» del dueño (pixel art con texto en la ropa, scripts/juego/portada.py):
+   * la UI no lo espeja nunca (`espejarRetrato`, personajes.ts). Sin el campo se espeja como siempre.
+   */
+  retratoFijo?: boolean
   rutas: {
     atlas: string
     retrato: string

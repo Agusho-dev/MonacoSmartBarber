@@ -5,7 +5,7 @@ import { useRef, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import type { EstadoDuelo } from '@/lib/juego/online/duelo'
 import { bajadaResultado, textoRivalAusente, textoSinRed, tituloResultado } from '@/lib/juego/online/textos'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import { formatearDuracion, formatearPuntos, porcentaje } from '@/lib/juego/ui/textos'
 import { alTocar } from '@/lib/juego/ui/toque'
 import { useDesborde } from '../capa'
@@ -96,7 +96,7 @@ export function ResultadoOnline({
                 alt={miPersonaje.nombre}
                 tipo="cuerpo"
                 color={miPersonaje.color}
-                espejar
+                espejar={espejarRetrato(miPersonaje)}
                 prioridad
               />
             </div>

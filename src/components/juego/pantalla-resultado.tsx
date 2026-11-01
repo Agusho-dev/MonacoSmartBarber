@@ -39,7 +39,7 @@ import {
   type RespuestaGuardado,
 } from '@/lib/juego/guardado'
 import { encolarSiCorresponde, quitarPendiente, reintentarPendientes } from '@/lib/juego/pendientes'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { prefiereMenosMovimiento } from '@/lib/juego/ui/media'
@@ -436,7 +436,7 @@ export function PantallaResultado({
                 alt={retratoPelado ? `${jugador.nombre}, pelado al cero` : jugador.nombre}
                 tipo="cuerpo"
                 color={jugador.color}
-                espejar
+                espejar={espejarRetrato(jugador)}
                 prioridad
               />
             </div>

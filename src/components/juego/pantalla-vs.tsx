@@ -3,7 +3,7 @@
 import { LoaderCircle, MapPin, Wifi } from 'lucide-react'
 import { useEffect, useEffectEvent, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import type { IdPersonaje, Lado } from '@/lib/juego/tipos'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { NOMBRE_DIFICULTAD } from '@/lib/juego/ui/textos'
@@ -68,7 +68,7 @@ export function PantallaVs({
       <div className="cf-vs__lado cf-vs__lado--1">
         <span className="cf-vs__lineas" aria-hidden="true" />
         <div className="cf-vs__retrato">
-          <ImagenJuego src={jugador.rutas.retrato} alt="" tipo="cuerpo" color={jugador.color} espejar prioridad />
+          <ImagenJuego src={jugador.rutas.retrato} alt="" tipo="cuerpo" color={jugador.color} espejar={espejarRetrato(jugador)} prioridad />
         </div>
         <div className="cf-vs__placa" style={{ '--cf-letras': Math.max(4, jugador.nombre.length) } as CSSProperties}>
           <span className="cf-vs__etiqueta" data-jugador={online ? '' : undefined}>

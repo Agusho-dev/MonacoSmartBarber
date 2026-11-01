@@ -4,7 +4,7 @@ import { CircleHelp, Trophy, Volume2, VolumeX } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useEffectEvent, useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import type { DatosEntradaJuego, EstadoTurnoJuego, IdPersonaje } from '@/lib/juego/tipos'
 import type { PreferenciasJuego } from '@/lib/juego/ui/preferencias'
 import { ImagenJuego } from './imagen-juego'
@@ -61,7 +61,7 @@ export function PantallaInicio({ datos, luchadores, turno, prefs, onJugar, onRan
         style={{ '--cf-acento': izquierda.color } as CSSProperties}
         aria-hidden="true"
       >
-        <ImagenJuego src={izquierda.rutas.retrato} alt="" tipo="cuerpo" color={izquierda.color} espejar prioridad />
+        <ImagenJuego src={izquierda.rutas.retrato} alt="" tipo="cuerpo" color={izquierda.color} espejar={espejarRetrato(izquierda)} prioridad />
       </div>
       <div
         className="cf-inicio__luchador cf-inicio__luchador--der"
