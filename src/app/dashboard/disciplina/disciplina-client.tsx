@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
-import { upsertDisciplinaryRule, deleteDisciplinaryRule, createDisciplinaryEvent } from '@/lib/actions/disciplinary'
+import { useState, useTransition, useEffect, useRef } from 'react'
+import { upsertDisciplinaryRule, deleteDisciplinaryRule, createDisciplinaryEvent, getDisciplinaDelMes, type DisciplinaDelMes } from '@/lib/actions/disciplinary'
+import { nombreDelMes } from '@/lib/disciplina-mes'
 import { formatCurrency } from '@/lib/format'
 import type { DisciplinaryRule, DisciplinaryEvent, DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
@@ -35,9 +36,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Trash2, Pencil, Clock, UserX, Coffee, LogIn, LogOut, ScanFace } from 'lucide-react'
+import { Plus, Trash2, Pencil, Clock, UserX, Coffee, LogIn, LogOut, ScanFace, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
+import { SelectorMes } from './selector-mes'
+
+const TODO_EL_PERSONAL = 'todos'
 
 interface BarberBasic {
   id: string
@@ -133,16 +137,66 @@ export function DisciplinaClient({
   })
   const [, startTransition] = useTransition()
 
+  // ── El mes que se está mirando ─────────────────────────────────────────────
+  // `null` es el mes en curso, que llega por props y se refresca con la página.
+  // Los anteriores se piden aparte: la página de Equipo carga todas sus pestañas y
+  // recargarla por una flecha era traer de nuevo el historial de servicios entero.
+  const mesEnCurso = fromDate.slice(0, 7)
+  const [mesElegido, setMesElegido] = useState<string | null>(null)
+  const [datosDelMes, setDatosDelMes] = useState<DisciplinaDelMes | null>(null)
+  const [errorDelMes, setErrorDelMes] = useState<string | null>(null)
+  const [personaElegida, setPersonaElegida] = useState(TODO_EL_PERSONAL)
+  const ultimoPedido = useRef(0)
+  const mes = mesElegido ?? mesEnCurso
+  const cargandoMes = mesElegido !== null && !datosDelMes && !errorDelMes
+
+  async function cargarMes(destino: string) {
+    const pedido = ++ultimoPedido.current
+    setErrorDelMes(null)
+    const r = await getDisciplinaDelMes(destino).catch(() => ({
+      error: 'No se pudo cargar ese mes. Revisá la conexión y probá de nuevo.',
+    }))
+    // Tocó otra flecha mientras esperaba: esta respuesta ya no es la que está mirando.
+    if (pedido !== ultimoPedido.current) return
+    if ('error' in r) {
+      setDatosDelMes(null)
+      setErrorDelMes(r.error)
+      return
+    }
+    setDatosDelMes(r)
+  }
+
+  function irAMes(destino: string) {
+    setDatosDelMes(null)
+    setErrorDelMes(null)
+    if (destino >= mesEnCurso) {
+      ultimoPedido.current += 1
+      setMesElegido(null)
+      return
+    }
+    setMesElegido(destino)
+    void cargarMes(destino)
+  }
+
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
 
+  // Sin sucursal elegida ("Todas") se ve todo. Antes comparaba contra null y las
+  // listas quedaban vacías, como si nadie hubiera fichado.
+  const enLaSucursal = (branchId: string | null | undefined) =>
+    !selectedBranchId || branchId === selectedBranchId
+
+  const eventosDelMes: EventWithStaff[] = mesElegido ? (datosDelMes?.events ?? []) : events
+  const fichadasDelMes: AttendanceLog[] = mesElegido ? (datosDelMes?.attendanceLogs ?? []) : attendanceLogs
+  const personalDelMes: BarberBasic[] = datosDelMes?.personal ?? []
+
   const branchRules = rules.filter((r) => r.branch_id === selectedBranchId)
-  const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
-  const branchEvents = events.filter((e) => {
+  const branchBarbers = barbers.filter((b) => enLaSucursal(b.branch_id))
+  const branchEvents = eventosDelMes.filter((e) => {
     const staff = e.staff as { branch_id: string | null } | null
-    return staff?.branch_id === selectedBranchId
+    return enLaSucursal(staff?.branch_id)
   })
 
   // Compute currently overdue breaks for the selected branch
@@ -204,7 +258,48 @@ export function DisciplinaClient({
     return Array.from(map.values()).sort((a, b) => b.totalSeconds - a.totalSeconds)
   })()
 
-  const barberSummary = branchBarbers.map((b) => {
+  // Attendance logs filtered by branch
+  const branchAttendanceLogs = fichadasDelMes.filter((l) => enLaSucursal(l.branch_id))
+
+  // Build staff name map for attendance display. Incluye a quien ese mes trabajó y
+  // hoy ya no está activo: en un mes pasado es lo común.
+  const staffNameMap = new Map([...personalDelMes, ...barbers].map((b) => [b.id, b]))
+
+  // Quien aparece en este mes en esta sucursal, además del personal activo.
+  const idsConDatos = new Set([
+    ...branchEvents.map((e) => e.staff_id),
+    ...branchAttendanceLogs.map((l) => l.staff_id),
+  ])
+  const personasDelMes = [
+    ...branchBarbers,
+    ...personalDelMes.filter((p) => idsConDatos.has(p.id) && !branchBarbers.some((b) => b.id === p.id)),
+  ].sort((a, b) => a.full_name.localeCompare(b.full_name, 'es'))
+
+  // Si cambió de sucursal o de mes y esa persona ya no está en la lista, se vuelve a todos.
+  const personaFiltro = personasDelMes.some((p) => p.id === personaElegida) ? personaElegida : TODO_EL_PERSONAL
+  const personaSeleccionada = personasDelMes.find((p) => p.id === personaFiltro) ?? null
+
+  // Una persona se mira entera: si ese mes trabajó en dos sucursales, su asistencia
+  // es de las dos. Filtrarla por sucursal mostraba días de menos, como si no hubiera ido.
+  const eventosVisibles = personaSeleccionada
+    ? eventosDelMes.filter((e) => e.staff_id === personaSeleccionada.id)
+    : branchEvents
+  const fichadasVisibles = personaSeleccionada
+    ? fichadasDelMes.filter((l) => l.staff_id === personaSeleccionada.id)
+    : branchAttendanceLogs
+
+  const resumenPersona = personaSeleccionada && {
+    diasConEntrada: new Set(
+      fichadasVisibles
+        .filter((l) => l.action_type === 'clock_in')
+        .map((l) => new Date(l.recorded_at).toLocaleDateString('es-AR')),
+    ).size,
+    faltas: eventosVisibles.filter((e) => e.event_type === 'absence').length,
+    tardanzas: eventosVisibles.filter((e) => e.event_type === 'late').length,
+    perdioPresentismo: eventosVisibles.some((e) => e.consequence_applied === 'presentismo_loss'),
+  }
+
+  const barberSummary = personasDelMes.map((b) => {
     const barberEvents = branchEvents.filter((e) => e.staff_id === b.id)
     return {
       ...b,
@@ -212,12 +307,6 @@ export function DisciplinaClient({
       lates: barberEvents.filter((e) => e.event_type === 'late').length,
     }
   })
-
-  // Attendance logs filtered by branch
-  const branchAttendanceLogs = attendanceLogs.filter((l) => l.branch_id === selectedBranchId)
-
-  // Build staff name map for attendance display
-  const staffNameMap = new Map(barbers.map((b) => [b.id, b]))
 
   const ROLE_LABELS: Record<string, string> = {
     barber: 'Barbero',
@@ -271,7 +360,8 @@ export function DisciplinaClient({
     startTransition(async () => {
       const r = await createDisciplinaryEvent(
         eventForm.staff_id,
-        selectedBranchId || '',
+        // Con "Todas" elegido, la sucursal de la persona.
+        selectedBranchId || barbers.find((b) => b.id === eventForm.staff_id)?.branch_id || '',
         eventForm.event_type,
         eventForm.event_date,
         eventForm.notes || null,
@@ -284,12 +374,69 @@ export function DisciplinaClient({
           : `Registrado (ocurrencia ${r.occurrenceNumber})`
         toast.success(msg)
         setEventDialog(false)
+        if (mesElegido) void cargarMes(mesElegido)
       }
     })
   }
 
   const absenceRules = branchRules.filter((r) => r.event_type === 'absence')
   const lateRules = branchRules.filter((r) => r.event_type === 'late')
+
+  const nombreMes = nombreDelMes(mes)
+
+  // Mes (y persona, en las pestañas que listan por persona) arriba de cada lista.
+  const barraDelMes = (conPersona: boolean) => (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <SelectorMes mes={mes} mesMaximo={mesEnCurso} onCambiar={irAMes} />
+      {conPersona && (
+        <Select value={personaFiltro} onValueChange={setPersonaElegida}>
+          <SelectTrigger className="h-8 w-[200px] text-sm" aria-label="Filtrar por persona">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TODO_EL_PERSONAL}>Todo el personal</SelectItem>
+            {personasDelMes.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+
+  // "No se pudo leer" y "cargando" no pueden verse como "no hubo nada ese mes".
+  const avisoDelMes = cargandoMes ? (
+    <div className="flex items-center justify-center gap-2 rounded-xl border bg-card p-8 text-sm text-muted-foreground" role="status">
+      <Loader2 className="size-4 animate-spin" aria-hidden />
+      Cargando {nombreMes}…
+    </div>
+  ) : errorDelMes ? (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-8 text-center" role="alert">
+      <p className="text-sm text-red-500">{errorDelMes}</p>
+      <Button variant="outline" size="sm" onClick={() => mesElegido && void cargarMes(mesElegido)}>
+        Reintentar
+      </Button>
+    </div>
+  ) : null
+
+  const resumenDeLaPersona = personaSeleccionada && resumenPersona && !avisoDelMes && (
+    <div className="mb-3 rounded-xl border bg-card px-3 py-3 sm:px-5">
+      <p className="font-medium">{personaSeleccionada.full_name}</p>
+      <p className="text-sm text-muted-foreground">
+        {resumenPersona.diasConEntrada} {resumenPersona.diasConEntrada === 1 ? 'día con entrada' : 'días con entrada'}
+        {' · '}
+        {resumenPersona.tardanzas} {resumenPersona.tardanzas === 1 ? 'tardanza' : 'tardanzas'}
+        {' · '}
+        {/* Las faltas se cargan a mano: nada las crea solo si alguien no ficha. Decir
+            "0 faltas" a secas sería afirmar que vino todos los días. */}
+        {resumenPersona.faltas} {resumenPersona.faltas === 1 ? 'falta cargada' : 'faltas cargadas'}
+        {' · '}
+        <span className={resumenPersona.perdioPresentismo ? 'font-medium text-red-500' : undefined}>
+          {resumenPersona.perdioPresentismo ? 'Perdió el presentismo' : 'Sin pérdida de presentismo registrada'}
+        </span>
+      </p>
+    </div>
+  )
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -367,16 +514,15 @@ export function DisciplinaClient({
 
         {/* Eventos del mes */}
         <TabsContent value="eventos" className="mt-4">
-          <p className="text-xs text-muted-foreground mb-3">
-            Desde {new Date(fromDate + 'T12:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
-          {branchEvents.length === 0 ? (
+          {barraDelMes(true)}
+          {resumenDeLaPersona}
+          {avisoDelMes ?? (eventosVisibles.length === 0 ? (
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">
-              No hay eventos registrados este mes.
+              No hay eventos registrados en {nombreMes}.
             </div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">
-              {branchEvents.map((evt) => (
+              {eventosVisibles.map((evt) => (
                 <div key={evt.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                   {evt.event_type === 'absence'
                     ? <UserX className="size-5 text-red-500 shrink-0" />
@@ -403,12 +549,13 @@ export function DisciplinaClient({
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </TabsContent>
 
         {/* Resumen por barbero */}
         <TabsContent value="resumen" className="mt-4">
-          {barberSummary.length === 0 ? (
+          {barraDelMes(false)}
+          {avisoDelMes ?? (barberSummary.length === 0 ? (
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">Sin personal.</div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">
@@ -442,7 +589,7 @@ export function DisciplinaClient({
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </TabsContent>
 
         {/* Descansos excedidos */}
@@ -532,17 +679,16 @@ export function DisciplinaClient({
 
         {/* Asistencia */}
         <TabsContent value="asistencia" className="mt-4">
-          <p className="text-xs text-muted-foreground mb-3">
-            Entradas y salidas del personal desde {new Date(fromDate + 'T12:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
-          {branchAttendanceLogs.length === 0 ? (
+          {barraDelMes(true)}
+          {resumenDeLaPersona}
+          {avisoDelMes ?? (fichadasVisibles.length === 0 ? (
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">
               <LogIn className="size-8 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">Sin registros de asistencia este mes.</p>
+              <p className="text-sm">Sin registros de asistencia en {nombreMes}.</p>
             </div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">
-              {branchAttendanceLogs.map((log) => {
+              {fichadasVisibles.map((log) => {
                 const staffMember = staffNameMap.get(log.staff_id)
                 const isClockIn = log.action_type === 'clock_in'
                 return (
@@ -582,7 +728,7 @@ export function DisciplinaClient({
                 )
               })}
             </div>
-          )}
+          ))}
         </TabsContent>
 
         {/* Reglas */}

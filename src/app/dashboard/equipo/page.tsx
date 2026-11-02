@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { getActiveTimezone } from '@/lib/i18n'
 import { getLocalDayBounds } from '@/lib/time-utils'
+import { limitesDelMes, mesDeHoy } from '@/lib/disciplina-mes'
+import type { DisciplinaDelMes } from '@/lib/actions/disciplinary'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
 import type { Role } from '@/lib/types/database'
@@ -37,9 +39,8 @@ export default async function EquipoPage() {
     const tz = await getActiveTimezone()
     const { start: todayStart, end: todayEnd } = getLocalDayBounds(tz)
 
-    const startOfMonth = new Date()
-    startOfMonth.setDate(1)
-    const fromDate = startOfMonth.toISOString().slice(0, 10)
+    // El mes en curso de Disciplina. Los anteriores los pide el cliente (getDisciplinaDelMes).
+    const { desdeFecha: fromDate, desdeIso: inicioDelMesIso } = limitesDelMes(mesDeHoy(tz), tz)
 
     const thirtyDaysAgo = new Date(now)
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
@@ -87,7 +88,7 @@ export default async function EquipoPage() {
         { data: activeBreakEntries },
         { data: breakOvertimeHistory },
         serviceHistory,
-        { data: attendanceLogs },
+        attendanceLogs,
         { data: salaryConfigs },
         { data: calendarBarbers },
     ] = await Promise.all([
@@ -143,8 +144,19 @@ export default async function EquipoPage() {
             )
             : Promise.resolve([]),
         branchIds.length > 0
-            ? supabase.from('attendance_logs').select('id, staff_id, branch_id, action_type, recorded_at, face_verified').in('branch_id', branchIds).gte('recorded_at', fromDate).order('recorded_at', { ascending: false })
-            : Promise.resolve({ data: [] }),
+            ? fetchAll<DisciplinaDelMes['attendanceLogs'][number]>(
+                (from, to) =>
+                    supabase
+                        .from('attendance_logs')
+                        .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
+                        .in('branch_id', branchIds)
+                        .gte('recorded_at', inicioDelMesIso)
+                        .order('recorded_at', { ascending: false })
+                        .order('id')
+                        .range(from, to),
+                { contexto: 'disciplina: fichadas del mes' },
+            )
+            : Promise.resolve([]),
         branchIds.length > 0
             ? supabase.from('salary_configs').select('*, staff!inner(organization_id, branch_id)').eq('staff.organization_id', orgId).in('staff.branch_id', branchIds)
             : Promise.resolve({ data: [] }),
@@ -202,7 +214,7 @@ export default async function EquipoPage() {
             incentiveAchievements={incentiveAchievements ?? []}
             disciplinaryRules={disciplinaryRules ?? []}
             disciplinaryEvents={disciplinaryEvents ?? []}
-            attendanceLogs={attendanceLogs ?? []}
+            attendanceLogs={attendanceLogs}
             defaultPeriod={defaultPeriod}
             fromDate={fromDate}
             roles={(roles as Role[]) ?? []}

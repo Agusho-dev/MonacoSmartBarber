@@ -1,7 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
+import type { DisciplinaDelMes } from '@/lib/actions/disciplinary'
 import { redirect } from 'next/navigation'
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import { getActiveTimezone } from '@/lib/i18n'
+import { limitesDelMes, mesDeHoy } from '@/lib/disciplina-mes'
 import { DisciplinaClient } from './disciplina-client'
 import type { Metadata } from 'next'
 
@@ -16,11 +20,11 @@ export default async function DisciplinaPage() {
 
   const supabase = createAdminClient()
 
-  const startOfMonth = new Date()
-  startOfMonth.setDate(1)
-  const fromDate = startOfMonth.toISOString().slice(0, 10)
+  // El mes en curso. Los anteriores los pide el cliente (getDisciplinaDelMes).
+  const tz = await getActiveTimezone()
+  const { desdeFecha: fromDate, desdeIso } = limitesDelMes(mesDeHoy(tz), tz)
 
-  const [{ data: _branches }, { data: rules }, { data: staff }, { data: events }, { data: attendanceLogs }] = await Promise.all([
+  const [{ data: _branches }, { data: rules }, { data: staff }, { data: events }, attendanceLogs] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -34,8 +38,19 @@ export default async function DisciplinaPage() {
       ? supabase.from('disciplinary_events').select('*, staff:staff(id, full_name, branch_id)').in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
       : Promise.resolve({ data: [] }),
     branchIds.length > 0
-      ? supabase.from('attendance_logs').select('id, staff_id, branch_id, action_type, recorded_at, face_verified').in('branch_id', branchIds).gte('recorded_at', fromDate).order('recorded_at', { ascending: false })
-      : Promise.resolve({ data: [] }),
+      ? fetchAll<DisciplinaDelMes['attendanceLogs'][number]>(
+          (from, to) =>
+            supabase
+              .from('attendance_logs')
+              .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
+              .in('branch_id', branchIds)
+              .gte('recorded_at', desdeIso)
+              .order('recorded_at', { ascending: false })
+              .order('id')
+              .range(from, to),
+          { contexto: 'disciplina: fichadas del mes' },
+        )
+      : Promise.resolve([]),
   ])
 
   return (
@@ -44,7 +59,7 @@ export default async function DisciplinaPage() {
       barbers={staff ?? []}
       events={events ?? []}
       fromDate={fromDate}
-      attendanceLogs={attendanceLogs ?? []}
+      attendanceLogs={attendanceLogs}
     />
   )
 }

@@ -255,6 +255,12 @@ Una lista que se vuelve a leer en cada evento de Realtime NO se reemplaza por un
 
 El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo: los grupos y sus pestañas salen de `src/lib/navegacion/grupos.ts` (módulo puro; las URLs no cambiaron y la coincidencia es por segmento), una página nueva en `/dashboard` va como pestaña o como alias ahí, las pestañas internas de una pantalla usan el contenedor gris (el subrayado es del nivel 1, en el header) y la clave vieja `nav-order-<nombre>` se lee para migrar pero no se escribe. Tex salió del menú: botón flotante (`src/components/tex/tex-boton-flotante.tsx`).
 
+### Disciplina por mes (2/nov/2026)
+
+`DisciplinaClient` (pestaña de Equipo y `/dashboard/disciplina`) mira un mes por vez, con `‹ mes ›` en Eventos, Resumen y Asistencia, y filtro por persona en las dos que listan. El mes en curso llega por props; los anteriores los pide `getDisciplinaDelMes` (gate `discipline.view`, `fetchAll` estricto): se piden aparte porque la página de Equipo carga todas sus pestañas. Los bordes del mes salen de `src/lib/disciplina-mes.ts`, en la zona de la organización. Una persona elegida se ve entera aunque ese mes haya trabajado en dos sucursales.
+
+Para leerlo bien: las tardanzas se crean solas al fichar (`checkTardiness`), pero **las faltas sólo se cargan a mano**, así que un día sin fichada no cuenta como falta si nadie la cargó; hay que mirar "días con entrada". `presentismo_loss` es lo que deja una regla sobre un evento: nada más lo calcula ni lo descuenta del sueldo.
+
 ### El dashboard como app instalada (23/oct/2026)
 
 El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo:

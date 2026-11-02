@@ -2,9 +2,101 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
-import { validateBranchAccess } from './org'
+import type { DisciplinaryEvent, DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
+import { getCurrentOrgId, validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
+import { currentUserCan } from './permissions-gate'
 import { getActiveTimezone } from '@/lib/i18n'
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import { esMes, limitesDelMes } from '@/lib/disciplina-mes'
+
+export interface DisciplinaDelMes {
+  events: (Omit<DisciplinaryEvent, 'staff'> & {
+    staff?: { id: string; full_name: string; branch_id: string | null } | null
+  })[]
+  attendanceLogs: {
+    id: string
+    staff_id: string
+    branch_id: string
+    action_type: 'clock_in' | 'clock_out'
+    recorded_at: string
+    face_verified: boolean
+  }[]
+  /** Quién aparece en ese mes, aunque hoy ya no esté activo: si no, salía como "Personal". */
+  personal: { id: string; full_name: string; branch_id: string | null; role?: string }[]
+}
+
+/**
+ * Eventos y fichadas de un mes completo, para mirar meses pasados. El mes en curso
+ * sigue llegando por props desde la página.
+ *
+ * Se pagina y en modo estricto: un mes entero de todas las sucursales supera las
+ * 1.000 filas de PostgREST y, ordenado del más nuevo al más viejo, lo que se corta
+ * son los primeros días. Acá se mira si alguien cumplió: un mes a medias presentado
+ * como completo es peor que un "no se pudo cargar".
+ */
+export async function getDisciplinaDelMes(
+  mes: string,
+): Promise<DisciplinaDelMes | { error: string }> {
+  if (!esMes(mes)) return { error: 'Mes inválido' }
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+  if (!(await currentUserCan('discipline.view'))) {
+    return { error: 'No tenés permiso para ver la disciplina del equipo.' }
+  }
+  const branchIds = await getScopedBranchIds()
+  if (branchIds.length === 0) return { events: [], attendanceLogs: [], personal: [] }
+
+  const { desdeFecha, hastaFecha, desdeIso, hastaIso } = limitesDelMes(mes, await getActiveTimezone())
+  const supabase = createAdminClient()
+
+  try {
+    const [events, attendanceLogs] = await Promise.all([
+      fetchAll<DisciplinaDelMes['events'][number]>(
+        (from, to) =>
+          supabase
+            .from('disciplinary_events')
+            .select('*, staff:staff(id, full_name, branch_id)')
+            .in('branch_id', branchIds)
+            .gte('event_date', desdeFecha)
+            .lt('event_date', hastaFecha)
+            .order('event_date', { ascending: false })
+            .order('id')
+            .range(from, to),
+        { estricto: true, contexto: 'disciplina: eventos del mes' },
+      ),
+      fetchAll<DisciplinaDelMes['attendanceLogs'][number]>(
+        (from, to) =>
+          supabase
+            .from('attendance_logs')
+            .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
+            .in('branch_id', branchIds)
+            .gte('recorded_at', desdeIso)
+            .lt('recorded_at', hastaIso)
+            .order('recorded_at', { ascending: false })
+            .order('id')
+            .range(from, to),
+        { estricto: true, contexto: 'disciplina: fichadas del mes' },
+      ),
+    ])
+
+    const ids = [...new Set([...events.map((e) => e.staff_id), ...attendanceLogs.map((l) => l.staff_id)])]
+    let personal: DisciplinaDelMes['personal'] = []
+    if (ids.length > 0) {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('id, full_name, branch_id, role')
+        .eq('organization_id', orgId)
+        .in('id', ids)
+      if (error) throw new Error(error.message)
+      personal = data ?? []
+    }
+    return { events, attendanceLogs, personal }
+  } catch (err) {
+    console.error('[getDisciplinaDelMes]', mes, (err as Error).message)
+    return { error: 'No se pudo cargar ese mes. Probá de nuevo.' }
+  }
+}
 
 export async function getDisciplinaryRules(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
