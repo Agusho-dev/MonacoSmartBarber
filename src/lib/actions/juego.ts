@@ -53,6 +53,9 @@ import type {
   PeriodoRanking,
 } from '@/lib/juego/tipos'
 
+/** El dominio propio de «Corte Final» (next.config.ts, HOST_JUEGO). */
+const ORIGEN_JUEGO = 'https://juego.monacobarberstudio.com'
+
 const ERROR_GUARDAR = 'No pudimos guardar la partida. Probá de nuevo en un rato.'
 const ERROR_DATOS = 'Los datos de la partida no son válidos.'
 const ERROR_RANKING = 'No pudimos cargar el ranking. Probá de nuevo en un rato.'
@@ -615,7 +618,11 @@ export async function crearEnlaceJuego(
 
     const token = firmarTokenJuego({ queueEntryId, branchId: entrada.branch_id })
     if (!token) return { ok: false, error: 'No pudimos armar el enlace del juego.' }
-    return { ok: true, url: `${await buildAppUrl()}/juego?t=${token}` }
+    // En producción el QR va al dominio propio del juego (HOST_JUEGO en next.config.ts): ahí la raíz es
+    // el juego y borrando la ruta no se llega al login del sistema. En desarrollo y en las vistas
+    // previas, al mismo host de siempre.
+    const base = process.env.VERCEL_ENV === 'production' ? `${ORIGEN_JUEGO}/` : `${await buildAppUrl()}/juego`
+    return { ok: true, url: `${base}?t=${token}` }
   } catch (e) {
     console.error('[juego] crearEnlaceJuego:', mensaje(e))
     return { ok: false, error: 'No pudimos armar el enlace del juego.' }

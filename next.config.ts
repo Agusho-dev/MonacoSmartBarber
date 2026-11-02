@@ -81,6 +81,15 @@ const nextConfig: NextConfig = {
         destination: "/",
         permanent: false,
       },
+      {
+        // El juego en el dominio de siempre (los QR y links viejos, «Probar el juego» de
+        // Configuración) se va al dominio propio, con su ?t= o ?s=. Sólo el de producción: las
+        // vistas previas y el desarrollo siguen con /juego.
+        source: "/juego",
+        has: [{ type: "host", value: "monacobarber\\.vercel\\.app" }],
+        destination: "https://juego.monacobarberstudio.com/",
+        permanent: false,
+      },
     ];
   },
   async rewrites() {
