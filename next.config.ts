@@ -11,6 +11,15 @@ import path from "node:path";
  */
 const VERSION_APP = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || "";
 
+/**
+ * El dominio propio de «Corte Final» (1/nov/2026, pedido del dueño): con el juego en
+ * monacobarber.vercel.app/juego, un cliente que borraba el final de la dirección caía en el login
+ * del sistema. En este host la raíz ES el juego y ninguna otra ruta existe (vuelven a la raíz).
+ * El dominio se agrega en Vercel (proyecto monaco.barber → Settings → Domains); mientras no esté,
+ * estas reglas no le hacen nada a ningún otro host. Es un patrón de `has` (regex): puntos escapados.
+ */
+const HOST_JUEGO = "juego\\.monacobarberstudio\\.com";
+
 const nextConfig: NextConfig = {
   // Fijar el workspace root explícitamente: hay un package-lock.json huérfano
   // en el directorio padre (MSB_FULL/) que hacía que Turbopack inferiera mal
@@ -60,6 +69,28 @@ const nextConfig: NextConfig = {
         pathname: '/storage/v1/object/public/**',
       },
     ],
+  },
+  async redirects() {
+    return [
+      {
+        // En el dominio del juego, lo que no es del juego (el login, el dashboard, el kiosko, el
+        // panel…) vuelve a la raíz. Pasan /juego (la página y sus assets), /_next y los archivos
+        // sueltos de la raíz (favicon, íconos).
+        source: "/:ruta((?!juego(?:/|$)|_next/|[^/]+\\.[a-zA-Z0-9]+$).+)",
+        has: [{ type: "host", value: HOST_JUEGO }],
+        destination: "/",
+        permanent: false,
+      },
+    ];
+  },
+  async rewrites() {
+    return {
+      // La raíz del dominio del juego es el juego, con el ?t= del QR o el ?s= de la sala. Las server
+      // actions de la página viajan a la misma raíz y siguen esta regla.
+      beforeFiles: [{ source: "/", has: [{ type: "host", value: HOST_JUEGO }], destination: "/juego" }],
+      afterFiles: [],
+      fallback: [],
+    };
   },
   async headers() {
     return [
