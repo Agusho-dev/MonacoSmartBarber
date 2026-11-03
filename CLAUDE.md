@@ -261,6 +261,13 @@ El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo: los 
 
 Para leerlo bien: las tardanzas se crean solas al fichar (`checkTardiness`), pero **las faltas sólo se cargan a mano**, así que un día sin fichada no cuenta como falta si nadie la cargó; hay que mirar "días con entrada". `presentismo_loss` es lo que deja una regla sobre un evento: nada más lo calcula ni lo descuenta del sueldo.
 
+**Cuándo es tardanza** (`src/lib/tardanza.ts`, mig 236, decisión del dueño del 3/nov/2026). En Monaco se entra a las 10:00 o a las 13:00 y casi todos rotan a mano, así que un horario semanal fijo no sirve de referencia: 10 barberos no lo tenían y el de otros era de otra rotación (47 % de los días sin evaluar). La regla vive en `app_settings` por organización (`tardanza_entradas`, `tardanza_vuelta`, `tardanza_tolerancia_minutos`); sin entradas cargadas, una org sigue midiendo contra `staff_schedules` y sin tolerancia.
+- **Primera fichada del día**: se mide contra la última entrada que ya pasó, con 5 min de tolerancia, salvo que esté hasta 60 min antes de la próxima (12:30 es temprano para las 13). Un inicio de bloque cargado ese día cuenta como una entrada más: así se respeta otro horario, como el de las 11:00.
+- **Fichadas posteriores**: sólo cuentan como la vuelta de las 16:00 del turno cortado (entró a la mañana y salió antes de las 16). Nunca a quien tiene cargado un horario corrido que incluye su entrada: salir a almorzar no es llegar tarde.
+- **Una tardanza por día.** El fichaje espera a `checkTardiness`: en Vercel lo que sigue después de responder se puede cortar.
+- `scripts/recalcular-tardanzas.ts` aplica la misma regla hacia atrás: sin `--aplicar` sólo simula, y es la forma de medir un cambio de la regla antes de hacerlo. Toca únicamente eventos `source = 'system'`.
+- En Resumen, cada persona se despliega con sus días y horarios (`hora_llegada`, `hora_esperada`, `minutos_tarde`).
+
 **Los eventos se leen con `SELECT_EVENTO_DISCIPLINA`** (`src/lib/disciplina-mes.ts`): `disciplinary_events` tiene dos FKs a `staff` (`staff_id`, `created_by`) y el embed sin nombre de constraint da `PGRST201` (Known Risk #15). Así estuvo desde que nació la pantalla: el mes en curso se dibujaba vacío, también en Perfiles, y al estrenarse el selector de meses (2/nov/2026) los anteriores dieron «No se pudo cargar ese mes». Había 467 tardanzas registradas que nadie podía ver. Si la lectura del mes en curso falla, la pantalla lo dice (`errorEventos`) en vez de mostrar «no hay eventos».
 
 ### Elegir a un barbero en descanso en el kiosko (3/nov/2026, migración 235)
@@ -325,7 +332,7 @@ Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciend
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (through `235` at nov/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
+Located in `supabase/migrations/`, numbered sequentially (through `236` at nov/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 

@@ -37,7 +37,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Trash2, Pencil, Clock, UserX, Coffee, LogIn, LogOut, ScanFace, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, Clock, UserX, Coffee, LogIn, LogOut, ScanFace, Loader2, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
 import { SelectorMes } from './selector-mes'
@@ -120,6 +120,23 @@ const CONSEQUENCE_LABELS: Record<ConsequenceType, string> = {
   salary_deduction: 'Descuento de sueldo',
 }
 
+/** 49 → "49 min"; 70 → "1 h 10 min". */
+function duracionDeLaDemora(minutos: number): string {
+  if (minutos < 60) return `${minutos} min`
+  const resto = minutos % 60
+  return resto > 0 ? `${Math.floor(minutos / 60)} h ${resto} min` : `${Math.floor(minutos / 60)} h`
+}
+
+/** El renglón de un evento al desplegar a una persona en el resumen. */
+function detalleDelEvento(evt: EventWithStaff): string {
+  if (evt.hora_llegada && evt.hora_esperada) {
+    const partes = [`Fichó a las ${evt.hora_llegada.slice(0, 5)}`, `debía a las ${evt.hora_esperada.slice(0, 5)}`]
+    if (evt.minutos_tarde != null) partes.push(`${duracionDeLaDemora(evt.minutos_tarde)} tarde`)
+    return partes.join(' · ')
+  }
+  return evt.notes ?? 'Sin detalle'
+}
+
 export function DisciplinaClient({
   rules,
   barbers,
@@ -156,6 +173,8 @@ export function DisciplinaClient({
   const [datosDelMes, setDatosDelMes] = useState<DisciplinaDelMes | null>(null)
   const [errorDelMes, setErrorDelMes] = useState<string | null>(null)
   const [personaElegida, setPersonaElegida] = useState(TODO_EL_PERSONAL)
+  // Las personas abiertas en el resumen. Varias a la vez, para poder compararlas.
+  const [desplegadas, setDesplegadas] = useState<ReadonlySet<string>>(new Set())
   const ultimoPedido = useRef(0)
   const mes = mesElegido ?? mesEnCurso
   const cargandoMes = mesElegido !== null && !datosDelMes && !errorDelMes
@@ -317,6 +336,7 @@ export function DisciplinaClient({
     const barberEvents = branchEvents.filter((e) => e.staff_id === b.id)
     return {
       ...b,
+      eventos: barberEvents,
       absences: barberEvents.filter((e) => e.event_type === 'absence').length,
       lates: barberEvents.filter((e) => e.event_type === 'late').length,
     }
@@ -326,6 +346,14 @@ export function DisciplinaClient({
     barber: 'Barbero',
     admin: 'Encargado',
     owner: 'Dueño',
+  }
+
+  function alternarPersona(id: string) {
+    setDesplegadas((actuales) => {
+      const nuevas = new Set(actuales)
+      if (!nuevas.delete(id)) nuevas.add(id)
+      return nuevas
+    })
   }
 
   function openCreateRule() {
@@ -582,35 +610,69 @@ export function DisciplinaClient({
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">Sin personal.</div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">
-              {barberSummary.map((b) => (
-                <div key={b.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-sm">
-                    {b.full_name.charAt(0)}
-                  </div>
-                  <div className="flex-1 flex items-center gap-2">
-                    <span className="font-medium">{b.full_name}</span>
-                    {b.role && b.role !== 'barber' && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {ROLE_LABELS[b.role] ?? b.role}
-                      </Badge>
+              {barberSummary.map((b) => {
+                const tieneEventos = b.eventos.length > 0
+                const abierta = tieneEventos && desplegadas.has(b.id)
+                return (
+                  <div key={b.id}>
+                    <button
+                      type="button"
+                      onClick={() => alternarPersona(b.id)}
+                      disabled={!tieneEventos}
+                      aria-expanded={tieneEventos ? abierta : undefined}
+                      className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors enabled:hover:bg-muted/40 sm:gap-4 sm:px-5 sm:py-4"
+                    >
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-sm">
+                        {b.full_name.charAt(0)}
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="truncate font-medium">{b.full_name}</span>
+                        {b.role && b.role !== 'barber' && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {ROLE_LABELS[b.role] ?? b.role}
+                          </Badge>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2 sm:gap-3 shrink-0">
+                        <span className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
+                          <UserX className="size-3.5 sm:size-4 text-red-500" aria-hidden />
+                          <span className="sr-only">Faltas:</span>
+                          <span className={b.absences > 0 ? 'text-red-500 font-semibold' : 'text-muted-foreground'}>
+                            {b.absences}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
+                          <Clock className="size-3.5 sm:size-4 text-yellow-500" aria-hidden />
+                          <span className="sr-only">Tardanzas:</span>
+                          <span className={b.lates > 0 ? 'text-yellow-500 font-semibold' : 'text-muted-foreground'}>
+                            {b.lates}
+                          </span>
+                        </span>
+                        {/* Sin eventos no hay nada que abrir: el lugar se guarda para que las columnas no se corran. */}
+                        <ChevronDown
+                          className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${tieneEventos ? '' : 'invisible'} ${abierta ? 'rotate-180' : ''}`}
+                          aria-hidden
+                        />
+                      </span>
+                    </button>
+                    {abierta && (
+                      <ul className="border-t bg-muted/20 px-3 py-2 sm:px-5">
+                        {b.eventos.map((evt) => (
+                          <li key={evt.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 text-sm">
+                            <span className="w-24 shrink-0 font-medium tabular-nums">
+                              {new Date(evt.event_date + 'T12:00').toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </span>
+                            <span className={evt.event_type === 'absence' ? 'text-red-500' : 'text-yellow-500'}>
+                              {EVENT_LABELS[evt.event_type]}
+                            </span>
+                            <span className="text-muted-foreground">{detalleDelEvento(evt)}</span>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                    <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
-                      <UserX className="size-3.5 sm:size-4 text-red-500" />
-                      <span className={b.absences > 0 ? 'text-red-500 font-semibold' : 'text-muted-foreground'}>
-                        {b.absences}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
-                      <Clock className="size-3.5 sm:size-4 text-yellow-500" />
-                      <span className={b.lates > 0 ? 'text-yellow-500 font-semibold' : 'text-muted-foreground'}>
-                        {b.lates}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ))}
         </TabsContent>

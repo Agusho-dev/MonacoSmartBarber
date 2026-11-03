@@ -815,6 +815,11 @@ export interface DisciplinaryEvent {
   created_by: string | null
   source: string
   created_at: string
+  /** Mig 236: hora de pared de la sucursal en que fichó. NULL en faltas y en lo cargado a mano. */
+  hora_llegada?: string | null
+  /** Mig 236: la entrada o la vuelta contra la que se midió. */
+  hora_esperada?: string | null
+  minutos_tarde?: number | null
   staff?: Staff
 }
 

@@ -9,6 +9,8 @@ import { currentUserCan } from './permissions-gate'
 import { getActiveTimezone } from '@/lib/i18n'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { esMes, limitesDelMes, SELECT_EVENTO_DISCIPLINA } from '@/lib/disciplina-mes'
+import { aHora, aMinutos, evaluarLlegada, horaEnZona, leerReglaTardanza, notaDeTardanza } from '@/lib/tardanza'
+import { getTzOffsetISO } from '@/lib/time-utils'
 
 export interface DisciplinaDelMes {
   events: (Omit<DisciplinaryEvent, 'staff'> & {
@@ -270,9 +272,10 @@ export async function getBarberDisciplinarySummary(branchId: string) {
 }
 
 /**
- * Verifica si un barbero llegó tarde comparando la hora actual contra su horario.
- * Si detecta tardanza, crea automáticamente un evento disciplinario.
- * Extraída de attendance.ts para mantener toda la lógica disciplinaria en un solo lugar.
+ * Evalúa la fichada de entrada que se acaba de registrar y, si fue tarde, crea el evento
+ * disciplinario. La regla vive en `src/lib/tardanza.ts`: entradas de la organización,
+ * tolerancia y vuelta del turno cortado, o sólo el horario cargado si la org no las tiene.
+ * Va después de insertar la fichada: la última entrada del día es ésta.
  */
 export async function checkTardiness(staffId: string, branchId: string) {
   const supabase = createAdminClient()
@@ -283,17 +286,13 @@ export async function checkTardiness(staffId: string, branchId: string) {
   // legítimo (registerBarberClockIn) ya valida este mismo pairing antes de invocarla.
   const { data: staffRow } = await supabase
     .from('staff')
-    .select('branch_id, is_active')
+    .select('branch_id, is_active, organization_id')
     .eq('id', staffId)
     .maybeSingle()
   if (!staffRow || !staffRow.is_active || staffRow.branch_id !== branchId) return
 
   const tz = await getActiveTimezone()
   const now = new Date()
-  const argTimeOptions = { timeZone: tz, hour12: false } as const
-
-  // Hora actual "HH:MM:SS"
-  const currentTimeStr = now.toLocaleTimeString('en-US', argTimeOptions)
 
   // Día de la semana (0-6, donde 0 = domingo)
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -307,44 +306,7 @@ export async function checkTardiness(staffId: string, branchId: string) {
   // Fecha "YYYY-MM-DD"
   const ymdFormat = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now)
 
-  // Obtener bloques de horario del día
-  const { data: schedules } = await supabase
-    .from('staff_schedules')
-    .select('start_time, end_time, block_index')
-    .eq('staff_id', staffId)
-    .eq('day_of_week', dow)
-    .eq('is_active', true)
-    .order('block_index', { ascending: true })
-
-  if (!schedules || schedules.length === 0) return
-
-  // Parsear hora actual a minutos
-  const [h1, m1] = currentTimeStr.split(':').map(Number)
-  const currentMins = h1 * 60 + m1
-
-  // Encontrar el bloque relevante
-  let relevantBlock: { start_time: string; end_time: string } | null = null
-  for (const block of schedules) {
-    const [sh, sm] = block.start_time.split(':').map(Number)
-    const [eh, em] = block.end_time.split(':').map(Number)
-    const blockStart = sh * 60 + sm
-    const blockEnd = eh * 60 + em
-
-    if (currentMins < blockStart) break
-    if (currentMins >= blockStart && currentMins <= blockEnd) {
-      relevantBlock = block
-      break
-    }
-  }
-
-  if (!relevantBlock) return
-
-  const [sh, sm] = relevantBlock.start_time.split(':').map(Number)
-  const startMins = sh * 60 + sm
-
-  if (currentMins <= startMins) return
-
-  // Verificar que no haya tardanza ya registrada hoy
+  // Una tardanza por día.
   const { count } = await supabase
     .from('disciplinary_events')
     .select('id', { count: 'exact', head: true })
@@ -355,8 +317,58 @@ export async function checkTardiness(staffId: string, branchId: string) {
 
   if (count && count > 0) return
 
-  // Insertamos el evento inline (NO via createDisciplinaryEvent): ese action ahora exige
-  // sesión y acá corremos fire-and-forget desde el clock-in, sin contexto de cookies. El
+  const [
+    { data: bloques, error: errorBloques },
+    { data: ajustes, error: errorAjustes },
+    { data: marcas, error: errorMarcas },
+  ] = await Promise.all([
+    supabase
+      .from('staff_schedules')
+      .select('start_time, end_time, block_index')
+      .eq('staff_id', staffId)
+      .eq('day_of_week', dow)
+      .eq('is_active', true)
+      .order('block_index', { ascending: true }),
+    supabase
+      .from('app_settings')
+      .select('tardanza_entradas, tardanza_vuelta, tardanza_tolerancia_minutos')
+      .eq('organization_id', staffRow.organization_id)
+      .maybeSingle(),
+    supabase
+      .from('attendance_logs')
+      .select('action_type, recorded_at')
+      .eq('staff_id', staffId)
+      .gte('recorded_at', `${ymdFormat}T00:00:00${getTzOffsetISO(now, tz)}`)
+      .order('recorded_at', { ascending: true }),
+  ])
+
+  // Sin alguno de estos datos no se evalúa: tomar una vuelta del almuerzo por la primera
+  // entrada del día, por ejemplo, le fabricaría una tardanza a alguien.
+  const errorDeLectura = errorBloques ?? errorAjustes ?? errorMarcas
+  if (errorDeLectura) {
+    console.error('[checkTardiness] leer los datos de la fichada', errorDeLectura.message)
+    return
+  }
+
+  const delDia = (marcas ?? []) as { action_type: 'clock_in' | 'clock_out'; recorded_at: string }[]
+  const iLlegada = delDia.map((m) => m.action_type).lastIndexOf('clock_in')
+  if (iLlegada < 0) return
+
+  const hora = horaEnZona(new Date(delDia[iLlegada].recorded_at), tz)
+  const llegadaMin = aMinutos(hora)
+  const resultado = evaluarLlegada({
+    llegadaMin,
+    marcasPrevias: delDia.slice(0, iLlegada).map((m) => ({
+      action_type: m.action_type,
+      minutos: aMinutos(horaEnZona(new Date(m.recorded_at), tz)),
+    })),
+    bloques: bloques ?? [],
+    regla: leerReglaTardanza(ajustes),
+  })
+  if (!resultado.tarde) return
+
+  // Insertamos el evento inline (NO via createDisciplinaryEvent): ese action exige sesión y
+  // acá corremos desde el fichaje del kiosko, sin contexto de cookies. El
   // staff-pertenece-a-sucursal ya está validado en el guard de arriba.
   const startOfMonth = ymdFormat.slice(0, 7) + '-01'
   const { data: countData } = await supabase.rpc('get_occurrence_count', {
@@ -372,9 +384,8 @@ export async function checkTardiness(staffId: string, branchId: string) {
     .eq('branch_id', branchId)
     .eq('event_type', 'late')
     .eq('occurrence_number', occurrenceNumber)
-    .single()
+    .maybeSingle()
 
-  const notes = `Llegada tarde a las ${currentTimeStr} (Horario: ${relevantBlock.start_time})`
   const { error } = await supabase.from('disciplinary_events').insert({
     staff_id: staffId,
     branch_id: branchId,
@@ -383,13 +394,17 @@ export async function checkTardiness(staffId: string, branchId: string) {
     occurrence_number: occurrenceNumber,
     consequence_applied: rule?.consequence ?? null,
     deduction_amount: rule?.deduction_amount ?? null,
-    notes,
+    notes: notaDeTardanza(llegadaMin, resultado.esperadaMin, resultado.motivo),
     created_by: null,
     source: 'system',
+    hora_llegada: hora,
+    hora_esperada: `${aHora(resultado.esperadaMin)}:00`,
+    minutos_tarde: resultado.minutosTarde,
   })
   if (error) {
     console.error('[checkTardiness] insert disciplinary_event', error.message)
     return
   }
   revalidatePath('/dashboard/disciplina')
+  revalidatePath('/dashboard/equipo')
 }

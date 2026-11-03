@@ -121,10 +121,13 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
         return { error: 'Error al registrar entrada: ' + logError.message }
     }
 
-    // Verificar tardanza en background (toda la lógica vive en disciplinary.ts)
-    checkTardiness(staffId, branchId).catch((err) => {
+    // Se espera: en Vercel, lo que sigue corriendo después de responder se puede cortar, y
+    // una tardanza no puede depender de eso. Un fallo acá no tira el fichaje, que ya quedó.
+    try {
+        await checkTardiness(staffId, branchId)
+    } catch (err) {
         console.error('Error al verificar tardanza:', err)
-    })
+    }
 
     revalidatePath('/checkin')
     return { success: true }
