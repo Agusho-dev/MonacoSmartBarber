@@ -261,6 +261,12 @@ El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo: los 
 
 Para leerlo bien: las tardanzas se crean solas al fichar (`checkTardiness`), pero **las faltas sólo se cargan a mano**, así que un día sin fichada no cuenta como falta si nadie la cargó; hay que mirar "días con entrada". `presentismo_loss` es lo que deja una regla sobre un evento: nada más lo calcula ni lo descuenta del sueldo.
 
+**Los eventos se leen con `SELECT_EVENTO_DISCIPLINA`** (`src/lib/disciplina-mes.ts`): `disciplinary_events` tiene dos FKs a `staff` (`staff_id`, `created_by`) y el embed sin nombre de constraint da `PGRST201` (Known Risk #15). Así estuvo desde que nació la pantalla: el mes en curso se dibujaba vacío, también en Perfiles, y al estrenarse el selector de meses (2/nov/2026) los anteriores dieron «No se pudo cargar ese mes». Había 467 tardanzas registradas que nadie podía ver. Si la lectura del mes en curso falla, la pantalla lo dice (`errorEventos`) en vez de mostrar «no hay eventos».
+
+### Elegir a un barbero en descanso en el kiosko (3/nov/2026, migración 235)
+
+El detalle está en `../.claude/rules/operacion-local.md`. Lo mínimo: las tarjetas «En descanso» se pueden tocar y abren un paso de confirmación dentro del mismo diálogo (`renderEsperaDeDescanso` en `checkin-walk-in.tsx`); «Menor espera» y la asignación dinámica siguen sin contarlos; la duración del descanso vive en `queue_entries.break_duration_minutes` y los minutos salen de `minutosParaVolverDelDescanso` (`barber-utils.ts`).
+
 ### El dashboard como app instalada (23/oct/2026)
 
 El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo:
@@ -319,7 +325,7 @@ Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciend
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (through `232` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
+Located in `supabase/migrations/`, numbered sequentially (through `235` at nov/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 
