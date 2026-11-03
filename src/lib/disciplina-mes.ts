@@ -7,6 +7,19 @@
 
 import { getLocalDateStr, getTzOffsetISO } from '@/lib/time-utils'
 
+/**
+ * Columnas de un evento disciplinario con la persona a la que le pasó.
+ *
+ * El embed va con el nombre del constraint: `disciplinary_events` tiene DOS FKs a
+ * `staff` (`staff_id` y `created_by`) y con `staff:staff(...)` PostgREST rechaza la
+ * consulta ENTERA con PGRST201 (Known Risk #15). Así estuvo desde que nació la
+ * pantalla (mig 016, marzo de 2026): el mes en curso se dibujaba vacío, como si
+ * nadie hubiera llegado tarde, y los meses anteriores daban "No se pudo cargar".
+ * Lo usan las dos páginas y la server action: que sea uno solo.
+ */
+export const SELECT_EVENTO_DISCIPLINA =
+  '*, staff:staff!disciplinary_events_staff_id_fkey(id, full_name, branch_id)'
+
 export function mesDeHoy(timeZone?: string): string {
   return getLocalDateStr(timeZone).slice(0, 7)
 }

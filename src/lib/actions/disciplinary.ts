@@ -8,7 +8,7 @@ import { getScopedBranchIds } from './branch-access'
 import { currentUserCan } from './permissions-gate'
 import { getActiveTimezone } from '@/lib/i18n'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { esMes, limitesDelMes } from '@/lib/disciplina-mes'
+import { esMes, limitesDelMes, SELECT_EVENTO_DISCIPLINA } from '@/lib/disciplina-mes'
 
 export interface DisciplinaDelMes {
   events: (Omit<DisciplinaryEvent, 'staff'> & {
@@ -56,7 +56,7 @@ export async function getDisciplinaDelMes(
         (from, to) =>
           supabase
             .from('disciplinary_events')
-            .select('*, staff:staff(id, full_name, branch_id)')
+            .select(SELECT_EVENTO_DISCIPLINA)
             .in('branch_id', branchIds)
             .gte('event_date', desdeFecha)
             .lt('event_date', hastaFecha)
@@ -160,7 +160,7 @@ export async function getDisciplinaryEvents(branchId: string, fromDate?: string)
   const supabase = createAdminClient()
   let query = supabase
     .from('disciplinary_events')
-    .select('*, staff:staff(id, full_name)')
+    .select(SELECT_EVENTO_DISCIPLINA)
     .eq('branch_id', branchId)
     .order('event_date', { ascending: false })
 

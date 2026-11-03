@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { getActiveTimezone } from '@/lib/i18n'
 import { getLocalDayBounds } from '@/lib/time-utils'
-import { limitesDelMes, mesDeHoy } from '@/lib/disciplina-mes'
+import { limitesDelMes, mesDeHoy, SELECT_EVENTO_DISCIPLINA } from '@/lib/disciplina-mes'
 import type { DisciplinaDelMes } from '@/lib/actions/disciplinary'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
@@ -82,7 +82,7 @@ export default async function EquipoPage() {
         { data: incentiveRules },
         { data: incentiveAchievements },
         { data: disciplinaryRules },
-        { data: disciplinaryEvents },
+        { data: disciplinaryEvents, error: errorEventosDisciplina },
         { data: roles },
         { data: breakRequests },
         { data: activeBreakEntries },
@@ -115,8 +115,8 @@ export default async function EquipoPage() {
             ? supabase.from('disciplinary_rules').select('*').in('branch_id', branchIds).order('event_type').order('occurrence_number')
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
-            ? supabase.from('disciplinary_events').select('*, staff:staff(id, full_name, branch_id)').in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
-            : Promise.resolve({ data: [] }),
+            ? supabase.from('disciplinary_events').select(SELECT_EVENTO_DISCIPLINA).in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
         supabase
             .from('roles')
             .select('*, role_branch_scope(branch_id)')
@@ -126,7 +126,7 @@ export default async function EquipoPage() {
             ? supabase.from('break_requests').select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)').in('branch_id', branchIds).in('status', ['pending', 'approved']).order('requested_at', { ascending: true })
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
-            ? supabase.from('queue_entries').select('id, barber_id, branch_id, started_at, break_request_id, barber:staff(id, full_name, branch_id), break_request:break_requests(id, branch_id, break_config:break_configs(name, duration_minutes))').in('branch_id', branchIds).eq('is_break', true).eq('status', 'in_progress')
+            ? supabase.from('queue_entries').select('id, barber_id, branch_id, started_at, break_request_id, break_duration_minutes, barber:staff(id, full_name, branch_id), break_request:break_requests(id, branch_id, break_config:break_configs(name, duration_minutes))').in('branch_id', branchIds).eq('is_break', true).eq('status', 'in_progress')
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
             ? supabase.from('break_requests').select('*, staff:staff_id(id, full_name, branch_id), break_config:break_config_id(name, duration_minutes)').in('branch_id', branchIds).eq('status', 'completed').gt('overtime_seconds', 0).gte('actual_completed_at', thirtyDaysAgoStr).order('actual_completed_at', { ascending: false })
@@ -214,6 +214,7 @@ export default async function EquipoPage() {
             incentiveAchievements={incentiveAchievements ?? []}
             disciplinaryRules={disciplinaryRules ?? []}
             disciplinaryEvents={disciplinaryEvents ?? []}
+            errorEventosDisciplina={Boolean(errorEventosDisciplina)}
             attendanceLogs={attendanceLogs}
             defaultPeriod={defaultPeriod}
             fromDate={fromDate}

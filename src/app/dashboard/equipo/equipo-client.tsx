@@ -50,6 +50,8 @@ interface EquipoClientProps {
     // Disciplina
     disciplinaryRules: unknown[]
     disciplinaryEvents: unknown[]
+    /** La lectura de eventos del mes en curso falló: la pantalla lo dice, no muestra "sin eventos". */
+    errorEventosDisciplina?: boolean
     attendanceLogs: unknown[]
     defaultPeriod: string
     fromDate: string
@@ -78,6 +80,7 @@ export function EquipoClient({
     incentiveAchievements,
     disciplinaryRules,
     disciplinaryEvents,
+    errorEventosDisciplina = false,
     attendanceLogs,
     defaultPeriod,
     fromDate,
@@ -328,6 +331,7 @@ export function EquipoClient({
                                 })) as Parameters<typeof DisciplinaClient>[0]['barbers']
                         }
                         events={disciplinaryEvents as Parameters<typeof DisciplinaClient>[0]['events']}
+                        errorEventos={errorEventosDisciplina}
                         fromDate={fromDate}
                         activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}

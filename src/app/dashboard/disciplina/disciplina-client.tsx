@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { upsertDisciplinaryRule, deleteDisciplinaryRule, createDisciplinaryEvent, getDisciplinaDelMes, type DisciplinaDelMes } from '@/lib/actions/disciplinary'
 import { nombreDelMes } from '@/lib/disciplina-mes'
 import { formatCurrency } from '@/lib/format'
@@ -68,6 +69,8 @@ interface ActiveBreakEntry {
   barber_id: string | null
   branch_id: string | null
   started_at: string | null
+  /** Mig 235: los minutos que le dieron a este descanso. NULL = no se sabe. */
+  break_duration_minutes?: number | null
   barber?: { id: string; full_name: string; branch_id: string | null } | null
   break_request?: {
     id: string
@@ -93,6 +96,11 @@ interface Props {
   rules: DisciplinaryRule[]
   barbers: BarberBasic[]
   events: EventWithStaff[]
+  /**
+   * No se pudieron leer los eventos del mes en curso. Sin esto, una lectura fallida
+   * se dibuja igual que "nadie llegó tarde": así estuvo esta pantalla desde marzo.
+   */
+  errorEventos?: boolean
   fromDate: string
   activeBreakEntries?: ActiveBreakEntry[]
   breakOvertimeHistory?: BreakOvertimeRecord[]
@@ -116,11 +124,13 @@ export function DisciplinaClient({
   rules,
   barbers,
   events,
+  errorEventos = false,
   fromDate,
   activeBreakEntries = [],
   breakOvertimeHistory = [],
   attendanceLogs = [],
 }: Props) {
+  const router = useRouter()
   const { selectedBranchId } = useBranchStore()
   const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
   const [now, setNow] = useState(() => Date.now())
@@ -205,13 +215,17 @@ export function DisciplinaClient({
       const entryBranchId = entry.branch_id ?? entry.break_request?.branch_id ?? entry.barber?.branch_id
       return entryBranchId === selectedBranchId && entry.started_at
     })
-    .map((entry) => {
-      const durationMs = (entry.break_request?.break_config?.duration_minutes ?? 0) * 60_000
+    .flatMap((entry) => {
+      // Sin duración conocida no se puede afirmar que se excedió. Antes valía 0, y el
+      // descanso arrastrado desde la fila (que no la guardaba) figuraba excedido desde
+      // el primer segundo, con TODO lo transcurrido como exceso.
+      const duracionMin =
+        entry.break_duration_minutes ?? entry.break_request?.break_config?.duration_minutes ?? null
+      if (!duracionMin) return []
       const elapsedMs = now - new Date(entry.started_at!).getTime()
-      const overdueMs = elapsedMs - durationMs
-      return { entry, overdueMs }
+      const overdueMs = elapsedMs - duracionMin * 60_000
+      return overdueMs > 0 ? [{ entry, overdueMs, duracionMin }] : []
     })
-    .filter(({ overdueMs }) => overdueMs > 0)
 
   function formatOverdue(ms: number) {
     const totalSeconds = Math.floor(ms / 1000)
@@ -419,7 +433,18 @@ export function DisciplinaClient({
     </div>
   ) : null
 
-  const resumenDeLaPersona = personaSeleccionada && resumenPersona && !avisoDelMes && (
+  // Lo mismo para el mes en curso, que llega por props. Sólo tapa lo que depende de
+  // los eventos: las fichadas se leen aparte y Asistencia se sigue pudiendo mirar.
+  const avisoEventos = avisoDelMes ?? (mesElegido === null && errorEventos ? (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-8 text-center" role="alert">
+      <p className="text-sm text-red-500">No se pudieron leer los eventos de {nombreMes}. Probá de nuevo.</p>
+      <Button variant="outline" size="sm" onClick={() => router.refresh()}>
+        Reintentar
+      </Button>
+    </div>
+  ) : null)
+
+  const resumenDeLaPersona = personaSeleccionada && resumenPersona && !avisoEventos && (
     <div className="mb-3 rounded-xl border bg-card px-3 py-3 sm:px-5">
       <p className="font-medium">{personaSeleccionada.full_name}</p>
       <p className="text-sm text-muted-foreground">
@@ -464,7 +489,7 @@ export function DisciplinaClient({
             </Badge>
           </div>
           <div className="divide-y divide-red-500/10 rounded-lg border border-red-500/20 bg-background">
-            {overdueBreaks.map(({ entry, overdueMs }) => (
+            {overdueBreaks.map(({ entry, overdueMs, duracionMin }) => (
               <div key={entry.id} className="flex items-center gap-4 px-4 py-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500 font-semibold text-sm">
                   {(entry.barber?.full_name ?? 'B').charAt(0).toUpperCase()}
@@ -473,9 +498,7 @@ export function DisciplinaClient({
                   <p className="font-medium">{entry.barber?.full_name ?? 'Barbero'}</p>
                   <p className="text-xs text-muted-foreground">
                     {entry.break_request?.break_config?.name ?? 'Descanso'}
-                    {entry.break_request?.break_config?.duration_minutes
-                      ? ` · ${entry.break_request.break_config.duration_minutes} min estipulados`
-                      : ''}
+                    {` · ${duracionMin} min estipulados`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -516,7 +539,7 @@ export function DisciplinaClient({
         <TabsContent value="eventos" className="mt-4">
           {barraDelMes(true)}
           {resumenDeLaPersona}
-          {avisoDelMes ?? (eventosVisibles.length === 0 ? (
+          {avisoEventos ?? (eventosVisibles.length === 0 ? (
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">
               No hay eventos registrados en {nombreMes}.
             </div>
@@ -555,7 +578,7 @@ export function DisciplinaClient({
         {/* Resumen por barbero */}
         <TabsContent value="resumen" className="mt-4">
           {barraDelMes(false)}
-          {avisoDelMes ?? (barberSummary.length === 0 ? (
+          {avisoEventos ?? (barberSummary.length === 0 ? (
             <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">Sin personal.</div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">

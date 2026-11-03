@@ -5,7 +5,7 @@ import type { DisciplinaDelMes } from '@/lib/actions/disciplinary'
 import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { getActiveTimezone } from '@/lib/i18n'
-import { limitesDelMes, mesDeHoy } from '@/lib/disciplina-mes'
+import { limitesDelMes, mesDeHoy, SELECT_EVENTO_DISCIPLINA } from '@/lib/disciplina-mes'
 import { DisciplinaClient } from './disciplina-client'
 import type { Metadata } from 'next'
 
@@ -24,7 +24,7 @@ export default async function DisciplinaPage() {
   const tz = await getActiveTimezone()
   const { desdeFecha: fromDate, desdeIso } = limitesDelMes(mesDeHoy(tz), tz)
 
-  const [{ data: _branches }, { data: rules }, { data: staff }, { data: events }, attendanceLogs] = await Promise.all([
+  const [{ data: _branches }, { data: rules }, { data: staff }, { data: events, error: errorEventos }, attendanceLogs] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -35,8 +35,8 @@ export default async function DisciplinaPage() {
       ? supabase.from('staff').select('id, full_name, branch_id, role').eq('organization_id', orgId).in('branch_id', branchIds).eq('is_active', true).order('full_name')
       : Promise.resolve({ data: [] }),
     branchIds.length > 0
-      ? supabase.from('disciplinary_events').select('*, staff:staff(id, full_name, branch_id)').in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
-      : Promise.resolve({ data: [] }),
+      ? supabase.from('disciplinary_events').select(SELECT_EVENTO_DISCIPLINA).in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
     branchIds.length > 0
       ? fetchAll<DisciplinaDelMes['attendanceLogs'][number]>(
           (from, to) =>
@@ -53,11 +53,14 @@ export default async function DisciplinaPage() {
       : Promise.resolve([]),
   ])
 
+  if (errorEventos) console.error('[disciplina] eventos del mes en curso:', errorEventos.message)
+
   return (
     <DisciplinaClient
       rules={rules ?? []}
       barbers={staff ?? []}
       events={events ?? []}
+      errorEventos={Boolean(errorEventos)}
       fromDate={fromDate}
       attendanceLogs={attendanceLogs}
     />
