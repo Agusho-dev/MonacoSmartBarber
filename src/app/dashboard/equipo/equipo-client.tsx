@@ -186,8 +186,14 @@ export function EquipoClient({
         )
     }
 
+    // Perfiles es la única pestaña de alto fijo: en la compu, la lista y la ficha scrollean
+    // cada una por su lado (`lg:h-full` en perfiles-client). Las demás fluyen y scrollea el
+    // <main>. Con el alto fijo para todas, lo que no entraba en la pantalla quedaba cortado
+    // por el `overflow-hidden`, sin ninguna forma de llegar hasta ahí.
+    const altoFijo = activeTab === 'perfiles'
+
     return (
-        <div className="space-y-4 lg:space-y-6 lg:flex lg:flex-col lg:h-[calc(100dvh-80px)] lg:overflow-hidden">
+        <div className={cn('space-y-4 lg:space-y-6', altoFijo && 'lg:flex lg:flex-col lg:h-[calc(100dvh-80px)] lg:overflow-hidden')}>
             {/* Header con BranchSelector */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:shrink-0">
                 <div>
@@ -258,7 +264,7 @@ export function EquipoClient({
             )}
 
             {/* Contenido del tab activo */}
-            <div key={activeTab} className="animate-in fade-in-0 duration-200 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+            <div key={activeTab} className={cn('animate-in fade-in-0 duration-200', altoFijo && 'lg:flex-1 lg:min-h-0 lg:overflow-hidden')}>
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
