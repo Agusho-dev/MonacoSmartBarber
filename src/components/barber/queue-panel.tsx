@@ -1687,7 +1687,8 @@ export function QueuePanel({
     <ActiveBreakCard
       key={myActiveBreak.id}
       startedAt={myActiveBreak.started_at}
-      durationMinutes={breakDurationMinutes}
+      // El descanso arrastrado desde la fila no tiene solicitud: su duración viene en la entrada (mig 235).
+      durationMinutes={myActiveBreak.break_duration_minutes ?? breakDurationMinutes}
       onComplete={handleCompleteBreak}
       actionLoading={actionLoading === myActiveBreak.id}
     />

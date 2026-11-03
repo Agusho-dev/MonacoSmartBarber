@@ -321,6 +321,12 @@ export interface QueueEntry {
   is_appointment: boolean
   appointment_id: string | null
   break_request_id: string | null
+  /**
+   * Mig 235: los minutos que le dieron a este descanso (sólo `is_break`), foto de
+   * `break_configs.duration_minutes` al crearlo. NULL = no se sabe: un descanso de
+   * antes de la 235 o creado por un bundle viejo.
+   */
+  break_duration_minutes?: number | null
   checked_in_at: string
   priority_order: string
   started_at: string | null

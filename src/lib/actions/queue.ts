@@ -2739,7 +2739,7 @@ export async function resumeActiveService(queueEntryId: string) {
   return { success: true }
 }
 
-export async function createBreakEntry(branchId: string, barberId: string, _breakConfigName: string) {
+export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
   const supabase = createAdminClient()
 
   // Validar que la sucursal pertenece a la org activa
@@ -2749,6 +2749,20 @@ export async function createBreakEntry(branchId: string, barberId: string, _brea
   const { data: position } = await supabase.rpc('next_queue_position', {
     p_branch_id: branchId,
   })
+
+  // Cuánto dura (mig 235): el kiosko se lo dice a quien quiera esperar a este barbero
+  // y el panel le dibuja la regla. Se va por el nombre porque es lo que manda la fila
+  // del dashboard, también con un bundle viejo. Si no se puede leer, el descanso se
+  // asigna igual, con la duración en NULL ("no se sabe"): no se traba por esto.
+  const { data: configDescanso, error: errorConfig } = await supabase
+    .from('break_configs')
+    .select('duration_minutes')
+    .eq('branch_id', branchId)
+    .eq('name', breakConfigName)
+    .order('is_active', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (errorConfig) console.error('[createBreakEntry] leer la duración del descanso:', errorConfig.message)
 
   // Si el barbero no tiene un servicio activo, el descanso empieza de inmediato
   const { data: currentService } = await supabase
@@ -2773,6 +2787,7 @@ export async function createBreakEntry(branchId: string, barberId: string, _brea
       is_break: true,
       is_dynamic: false,
       priority_order: nowBreak,
+      break_duration_minutes: configDescanso?.duration_minutes ?? null,
     })
     .select('id')
     .single()

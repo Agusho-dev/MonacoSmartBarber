@@ -204,6 +204,54 @@ export function getBarbersOnBreakIds(entries: QueueEntry[]): Set<string> {
 }
 
 /**
+ * Cuántos minutos le faltan a cada descanso en curso, por barbero (mig 235).
+ *
+ * - `> 0`: le faltan esos minutos, redondeado para arriba ("1 min" mientras quede algo).
+ * - `0`: ya se cumplió el tiempo y todavía no volvió.
+ * - `null`: no se sabe (descanso sin duración guardada o sin hora de inicio).
+ *
+ * Es lo que le dieron, no una promesa: de 71 descansos con historial (3/nov/2026), 48
+ * se pasaron del tiempo, 10 min en promedio. Por eso, a la hora de decidir, el kiosko
+ * dice cuándo termina el descanso y no promete cuándo vuelve el barbero.
+ *
+ * El tope en la duración cubre una tablet con el reloj atrasado: nunca dice que falta
+ * más de lo que dura el descanso entero.
+ */
+export function minutosParaVolverDelDescanso(
+  entries: QueueEntry[],
+  now: number,
+): Map<string, number | null> {
+  const faltan = new Map<string, number | null>()
+  for (const e of entries) {
+    if (!e.is_break || e.status !== 'in_progress' || !e.barber_id) continue
+    const duracion = e.break_duration_minutes ?? null
+    const inicio = e.started_at ? new Date(e.started_at).getTime() : Number.NaN
+    if (!duracion || duracion <= 0 || Number.isNaN(inicio)) {
+      faltan.set(e.barber_id, null)
+      continue
+    }
+    const restante = Math.ceil((inicio + duracion * 60_000 - now) / 60_000)
+    faltan.set(e.barber_id, Math.min(duracion, Math.max(0, restante)))
+  }
+  return faltan
+}
+
+/** Para la tarjeta del barbero en el kiosko: entra en un renglón. */
+export function textoRegresoCorto(minutos: number | null): string {
+  if (minutos === null) return 'Sin hora de regreso'
+  if (minutos === 0) return 'Por volver'
+  return `Vuelve en ~${minutos} min`
+}
+
+/** Para cuando el cliente tiene que decidir si espera, o ya decidió. Una oración entera. */
+export function textoRegresoLargo(minutos: number | null): string {
+  if (minutos === null) return 'No tenemos la hora exacta de su regreso.'
+  if (minutos === 0) return 'Ya se cumplió el tiempo: debería volver en cualquier momento.'
+  if (minutos === 1) return 'Termina en 1 minuto.'
+  return `Termina en unos ${minutos} minutos.`
+}
+
+/**
  * Barberos que están atendiendo un corte AHORA (in_progress, no-break).
  * No están disponibles para un dinámico aunque su ETA naïve dé 0 (un corte
  * largo satura max(0, avg-elapsed) a 0 y los hacía "empatar" con un barbero

@@ -232,7 +232,7 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
     // Esto cubre todos los casos de "barbero libre y nada lo tapa", incluyendo
     // cuts_before_break > 0 sin clientes asignados (antes quedaba en limbo).
     // Los clientes dinámicos (barber_id IS NULL) NO bloquean: van al pool.
-    const [{ data: currentService }, { data: blockingAssigned }] = await Promise.all([
+    const [{ data: currentService }, { data: blockingAssigned }, { data: configDescanso, error: errorConfig }] = await Promise.all([
         supabase
             .from('queue_entries')
             .select('id')
@@ -249,7 +249,15 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
             .eq('is_break', false)
             .lt('priority_order', ghost.priorityOrder)
             .limit(1),
+        // Cuánto dura (mig 235): lo muestran el kiosko y el panel. Si no se puede leer,
+        // el descanso se crea igual, con la duración en NULL ("no se sabe").
+        supabase
+            .from('break_configs')
+            .select('duration_minutes')
+            .eq('id', req.break_config_id)
+            .maybeSingle(),
     ])
+    if (errorConfig) console.error('[approveBreak] leer la duración del descanso:', errorConfig.message)
 
     const hasBlockingAssigned = (blockingAssigned?.length ?? 0) > 0
     const shouldStartImmediately = !currentService && !hasBlockingAssigned
@@ -264,6 +272,7 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
         priority_order: ghost.priorityOrder,
         is_break: true,
         break_request_id: req.id,
+        break_duration_minutes: configDescanso?.duration_minutes ?? null,
         checked_in_at: nowTs,
         started_at: shouldStartImmediately ? nowTs : null,
     })

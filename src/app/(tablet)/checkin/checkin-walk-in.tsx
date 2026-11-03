@@ -54,6 +54,7 @@ import {
   AlertCircle,
   Users,
   MessageCircle,
+  Coffee,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
@@ -69,6 +70,9 @@ import {
   getBarbersOnBreakIds,
   getBarbersAttendingIds,
   countActiveDynamicCapableBarbers,
+  minutosParaVolverDelDescanso,
+  textoRegresoCorto,
+  textoRegresoLargo,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
@@ -321,6 +325,11 @@ async function leerDatosDelKiosko(branchId: string) {
   }
 }
 
+/** «Gabriel Rodriguez» → «Gabriel»: así se lo nombra en una oración o en un botón. */
+function primerNombre(nombreCompleto: string): string {
+  return nombreCompleto.trim().split(/\s+/)[0] ?? ''
+}
+
 function formatPhone(digits: string): string {
   if (!digits) return ''
   if (digits.length <= 2) return digits
@@ -486,6 +495,12 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
    */
   const atencionRef = useRef(0)
   const [showBarberPreference, setShowBarberPreference] = useState(false)
+  /**
+   * El barbero en descanso que el cliente tocó en «Elegí tu barbero». Mientras está
+   * puesto, el diálogo le dice cuándo vuelve y le pregunta si lo quiere esperar: esa
+   * decisión es del cliente. Va el id y no el barbero, para leer siempre el estado vivo.
+   */
+  const [descansoPorConfirmar, setDescansoPorConfirmar] = useState<string | null>(null)
   const [globalCheckinBg, setGlobalCheckinBg] = useState('#3f3f46')
 
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -800,6 +815,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     setStep(next)
     setError('')
     setShowBarberPreference(false)
+    setDescansoPorConfirmar(null)
     // Asesoría: el paso nuevo arranca con el último valor confirmado y su
     // primera lectura exitosa lo puede corregir (ver `InterruptorAsesoria`).
     setAsesoria((a) => {
@@ -879,6 +895,22 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           if (entryRes.data) setMyQueueEntry(entryRes.data as unknown as QueueEntry)
           const lugar = Array.isArray(posRes.data) ? posRes.data[0] : posRes.data
           if (lugar?.label) setMiEsperaEnFila(lugar.label as string)
+
+          // Si su barbero está en descanso se lo decimos, porque a eso puede venir: a
+          // ver cuánto falta y si le conviene «Cambiar barbero». Esta pantalla no trae
+          // la fila, así que se pide sólo ese dato. Con su descanso en `queueEntries`,
+          // el resto se deriva igual que en el paso de barbero.
+          const entrada = entryRes.data as unknown as QueueEntry | null
+          if (entrada?.barber_id && entrada.status === 'waiting') {
+            const { data: descansos } = await supabase
+              .from('queue_entries')
+              .select('*')
+              .eq('branch_id', entrada.branch_id)
+              .eq('barber_id', entrada.barber_id)
+              .eq('is_break', true)
+              .eq('status', 'in_progress')
+            if (descansos) setQueueEntries(descansos as QueueEntry[])
+          }
         } catch {
           // Se navega igual: el dato duro (tiene lugar en la fila) ya lo sabemos
           // por la respuesta del server, y tragarse la pantalla por un adorno
@@ -934,6 +966,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     setStaffEnrollName('')
     setStaffEnrollPermiso(null)
     setBarberoElegidoId(null)
+    setDescansoPorConfirmar(null)
     setBarberNextArrival({})
     setAppointment(null)
     setConfirmingArrival(false)
@@ -1338,11 +1371,16 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, barberAvgMinutes])
 
   // Barberos con descanso activo (ghost is_break=true && status='in_progress').
-  // Estos quedan visibles en el kiosk como "En descanso" pero NO son seleccionables
-  // ni elegibles para "Menor espera" ni para asignación dinámica.
+  // El cliente los puede ELEGIR y esperar a que vuelvan, con la hora de regreso a la
+  // vista (`descansoPorConfirmar`). Lo que no hacen es entrar en "Menor espera" ni en
+  // la asignación dinámica: ahí nadie eligió esperar.
   const barbersOnBreak = useMemo(
     () => getBarbersOnBreakIds(queueEntries),
     [queueEntries]
+  )
+  const minutosParaVolver = useMemo(
+    () => minutosParaVolverDelDescanso(queueEntries, now),
+    [queueEntries, now]
   )
 
   // Barberos atendiendo ahora: el CTA "Menor espera" debe sugerir un barbero
@@ -1850,6 +1888,18 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     ? { nombre: barbers.find((b) => b.id === barberoElegidoId)?.full_name?.trim() || null }
     : null
 
+  // ── El barbero del cliente está en descanso ──
+  // El cartel de éxito y «Mi turno» lo recuerdan: es lo que el cliente tiene que tener
+  // presente mientras espera, y en los dos sigue a mano «Cambiar barbero».
+  const avisoDescansoExito =
+    barberoElegidoId && barbersOnBreak.has(barberoElegidoId)
+      ? `${primerNombre(destinoAsesoriaExito?.nombre ?? '') || 'Tu barbero'} está en descanso. ${textoRegresoLargo(minutosParaVolver.get(barberoElegidoId) ?? null)}`
+      : null
+  const avisoDescansoMiTurno =
+    myQueueEntry?.status === 'waiting' && myQueueEntry.barber_id && barbersOnBreak.has(myQueueEntry.barber_id)
+      ? `En descanso. ${textoRegresoLargo(minutosParaVolver.get(myQueueEntry.barber_id) ?? null)}`
+      : null
+
   const backButton = handleBack ? (
     <button
       onClick={handleBack}
@@ -1941,7 +1991,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     const subtitle = isNotClockedIn
       ? null
       : isOnBreak
-        ? 'En descanso'
+        ? textoRegresoCorto(minutosParaVolver.get(barber.id) ?? null)
         : mobileStatus === 'ocupado'
           ? 'Atendiendo ahora'
           : mobileStatus === 'descanso'
@@ -1956,14 +2006,14 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     return (
       <GlassRing key={barber.id} halo={false}>
         <button
-          onClick={() => { if (selectable && !isOnBreak) onSelect(barber.id) }}
-          disabled={submitting || isOnBreak || !selectable}
-          aria-disabled={isOnBreak || !selectable || undefined}
+          onClick={() => { if (selectable) onSelect(barber.id) }}
+          disabled={submitting || !selectable}
+          aria-disabled={!selectable || undefined}
           aria-label={
-            isOnBreak
-              ? `${barber.full_name} (en descanso, no disponible)`
-              : !selectable
-                ? `${barber.full_name} (aún no llegó, no disponible)`
+            !selectable
+              ? `${barber.full_name} (aún no llegó, no disponible)`
+              : isOnBreak
+                ? `${barber.full_name} (en descanso: ${subtitle})`
                 : barber.full_name
           }
           className={cn(
@@ -2019,7 +2069,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                   <span
                     className={cn(
                       'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-semibold',
-                      palette.badge,
+                      // Antes esta tarjeta iba apagada; ahora se elige y se tiene que leer.
+                      isOnBreak && isLightBg ? 'bg-zinc-100 text-zinc-700 border-zinc-300' : palette.badge,
                     )}
                   >
                     <span className="relative inline-flex size-2">
@@ -2034,7 +2085,14 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                   </span>
 
                   {subtitle && (
-                    <p className={cn('text-sm md:text-base font-medium', palette.accentText)}>
+                    <p
+                      className={cn(
+                        'text-sm md:text-base font-medium',
+                        // El gris del estado "descanso" no se lee sobre blanco, y acá
+                        // va lo que el cliente necesita para decidir si espera.
+                        isOnBreak ? (isLightBg ? 'text-zinc-600' : 'text-white/75') : palette.accentText
+                      )}
+                    >
                       {subtitle}
                     </p>
                   )}
@@ -2065,10 +2123,87 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     )
   }
 
+  /**
+   * El cliente tocó a un barbero en descanso: cuándo vuelve, cuánta gente lo está
+   * esperando, y la pregunta. Es un paso del mismo diálogo, no otro diálogo encima.
+   *
+   * Si el barbero vuelve mientras el cliente lee, los botones se quedan donde están y
+   * sólo cambia el texto. Volver a la lista movería las tarjetas bajo el dedo, y el
+   * toque que iba a «Sí, espero» podría anotarlo con otro barbero.
+   */
+  const renderEsperaDeDescanso = (barber: Staff, onSelect: (barberId: string) => void) => {
+    const nombre = primerNombre(barber.full_name) || barber.full_name
+    const sigueEnDescanso = barbersOnBreak.has(barber.id)
+    const esperando = getBarberStats(barber, dynamicEntries, barberAvgMinutes, now).waiting
+
+    return (
+      <div className="flex min-h-0 flex-col items-center gap-4 md:gap-6 overflow-y-auto p-1">
+        <div className="relative shrink-0">
+          {barber.avatar_url ? (
+            <Image
+              src={barber.avatar_url}
+              alt=""
+              width={112}
+              height={112}
+              className="size-24 md:size-28 rounded-full object-cover"
+              unoptimized
+            />
+          ) : (
+            <div className={cn('flex size-24 md:size-28 items-center justify-center rounded-full text-4xl font-bold', isLightBg ? 'bg-zinc-200 text-zinc-700' : 'bg-white/10 text-white')}>
+              {barber.full_name.charAt(0).toUpperCase()}
+            </div>
+          )}
+          {sigueEnDescanso && (
+            <span
+              aria-hidden
+              className={cn(
+                'absolute -bottom-1 -right-1 flex size-9 md:size-10 items-center justify-center rounded-full border',
+                isLightBg ? 'border-zinc-300 bg-white text-zinc-700' : 'border-white/20 bg-zinc-900 text-white'
+              )}
+            >
+              <Coffee className="size-4 md:size-5" />
+            </span>
+          )}
+        </div>
+
+        <DialogHeader className="items-center gap-2 text-center sm:text-center">
+          <DialogTitle className={cn('text-2xl md:text-3xl font-extrabold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+            {sigueEnDescanso ? `${nombre} está en descanso` : `${nombre} ya volvió`}
+          </DialogTitle>
+          <DialogDescription className={cn('text-base md:text-xl', isLightBg ? 'text-zinc-700' : 'text-white/85')}>
+            {sigueEnDescanso
+              ? textoRegresoLargo(minutosParaVolver.get(barber.id) ?? null)
+              : 'Ya terminó su descanso.'}
+          </DialogDescription>
+          <p className={cn('text-sm md:text-base', isLightBg ? 'text-zinc-500' : 'text-white/60')}>
+            {esperando === 0
+              ? `Por ahora nadie espera a ${nombre}.`
+              : esperando === 1
+                ? `Hay 1 persona esperando a ${nombre}.`
+                : `Hay ${esperando} personas esperando a ${nombre}.`}
+          </p>
+        </DialogHeader>
+
+        <div className="flex w-full max-w-md flex-col gap-3">
+          {botonTurnoPrimario(
+            sigueEnDescanso ? `Sí, espero a ${nombre}` : `Atenderme con ${nombre}`,
+            () => {
+              setDescansoPorConfirmar(null)
+              setShowBarberPreference(false)
+              onSelect(barber.id)
+            },
+            { loading: submitting }
+          )}
+          {botonTurnoSecundario('Elegir otro barbero', () => setDescansoPorConfirmar(null))}
+        </div>
+      </div>
+    )
+  }
+
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true, allowDynamicFallback = true) => {
-    // Barberos disponibles para SELECCIONAR: fichados, no bloqueados por fin de
-    // turno y NO en descanso. Los en descanso se muestran en su propia sección
-    // (deshabilitados) para que el cliente entienda por qué su barbero no aparece.
+    // Barberos libres de descanso: fichados y no bloqueados por fin de turno. Los que
+    // están en descanso van en su propia sección y también se pueden elegir, pasando
+    // por `renderEsperaDeDescanso`: el cliente decide si espera a que vuelvan.
     const availableBarbers = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
       !notClockedInBarbers.has(b.id) &&
@@ -2083,6 +2218,9 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
       notClockedInBarbers.has(b.id)
     )
+    const barberoEnDecision = descansoPorConfirmar
+      ? barbers.find((b) => b.id === descansoPorConfirmar) ?? null
+      : null
 
     return (
       <div className="w-full flex flex-col gap-5 overflow-y-auto min-h-0 flex-1">
@@ -2185,12 +2323,20 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         </div>
 
         {/* ── Barber Selection Dialog Modal ── */}
-        <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
+        <Dialog
+          open={showBarberPreference}
+          onOpenChange={(abierto) => {
+            setShowBarberPreference(abierto)
+            if (!abierto) setDescansoPorConfirmar(null)
+          }}
+        >
           <DialogContent className={cn(
             isLightBg
               ? 'inset-4 translate-x-0 translate-y-0 m-auto h-fit max-w-[95vw] md:max-w-2xl max-h-[80dvh] flex flex-col overflow-hidden border border-zinc-200 bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl'
               : terminalDialogSurface
           )}>
+            {barberoEnDecision ? renderEsperaDeDescanso(barberoEnDecision, onSelect) : (
+              <>
             <DialogHeader className="text-left mb-3 md:mb-6 shrink-0">
               <DialogTitle className={cn(
                 'text-xl md:text-3xl font-extrabold',
@@ -2231,16 +2377,18 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 }, showExpand))}
               </div>
 
-              {/* FIX #8: estado vacío cuando NINGÚN barbero está disponible para elegir
-                  (todos en descanso o sin llegar). Antes el modal quedaba en un dead-end
-                  o el cliente terminaba eligiendo un barbero ausente. */}
+              {/* FIX #8: estado vacío cuando no hay ningún barbero libre de descanso.
+                  Antes el modal quedaba en un dead-end o el cliente terminaba eligiendo
+                  un barbero ausente. Si hay alguno en descanso, se lo puede esperar. */}
               {availableBarbers.length === 0 && (
                 <div className={cn(
                   'rounded-2xl border p-6 text-center space-y-4',
                   isLightBg ? 'border-zinc-200 bg-zinc-50' : 'border-white/10 bg-white/5'
                 )}>
                   <p className={cn('text-sm md:text-base font-medium', isLightBg ? 'text-zinc-700' : 'text-white/80')}>
-                    Ahora mismo no hay barberos disponibles para elegir (todos en descanso o sin llegar).
+                    {onBreakBarbers.length > 0
+                      ? 'Ahora mismo no hay ningún barbero libre.'
+                      : 'Ahora mismo no hay barberos disponibles para elegir.'}
                   </p>
                   {allowDynamicFallback && (
                     <Button
@@ -2257,16 +2405,16 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
               {onBreakBarbers.length > 0 && (
                 <>
                   <div className={cn('w-full h-px my-6', isLightBg ? 'bg-zinc-200' : 'bg-white/8')} />
-                  <div className="flex items-center gap-3 mb-4">
+                  <div className="flex items-center gap-3 mb-2">
                     <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
-                    <h4 className={cn('text-xs font-bold uppercase tracking-widest shrink-0', isLightBg ? 'text-zinc-400' : 'text-white/40')}>En descanso</h4>
+                    <h4 className={cn('text-xs font-bold uppercase tracking-widest shrink-0', isLightBg ? 'text-zinc-500' : 'text-white/50')}>En descanso</h4>
                     <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
                   </div>
+                  <p className={cn('mb-4 text-center text-sm md:text-base', isLightBg ? 'text-zinc-600' : 'text-white/65')}>
+                    Si querés, podés elegir a uno y esperar a que vuelva.
+                  </p>
                   <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
-                    {onBreakBarbers.map((barber) => renderBarberCard(barber, () => {
-                      // No-op: la card está deshabilitada por isOnBreak.
-                      // El handler se mantiene por la firma del prop.
-                    }, showExpand, false))}
+                    {onBreakBarbers.map((barber) => renderBarberCard(barber, setDescansoPorConfirmar, showExpand))}
                   </div>
                 </>
               )}
@@ -2287,6 +2435,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 </>
               )}
             </div>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </div>
@@ -3369,6 +3519,12 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                         Ya estabas en la fila: tu turno quedó sumado a ese lugar.
                       </p>
                     )}
+                    {!appointmentConfirmed && avisoDescansoExito && (
+                      <p className={cn('text-balance text-base md:text-lg font-medium mt-3', isLightBg ? 'text-zinc-700' : 'text-white/85')}>
+                        <Coffee className="mr-2 inline-block size-4 md:size-5 align-[-0.15em]" aria-hidden />
+                        {avisoDescansoExito}
+                      </p>
+                    )}
                     <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
                       Te llamaremos cuando sea tu turno
                     </p>
@@ -3946,6 +4102,12 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                           <p className={cn('text-xs md:text-sm', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Tu barbero asignado</p>
                         </div>
                       </div>
+                      {avisoDescansoMiTurno && (
+                        <p className={cn('mt-2 md:mt-3 text-balance text-center text-sm md:text-base font-medium', isLightBg ? 'text-zinc-700' : 'text-white/85')}>
+                          <Coffee className="mr-2 inline-block size-4 align-[-0.15em]" aria-hidden />
+                          {avisoDescansoMiTurno}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
