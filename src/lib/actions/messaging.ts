@@ -5,6 +5,8 @@ import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import { llevaLinkDeGestion } from '@/lib/whatsapp-template-shape'
+import { getCachedAuthUser } from '@/lib/auth-cache'
+import { atenderConversacion, staffDelUsuario } from '@/lib/mensajeria/pendientes-servidor'
 
 export async function getConversations(channelFilter?: string) {
   const supabase = createAdminClient()
@@ -96,17 +98,42 @@ export async function sendMessage(
 
   const platform = (conv.channel as { platform?: string } | null)?.platform
 
+  // Quién escribe (6/nov/2026). El chat nunca pasaba staffId y `sent_by_staff_id`
+  // quedaba siempre en NULL: no se distinguía una respuesta de una persona de un
+  // mensaje automático. Se resuelve de la sesión; un dueño sin fila en staff
+  // queda en NULL, como antes.
+  const user = await getCachedAuthUser()
+  const quien = staffId ?? (user ? await staffDelUsuario(supabase, user.id, orgAccess.orgId) : null) ?? undefined
+
+  let resultado: { success?: boolean; error?: string }
   if (platform === 'whatsapp') {
     const { sendMetaWhatsAppMessage } = await import('./whatsapp-meta')
-    return sendMetaWhatsAppMessage(conv.platform_user_id, content, conversationId, staffId)
-  }
-
-  if (platform === 'instagram') {
+    resultado = await sendMetaWhatsAppMessage(conv.platform_user_id, content, conversationId, quien)
+  } else if (platform === 'instagram') {
     const { sendInstagramMessage } = await import('./instagram-meta')
-    return sendInstagramMessage(conv.platform_user_id, content, conversationId, staffId)
+    resultado = await sendInstagramMessage(conv.platform_user_id, content, conversationId, quien)
+  } else {
+    return { error: 'Plataforma no soportada aún' }
   }
 
-  return { error: 'Plataforma no soportada aún' }
+  // Una respuesta de una persona atiende la conversación: sus alertas pasan a
+  // leídas y sale de «Por responder» (mig 237), conteste desde la bandeja o
+  // desde el chat. El mensaje ya salió: si esto falla, se avisa en el log y la
+  // respuesta del envío no cambia (la tarjeta reaparecería, no se pierde nada).
+  if (resultado.success) {
+    try {
+      await atenderConversacion(supabase, {
+        orgId: orgAccess.orgId,
+        conversationId,
+        como: 'respondida',
+        authUserId: user?.id ?? null,
+        staffId: quien ?? null,
+      })
+    } catch (err) {
+      console.error('[sendMessage] el mensaje salió pero no se pudo marcar la conversación como atendida:', err instanceof Error ? err.message : err)
+    }
+  }
+  return resultado
 }
 
 // Envía un template de WA a una conversación existente

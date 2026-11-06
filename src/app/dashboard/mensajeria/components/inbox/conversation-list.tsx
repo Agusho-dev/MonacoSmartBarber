@@ -46,6 +46,7 @@ export function ConversationList({
   onOpenSettings,
   onProgramar,
   menu,
+  porResponder,
   seccionAbierta = false,
 }: {
   onNewChat: () => void
@@ -54,6 +55,8 @@ export function ConversationList({
   onProgramar: () => void
   /** El botón "…" con su menú, que arma mensajeria-client (sabe de las secciones). */
   menu: ReactNode
+  /** La fila «Por responder» (arriba de los chats, como «Archivados» en WhatsApp). */
+  porResponder?: ReactNode
   /** Hay una sección abierta (Difusiones, Workflows…): en la compu ocupa la columna de la lista. */
   seccionAbierta?: boolean
 }) {
@@ -97,6 +100,7 @@ export function ConversationList({
           onNewChat={onNewChat}
           onOpenSettings={onOpenSettings}
           menu={menu}
+          porResponder={porResponder}
         />
       </section>
       {/* Con una sección abierta no va: en la compu quedaba en la columna de la
@@ -115,6 +119,7 @@ function ListaChats({
   onNewChat,
   onOpenSettings,
   menu,
+  porResponder,
 }: {
   unreadOnly: boolean
   setUnreadOnly: Dispatch<SetStateAction<boolean>>
@@ -122,6 +127,7 @@ function ListaChats({
   onNewChat: () => void
   onOpenSettings: () => void
   menu: ReactNode
+  porResponder?: ReactNode
 }) {
   const {
     conversations,
@@ -385,6 +391,9 @@ function ListaChats({
             ))}
           </FilaChips>
         </div>
+
+        {/* «Por responder», arriba de los chats: no mientras se busca. */}
+        {!buscandoAlgo && porResponder}
 
         {hayFilas ? (
           <>

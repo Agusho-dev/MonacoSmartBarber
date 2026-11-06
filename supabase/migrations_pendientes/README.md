@@ -21,6 +21,7 @@ Ya aplicadas (4/10/2026, después del deploy `d31840e`): `219h` y `224b` — est
 | `223_rostros_staff_sin_anon.sql` | **Gate**: el commit deployado ya no usa `enrollStaffFaceDescriptor` ni `verifyBarberPin`, tablets recargadas y prueba positiva de alta de cara en Test | Biometría del staff: tabla y RPC sólo para `service_role` |
 | `224_staff_columnas_sensibles_sin_anon.sql` | **Gate**: inventario sin consultas del browser que nombren `staff.phone`/`commission_pct`, tablets recargadas y 0 GET anónimos que las pidan | Teléfono y comisión del staff legibles por anon (14 orgs) |
 | `recuperar_fotos_27ago.sql` | Sólo con el OK del dueño | No es una migración: recupera 2 fotos del 27/8 |
+| `237b_cron_avisos_mensajeria.sql` | **Gate**: deployado el commit con `/api/cron/avisos-mensajeria` y `curl` a la ruta en 200 | Programa los avisos push de «Por responder» (cada minuto; sin dispositivos suscriptos no hace nada) |
 
 Cada archivo trae en su encabezado el gate exacto (consultas a `query_logs` /
 `edge_logs`), la verificación posterior con `curl` y el rollback. Las que tocan

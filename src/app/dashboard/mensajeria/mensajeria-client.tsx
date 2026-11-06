@@ -15,11 +15,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { toast } from 'sonner'
 import { usePantallaInmersiva } from '@/components/dashboard/pantalla-inmersiva'
 import { useEsCelular } from '@/hooks/use-es-celular'
-import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
-import { getUnreadAlertCount } from '@/lib/actions/workflows'
-import { createClient } from '@/lib/supabase/client'
+import type { Pendiente } from '@/lib/mensajeria/por-responder'
 import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
@@ -31,8 +30,9 @@ import { TemplatePicker } from './components/dialogs/template-picker'
 import { BroadcastSection } from './components/broadcasts/broadcast-section'
 import { WorkflowList } from './components/workflows/workflow-list'
 import { QuickReplySection } from './components/quick-replies/quick-reply-section'
-import { CrmAlertsPanel } from './components/alerts/crm-alerts-panel'
-import { CrmCasesPanel } from './components/casos/crm-cases-panel'
+import { ProveedorPorResponder, usePorResponder } from './components/responder/contexto-por-responder'
+import { PorResponder } from './components/responder/por-responder'
+import { FilaPorResponder } from './components/responder/fila-por-responder'
 import { TokenHealthBanner } from './components/shared/token-health-banner'
 import { BarraSecciones } from './components/navegacion/barra-secciones'
 import { MenuSecciones } from './components/navegacion/menu-secciones'
@@ -80,7 +80,11 @@ export function MensajeriaClient(props: MensajeriaProps) {
       branches={props.branches}
       totalConversations={props.totalConversations}
     >
-      <MarcoMensajeria />
+      {/* «Por responder» lee del contexto de Mensajería (la lista de chats le avisa
+          cuándo releer): va adentro del provider. */}
+      <ProveedorPorResponder>
+        <MarcoMensajeria />
+      </ProveedorPorResponder>
     </MensajeriaProvider>
   )
 }
@@ -90,8 +94,14 @@ export function MensajeriaClient(props: MensajeriaProps) {
 function MarcoMensajeria() {
   const searchParams = useSearchParams()
   const isFocusMode = searchParams.get('foco') === '1'
-  const { inboxTab, setInboxTab, conversations, scheduled, showMobileChat, activeConv } = useMensajeria()
+  const {
+    inboxTab, setInboxTab, conversations, scheduled, showMobileChat, activeConv,
+    setActiveConv, setShowMobileChat, setShowProfile, handleStartConversation,
+  } = useMensajeria()
+  const { cuenta: porResponder, urgente: porResponderUrgente, refrescar: refrescarPorResponder } = usePorResponder()
   const esCelular = useEsCelular()
+  // La tarjeta que tiene que quedar arriba al abrir «Por responder» (la del aviso que se tocó).
+  const [convPorResponder, setConvPorResponder] = useState<string | null>(null)
 
   const [section, setSection] = useState<CrmSection>('inbox')
   const [showSettings, setShowSettings] = useState(() => searchParams.get('settings') === '1')
@@ -102,8 +112,6 @@ function MarcoMensajeria() {
     abierto: false,
     cliente: null,
   })
-  const [alertCount, setAlertCount] = useState(0)
-  const [casosCount, setCasosCount] = useState(0)
 
   // En el celular, un chat abierto, una sección y Programados son capas que
   // tapan la pantalla entera. El shell deja quietos e inertes su encabezado y
@@ -125,49 +133,14 @@ function MarcoMensajeria() {
     window.history.replaceState(null, '', `/dashboard/mensajeria${qs ? `?${qs}` : ''}${window.location.hash}`)
   }, [isFocusMode, searchParams])
 
-  // Alertas no leídas y casos pendientes. Sólo pinta la última consulta: si
-  // una vieja llega tarde no pisa el número nuevo.
-  const consultaContadores = useRef(0)
-  const refrescarContadores = useCallback(() => {
-    const n = ++consultaContadores.current
-    getUnreadAlertCount()
-      .then((r) => { if (n === consultaContadores.current) setAlertCount(r.count) })
-      .catch(() => {})
-    getOpenCrmCaseCount()
-      .then((r) => { if (n === consultaContadores.current) setCasosCount(r.count) })
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    refrescarContadores()
-  }, [refrescarContadores])
-
-  // Realtime para actualizar los badges cuando llega una alerta o un caso nuevo
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('crm-alerts-badge')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
-        setAlertCount(prev => prev + 1)
-      })
-      // NOTA: crm_cases NO está en la publication supabase_realtime, así que un
-      // listener postgres_changes sobre esa tabla nunca dispara (era código muerto).
-      // El badge de casos se refresca por refetch manual al montar, al cambiar
-      // de sección y al abrir el menú "…". Si se quiere en vivo, agregar
-      // crm_cases a la publication (bajo riesgo: tasa de cambios baja y el
-      // callback solo refetchea un count).
-      .subscribe((status, err) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.error('[crm-alerts-badge realtime] canal en estado', status, err)
-        }
-      })
-    return () => { supabase.removeChannel(channel) }
-  }, [])
-
-  const irA = (destino: DestinoMensajeria) => {
-    // Cada cambio de sección vuelve a contar: al salir de Alertas o de Casos el
-    // número tiene que reflejar lo que se leyó o se resolvió ahí.
-    refrescarContadores()
+  // «Por responder» (6/nov/2026) reemplazó a Alertas y Casos, y con ellos al
+  // canal de realtime `crm-alerts-badge`, que escuchaba crm_alerts de TODAS las
+  // orgs. El número sale de contexto-por-responder.tsx, que relee cuando se
+  // mueve la lista de chats.
+  const irA = useCallback((destino: DestinoMensajeria) => {
+    // Cada cambio de sección vuelve a leer: al salir de «Por responder» el
+    // número tiene que reflejar lo que se contestó ahí.
+    refrescarPorResponder()
     if (destino === 'chats' || destino === 'programados') {
       setSection('inbox')
       setInboxTab(destino === 'programados' ? 'scheduled' : 'inbox')
@@ -177,7 +150,43 @@ function MarcoMensajeria() {
     // De Programados a una sección: Programados se cierra. Si no, en la compu
     // quedaban las dos a la vista y la sección se apretaba en el lugar del chat.
     setInboxTab('inbox')
-  }
+  }, [refrescarPorResponder, setInboxTab])
+
+  const abrirPorResponder = useCallback((conv: string | null) => {
+    setConvPorResponder(conv)
+    irA('responder')
+  }, [irA])
+
+  // Tocar un aviso push con Mensajería abierta: el service worker le avisa a la
+  // página (public/sw-avisos.js) y se abre la bandeja en esa tarjeta, sin recargar.
+  useEffect(() => {
+    const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined
+    if (!sw) return
+    const alMensaje = (e: MessageEvent) => {
+      const d = e.data as { tipo?: string; conv?: string | null } | null
+      if (d?.tipo === 'abrir-por-responder') abrirPorResponder(typeof d.conv === 'string' ? d.conv : null)
+    }
+    sw.addEventListener('message', alMensaje)
+    return () => sw.removeEventListener('message', alMensaje)
+  }, [abrirPorResponder])
+
+  // «Ver chat» desde una tarjeta: el chat de esa conversación, como desde la lista.
+  const verChatDesdePendiente = useCallback((p: Pendiente) => {
+    const conv = conversations.find((c) => c.id === p.id)
+    if (conv) {
+      setActiveConv(conv)
+      setShowProfile(false)
+      setShowMobileChat(true)
+      irA('chats')
+      return
+    }
+    if (p.clientId) {
+      handleStartConversation(p.clientId)
+      irA('chats')
+      return
+    }
+    toast.info('Esa conversación no está entre las últimas: buscala en Chats.')
+  }, [conversations, handleStartConversation, irA, setActiveConv, setShowMobileChat, setShowProfile])
 
   const activo = destinoActivo(section, inboxTab)
   const seccionAbierta = section !== 'inbox'
@@ -218,8 +227,8 @@ function MarcoMensajeria() {
             activo={activo}
             contadores={{
               chats: chatsNoLeidos,
-              alertas: alertCount,
-              casos: casosCount,
+              responder: porResponder,
+              responderUrgente: porResponderUrgente,
               programados: programadosPendientes,
             }}
             configAbierta={showSettings}
@@ -238,23 +247,23 @@ function MarcoMensajeria() {
             seccionAbierta={seccionAbierta}
             menu={
               <MenuSecciones
-                alertCount={alertCount}
-                casosCount={casosCount}
+                responderCount={porResponder}
+                responderUrgente={porResponderUrgente}
                 isFocusMode={isFocusMode}
                 onIr={irA}
                 onConfig={abrirConfiguracion}
                 onToggleFoco={toggleFocusMode}
-                onAbrir={refrescarContadores}
+                onAbrir={refrescarPorResponder}
               />
             }
+            porResponder={<FilaPorResponder onAbrir={() => abrirPorResponder(null)} />}
           />
 
           {seccionAbierta ? (
             <MarcoSeccion titulo={itemDe(activo).titulo} onVolver={() => irA('chats')}>
               {section === 'broadcasts' && <BroadcastSection />}
               {section === 'automations' && <WorkflowList />}
-              {section === 'alerts' && <CrmAlertsPanel onNavigateToInbox={() => irA('chats')} />}
-              {section === 'casos' && <CrmCasesPanel onNavigateToInbox={() => irA('chats')} />}
+              {section === 'responder' && <PorResponder convInicial={convPorResponder} onVerChat={verChatDesdePendiente} />}
               {section === 'quick-replies' && <QuickReplySection />}
             </MarcoSeccion>
           ) : (
@@ -266,7 +275,7 @@ function MarcoMensajeria() {
         </div>
       </div>
 
-      <DeepLinkHandler onSection={setSection} />
+      <DeepLinkHandler onSection={setSection} onPorResponder={abrirPorResponder} />
 
       {/* ═══ Dialogs & Sheets ═══ */}
       <SettingsSheet open={showSettings} onOpenChange={setShowSettings} />
@@ -281,8 +290,35 @@ function MarcoMensajeria() {
   )
 }
 
-function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) {
+function DeepLinkHandler({
+  onSection,
+  onPorResponder,
+}: {
+  onSection: (s: CrmSection) => void
+  /** ?responder=1 (y &conv=): lo que abre tocar un aviso push con Mensajería cerrada. */
+  onPorResponder: (conv: string | null) => void
+}) {
   const searchParams = useSearchParams()
+  const responderAtendido = useRef('')
+
+  // El enlace de un aviso push: «Por responder», con esa tarjeta arriba. Se
+  // consume con el replaceState de la ventana (como ?clientId: nadie lo lee en
+  // el servidor y un router.replace en vuelo lo descartaría la capa que se abre).
+  useEffect(() => {
+    if (searchParams.get('responder') !== '1') return
+    const conv = searchParams.get('conv')
+    const clave = `responder|${conv ?? ''}`
+    if (responderAtendido.current === clave) return
+    responderAtendido.current = clave
+    onPorResponder(conv && /^[0-9a-f-]{36}$/i.test(conv) ? conv : null)
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('responder')
+    params.delete('conv')
+    const qs = params.toString()
+    window.history.replaceState(null, '', `/dashboard/mensajeria${qs ? `?${qs}` : ''}${window.location.hash}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   const { handleStartConversation, activeConv, setConversations, tags } = useMensajeria()
   const [pendingTag, setPendingTag] = useState<{ clientId: string; tagId: string } | null>(null)
   // Cada enlace se atiende una sola vez: si el ?clientId vuelve a aparecer

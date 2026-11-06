@@ -22,30 +22,32 @@ import { CLASE_ITEM_MENU_IOS, CLASE_MENU_IOS } from './lista-ios'
 import { ITEMS_SECCIONES, numeroCorto, type DestinoMensajeria } from './secciones'
 
 // Las secciones que en el celular se abren desde el menú, en este orden.
-const DEL_MENU: readonly DestinoMensajeria[] = ['broadcasts', 'automations', 'alerts', 'casos', 'quick-replies']
+const DEL_MENU: readonly DestinoMensajeria[] = ['responder', 'broadcasts', 'automations', 'quick-replies']
 
 export function MenuSecciones({
-  alertCount,
-  casosCount,
+  responderCount,
+  responderUrgente,
   isFocusMode,
   onIr,
   onConfig,
   onToggleFoco,
   onAbrir,
 }: {
-  alertCount: number
-  casosCount: number
+  /** Lo que se puede contestar ya en «Por responder». */
+  responderCount: number
+  /** Hay una reseña baja: el número va en rojo. */
+  responderUrgente: boolean
   isFocusMode: boolean
   onIr: (destino: DestinoMensajeria) => void
   onConfig: () => void
   onToggleFoco: () => void
-  /** Al abrirse: para volver a contar alertas y casos. */
+  /** Al abrirse: para volver a leer «Por responder». */
   onAbrir?: () => void
 }) {
   // El contenido se dibuja recién al abrir, con la página ya hidratada: acá
   // useEsCelular ya dice la verdad.
   const esCelular = useEsCelular()
-  const pendientes = alertCount > 0 || casosCount > 0
+  const pendientes = responderCount > 0
 
   return (
     <DropdownMenu onOpenChange={(abierto) => { if (abierto) onAbrir?.() }}>
@@ -54,7 +56,7 @@ export function MenuSecciones({
             lo deja ocupar lo mismo en la barra de la lista. */}
         <button
           type="button"
-          aria-label={pendientes ? 'Más opciones (hay alertas o casos pendientes)' : 'Más opciones'}
+          aria-label={pendientes ? `Más opciones (${responderCount} por responder)` : 'Más opciones'}
           className="group/mas relative -m-1 flex size-11 shrink-0 items-center justify-center rounded-full outline-none [-webkit-tap-highlight-color:transparent] lg:m-0 lg:size-8"
         >
           <span
@@ -66,11 +68,11 @@ export function MenuSecciones({
           >
             <Ellipsis aria-hidden className="size-5 lg:size-[18px]" strokeWidth={2.25} />
           </span>
-          {/* En el celular las alertas y los casos viven adentro de este menú:
-              el puntito avisa que hay algo esperando. En la compu ya se ven en
-              la columna de secciones. */}
+          {/* En el celular «Por responder» vive adentro de este menú (y en la
+              fila de arriba de la lista): el puntito avisa que hay algo
+              esperando. En la compu ya se ve en la columna de secciones. */}
           {pendientes && (
-            <span aria-hidden className="absolute right-0.5 top-0.5 size-2.5 rounded-full bg-red-500 ring-2 ring-[var(--wa-bg)] lg:hidden" />
+            <span aria-hidden className={cn('absolute right-0.5 top-0.5 size-2.5 rounded-full ring-2 ring-[var(--wa-bg)] lg:hidden', responderUrgente ? 'bg-red-500' : 'bg-[var(--wa-accent)]')} />
           )}
         </button>
       </DropdownMenuTrigger>
@@ -80,7 +82,7 @@ export function MenuSecciones({
           DEL_MENU.map((destino) => {
             const item = ITEMS_SECCIONES.find((i) => i.destino === destino)
             if (!item) return null
-            const n = destino === 'alerts' ? alertCount : destino === 'casos' ? casosCount : 0
+            const n = destino === 'responder' ? responderCount : 0
             return (
               <ItemMenu key={destino} icono={item.icono} onSelect={() => onIr(destino)}>
                 {item.etiqueta}
@@ -89,15 +91,15 @@ export function MenuSecciones({
                     <span
                       aria-hidden
                       className={cn(
-                        'ml-auto flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1.5 text-[13px] font-semibold leading-none tabular-nums text-white',
-                        // Los rojos y naranjas de siempre, un tono más oscuros: el número blanco
-                        // queda arriba de 4,5:1 (con bg-red-500 daba 3,8).
-                        destino === 'alerts' ? 'bg-[#d32f2f]' : 'bg-[#c2410c]',
+                        'ml-auto flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1.5 text-[13px] font-semibold leading-none tabular-nums',
+                        // El rojo de siempre un tono más oscuro: el número blanco queda
+                        // arriba de 4,5:1 (con bg-red-500 daba 3,8).
+                        responderUrgente ? 'bg-[#d32f2f] text-white' : 'bg-[var(--wa-accent)] text-[var(--wa-on-accent)]',
                       )}
                     >
                       {numeroCorto(n)}
                     </span>
-                    <span className="sr-only">: {n} {destino === 'alerts' ? 'sin leer' : 'pendientes'}</span>
+                    <span className="sr-only">: {n} por responder</span>
                   </>
                 )}
               </ItemMenu>

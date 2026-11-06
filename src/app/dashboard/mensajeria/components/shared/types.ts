@@ -69,4 +69,6 @@ export interface MensajeriaProps {
 
 export type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'
 export type PlatformFilter = 'all' | 'whatsapp' | 'instagram'
-export type CrmSection = 'inbox' | 'broadcasts' | 'automations' | 'quick-replies' | 'alerts' | 'casos' | 'settings'
+// 'responder' (6/nov/2026) reemplazó a 'alerts' y 'casos': la bandeja de tarjetas
+// «Por responder» (components/responder).
+export type CrmSection = 'inbox' | 'broadcasts' | 'automations' | 'quick-replies' | 'responder' | 'settings'

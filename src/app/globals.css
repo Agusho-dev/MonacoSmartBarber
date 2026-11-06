@@ -577,6 +577,159 @@
   animation: none;
 }
 
+/* ── «Por responder»: el mazo de tarjetas (components/responder) ────────────
+   La de arriba la mueve el dedo (mazo.tsx escribe su transform y --pr-der /
+   --pr-izq); las de atrás asoman abajo, más chicas, y suben a su lugar con
+   --pr-avance (0 en reposo, 1 cuando la de arriba ya se va). Con avance 1, la
+   segunda queda exactamente donde está la primera y la tercera donde la
+   segunda: al cambiar de tarjeta no salta nada. Mientras el dedo arrastra van
+   sin transición (siguen al dedo); al soltar ([data-soltando]) se acomodan. */
+@property --pr-avance {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+.pr-mazo {
+  --pr-avance: 0;
+}
+.pr-carta[data-posicion='1'] {
+  transform: translate3d(0, calc(16px * (1 - var(--pr-avance))), 0) scale(calc(0.94 + 0.06 * var(--pr-avance)));
+  opacity: calc(0.7 + 0.3 * var(--pr-avance));
+  transform-origin: 50% 100%;
+}
+.pr-carta[data-posicion='2'] {
+  transform: translate3d(0, calc(32px - 16px * var(--pr-avance)), 0) scale(calc(0.88 + 0.06 * var(--pr-avance)));
+  opacity: calc(0.38 + 0.32 * var(--pr-avance));
+  transform-origin: 50% 100%;
+}
+.pr-mazo[data-soltando] .pr-carta:not([data-posicion='0']) {
+  transition: transform 320ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 320ms ease-out;
+}
+.pr-carta[data-posicion='0'] {
+  will-change: transform;
+}
+/* Las de atrás son superficies limpias (como las tarjetas apiladas de Wallet):
+   lo de adentro de la segunda aparece mientras sube, con el mismo --pr-avance. */
+.pr-carta:not([data-posicion='0']) .pr-tarjeta {
+  box-shadow: none;
+}
+.pr-carta[data-posicion='1'] .pr-tarjeta > * {
+  opacity: var(--pr-avance);
+}
+.pr-carta[data-posicion='2'] .pr-tarjeta > * {
+  opacity: 0;
+}
+.pr-mazo[data-soltando] .pr-carta[data-posicion='1'] .pr-tarjeta > * {
+  transition: opacity 320ms ease-out;
+}
+.pr-carta[data-posicion='0'] .pr-tarjeta {
+  box-shadow: 0 34px 70px -28px rgba(0, 0, 0, 0.95), 0 12px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* Los sellos: aparecen con el arrastre, inclinados como los de una tarjeta. */
+.pr-sello {
+  position: absolute;
+  top: 22px;
+  z-index: 5;
+  pointer-events: none;
+  padding: 4px 12px 3px;
+  border: 3px solid currentColor;
+  border-radius: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.pr-sello-der {
+  left: 18px;
+  color: #3ddc84;
+  transform: rotate(-12deg) scale(calc(0.8 + 0.2 * var(--pr-der, 0)));
+  opacity: var(--pr-der, 0);
+}
+.pr-sello-izq {
+  right: 18px;
+  color: #e5e5ea;
+  transform: rotate(12deg) scale(calc(0.8 + 0.2 * var(--pr-izq, 0)));
+  opacity: var(--pr-izq, 0);
+}
+/* El tinte de la tarjeta según el lado: verde al mandar, gris al descartar. */
+.pr-carta[data-posicion='0'] .pr-tarjeta::before,
+.pr-carta[data-posicion='0'] .pr-tarjeta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.pr-carta[data-posicion='0'] .pr-tarjeta::before {
+  background: linear-gradient(120deg, rgba(33, 192, 99, 0.24), transparent 60%);
+  opacity: var(--pr-der, 0);
+}
+.pr-carta[data-posicion='0'] .pr-tarjeta::after {
+  background: linear-gradient(240deg, rgba(229, 229, 234, 0.13), transparent 60%);
+  opacity: var(--pr-izq, 0);
+}
+
+/* El borrador mientras Tex escribe: un brillo que recorre el borde y el cursor. */
+.pr-borrador-vivo {
+  background-image: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.07) 45%, transparent 60%);
+  background-size: 220% 100%;
+}
+.pr-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: currentColor;
+}
+.pr-brillo {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.05) 20%, rgba(255, 255, 255, 0.11) 40%, rgba(255, 255, 255, 0.05) 60%);
+  background-size: 300% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes pr-recorre {
+    from { background-position: 120% 0; }
+    to   { background-position: -120% 0; }
+  }
+  @keyframes pr-parpadeo {
+    0%, 45% { opacity: 1; }
+    55%, 100% { opacity: 0; }
+  }
+  @keyframes pr-latido {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.8); opacity: 0.35; }
+  }
+  @keyframes pr-entra {
+    from { opacity: 0; transform: translate3d(0, 48px, 0) scale(0.85); }
+  }
+  .pr-borrador-vivo { animation: pr-recorre 1.6s linear infinite; }
+  .pr-cursor { animation: pr-parpadeo 0.9s steps(1) infinite; }
+  .pr-brillo { animation: pr-recorre 1.8s ease-in-out infinite; }
+  .pr-latido { animation: pr-latido 1.6s ease-in-out infinite; }
+  .pr-carta[data-posicion='2'] { animation: pr-entra 360ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+
+  /* La cuenta regresiva del «Deshacer»: el anillo se vacía en 5 s (lo fija el componente). */
+  @keyframes pr-cuenta {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: 69.12; }
+  }
+  .pr-cuenta { animation: pr-cuenta var(--pr-cuenta-ms, 5000ms) linear forwards; }
+
+  /* El festejo de «Todo respondido»: papelitos que caen (sin emojis). */
+  @keyframes pr-papelito {
+    0%   { transform: translate3d(0, -12vh, 0) rotate(0deg); opacity: 1; }
+    100% { transform: translate3d(var(--pr-x, 0), 78vh, 0) rotate(var(--pr-giro, 540deg)); opacity: 0; }
+  }
+  .pr-papelito { animation: pr-papelito var(--pr-dura, 2.4s) cubic-bezier(0.2, 0.6, 0.4, 1) var(--pr-demora, 0s) forwards; }
+}
+
 /* ── Auth/Onboarding premium animations ────────────────────────────────────── */
 
 @keyframes float-slow {

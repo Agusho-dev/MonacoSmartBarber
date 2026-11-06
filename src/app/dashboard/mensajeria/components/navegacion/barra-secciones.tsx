@@ -22,17 +22,17 @@ import {
 type TonoContador = 'gris' | 'verde' | 'rojo' | 'naranja'
 
 // Chats lleva el globo verde de WhatsApp en el riel y el número gris en la
-// lista (como en la Mac); alertas y casos, pastillas de color en los dos.
-const TONO_RIEL: Partial<Record<DestinoMensajeria, TonoContador>> = {
-  chats: 'verde',
-  alerts: 'rojo',
-  casos: 'naranja',
+// lista (como en la Mac); «Por responder», pastilla de color en los dos: roja
+// si entre lo que espera hay una reseña baja, verde si son consultas.
+function tonoRiel(destino: DestinoMensajeria, c: ContadoresSecciones): TonoContador | undefined {
+  if (destino === 'chats') return 'verde'
+  if (destino === 'responder') return c.responderUrgente ? 'rojo' : 'verde'
+  return undefined
 }
-const TONO_LISTA: Partial<Record<DestinoMensajeria, TonoContador>> = {
-  chats: 'gris',
-  alerts: 'rojo',
-  casos: 'naranja',
-  programados: 'gris',
+function tonoLista(destino: DestinoMensajeria, c: ContadoresSecciones): TonoContador | undefined {
+  if (destino === 'chats' || destino === 'programados') return 'gris'
+  if (destino === 'responder') return c.responderUrgente ? 'rojo' : 'verde'
+  return undefined
 }
 
 const CLASE_GLOBO: Record<Exclude<TonoContador, 'gris'>, string> = {
@@ -72,8 +72,8 @@ export function BarraSecciones({
               corta={item.corta}
               actual={item.destino === activo}
               contador={contadorDe(item.destino, contadores)}
-              tonoRiel={TONO_RIEL[item.destino]}
-              tonoLista={TONO_LISTA[item.destino]}
+              tonoRiel={tonoRiel(item.destino, contadores)}
+              tonoLista={tonoLista(item.destino, contadores)}
               onClick={() => onIr(item.destino)}
             />
           </li>
