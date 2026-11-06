@@ -1,12 +1,13 @@
 -- =============================================================================
--- 237b_cron_avisos_mensajeria.sql — NO APLICADA (gate: el deploy)
+-- 237b_cron_avisos_mensajeria.sql — APLICADA en prod el 6/nov/2026, después del
+-- deploy b46562e (curl a la ruta: 200 {"ok":true,"orgs":0,…}). Job 29.
 --
 -- Programa los avisos push de «Por responder» (mig 237): cada minuto pg_cron
 -- le pega a /api/cron/avisos-mensajeria, que avisa de las reseñas bajas y de
 -- las consultas sin contestar a los dispositivos que activaron los avisos.
 -- Sin dispositivos suscriptos la ruta contesta enseguida y no hace nada.
 --
--- GATE: aplicarla DESPUÉS del deploy que trae /api/cron/avisos-mensajeria.
+-- GATE (cumplido): aplicarla DESPUÉS del deploy que trae /api/cron/avisos-mensajeria.
 -- Antes, verificar que la ruta existe en producción (un 404 acá es el incidente
 -- del Known Risk #26):
 --
