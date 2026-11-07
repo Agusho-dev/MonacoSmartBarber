@@ -80,6 +80,34 @@ export const Mazo = forwardRef<MazoRef, {
   const saliendo = useRef(false)
   const pasoUmbral = useRef(false)
   const idArriba = ids[0] ?? null
+  // La salida que ya avisó (onSoltada) con la tarjeta que puede seguir montada:
+  // la animación de salida queda puesta (fill: forwards) y la dejaría invisible
+  // donde quien llama la ponga. Pasaba con «Después» y tres tarjetas o menos: la
+  // postergada seguía en el mazo, transparente y corrida, y al volver arriba la
+  // pantalla quedaba negra (7/nov/2026, en el iPhone del dueño).
+  const salida = useRef<{ el: HTMLElement; anim: Animation } | null>(null)
+
+  const terminarSalida = useCallback(() => {
+    const s = salida.current
+    if (!s) return
+    salida.current = null
+    s.anim.cancel()
+    s.el.style.transform = ''
+    s.el.style.removeProperty('--pr-der')
+    s.el.style.removeProperty('--pr-izq')
+    const r = raiz.current
+    if (r) {
+      r.style.setProperty('--pr-avance', '0')
+      delete r.dataset.soltando
+    }
+    saliendo.current = false
+  }, [])
+
+  // Después de cada dibujo (y antes de pintar): si quedó una salida colgada, se
+  // limpia. La tarjeta ya está en su lugar nuevo (o desmontada).
+  useLayoutEffect(() => {
+    terminarSalida()
+  })
 
   // Al cambiar la de arriba, todo vuelve a reposo (la de atrás ya está en su lugar).
   useLayoutEffect(() => {
@@ -170,9 +198,20 @@ export const Mazo = forwardRef<MazoRef, {
       [{ transform: desde, opacity: 1 }, { transform: hasta, opacity: dir === 'abajo' ? 0 : 1 }],
       { duration: dir === 'abajo' ? 240 : 320, easing: 'cubic-bezier(0.32, 0.6, 0.4, 1)', fill: 'forwards' },
     )
-    anim.onfinish = terminar
-    anim.oncancel = terminar
-  }, [ids, onSoltada, puedeSoltar, reposo, sacudir])
+    let avisada = false
+    const alTerminar = () => {
+      if (avisada) return
+      avisada = true
+      // Se anota ANTES de avisar: el dibujo que provoca onSoltada la limpia.
+      const esta = { el, anim }
+      salida.current = esta
+      terminar()
+      // Por si quien llama no vuelve a dibujar el mazo.
+      window.setTimeout(() => { if (salida.current === esta) terminarSalida() }, 250)
+    }
+    anim.onfinish = alTerminar
+    anim.oncancel = alTerminar
+  }, [ids, onSoltada, puedeSoltar, reposo, sacudir, terminarSalida])
 
   useImperativeHandle(ref, () => ({ lanzar, sacudir }), [lanzar, sacudir])
 

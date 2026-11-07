@@ -123,7 +123,10 @@ export function PorResponder({
   const [convAntes, setConvAntes] = useState(convInicial)
   if (convInicial !== convAntes) {
     setConvAntes(convInicial)
-    if (convInicial) setFijada(convInicial)
+    if (convInicial) {
+      setFijada(convInicial)
+      setPostergadas((ps) => ps.filter((id) => id !== convInicial))
+    }
   }
   // Una vencida pedida desde un aviso: se abre su pila (una vez por aviso, con los datos ya leídos).
   const [pilaElegidaPara, setPilaElegidaPara] = useState<string | null>(null)
@@ -138,6 +141,19 @@ export function PorResponder({
   const arriba = ordenadas[0] ?? null
   const ids = useMemo(() => ordenadas.slice(0, 3).map((p) => p.id), [ordenadas])
   const porId = useMemo(() => new Map([...deResponder, ...pilas.vencidas].map((p) => [p.id, p])), [deResponder, pilas.vencidas])
+
+  // Pasó todas con «Después»: la pasada terminó (antes volvían en ronda, y con
+  // pocas tarjetas la que volvía arriba quedaba invisible: mazo.tsx).
+  const todasParaDespues = useMemo(() => {
+    if (ordenadas.length === 0) return false
+    const atras = new Set(postergadas)
+    return ordenadas.every((p) => atras.has(p.id))
+  }, [ordenadas, postergadas])
+  /** Una tarjeta pedida (un aviso, «Lo que sigue»): arriba, aunque estuviera para después. */
+  const traerArriba = (id: string) => {
+    setPostergadas((ps) => ps.filter((x) => x !== id))
+    setFijada(id)
+  }
 
   // Las rayitas: lo atendido de esta pila (que no volvió a aparecer) más lo que queda.
   const visibles = useMemo(() => new Set(ordenadas.map((p) => p.id)), [ordenadas])
@@ -468,6 +484,20 @@ export function PorResponder({
               <Escena barra={barraEscena} pose="ayuda" titulo="No pude leer lo que hay por responder" texto={error ?? 'Revisá la conexión y probá de nuevo.'}>
                 <BotonEscena onClick={refrescar}><RefreshCw aria-hidden className="size-4" /> Reintentar</BotonEscena>
               </Escena>
+            ) : todasParaDespues ? (
+              <Escena
+                barra={barraEscena}
+                pose="analiza"
+                titulo={ordenadas.length === 1 ? 'Quedó 1 para después' : `Quedaron ${ordenadas.length} para después`}
+                texto={ordenadas.length === 1
+                  ? 'Siguen acá hasta que la respondas o la marques como lista.'
+                  : 'Las pasaste todas. Siguen acá hasta que las respondas o las marques como listas.'}
+              >
+                <BotonEscena principal onClick={() => { setPostergadas([]); setFijada(null) }}>
+                  {ordenadas.length === 1 ? 'Verla de nuevo' : 'Verlas de nuevo'}
+                </BotonEscena>
+                {volver && <BotonEscena onClick={volver}>Volver a los chats</BotonEscena>}
+              </Escena>
             ) : arriba ? (
               <Mazo
                 ref={mazo}
@@ -542,7 +572,7 @@ export function PorResponder({
         <ColaLateral
           lista={ordenadas.slice(1, 9)}
           ahora={ahora}
-          onElegir={(id) => setFijada(id)}
+          onElegir={traerArriba}
           cierres={pila === 'responder' ? pilas.cierres.length : 0}
           onCierres={() => { void marcarCierresListos() }}
         />
