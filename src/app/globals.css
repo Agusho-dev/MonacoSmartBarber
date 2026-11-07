@@ -1100,8 +1100,9 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
    Asesoría sin costo (mig 217) — panel del barbero.
    Fucsia = asesoría en todo el panel (violeta turnos, ámbar descansos y
    demoras, verde corte en curso y primer corte, azul/amarillo Menor espera).
-   Lo usan queue-panel.tsx (.asesoria-recien) y asesoria-inicio-dialog.tsx
-   (.asesoria-respira). Sin animación con prefers-reduced-motion.
+   Lo usan queue-panel.tsx (.asesoria-recien) y la ficha de asesoría
+   (.asesoria-respira, ficha-asesoria/ficha-asesoria-hoja.tsx). Sin animación
+   con prefers-reduced-motion.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Anillo de "recién llegada" en la tarjeta de la fila: lo pone el aviso de
@@ -1124,7 +1125,7 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   100% { outline-offset: 2px; outline-color: oklch(66.7% 0.295 322.15 / 0.7); }
 }
 
-/* Ícono del pop-up de asesoría: "respira" (escala 1 → 1.04) con un halo blanco
+/* Ícono del aviso «pidió asesoría» de la ficha: "respira" (escala 1 → 1.04) con un halo blanco
    que se abre y se desvanece, cada 2,4 s. El halo nace con radio 0 debajo del
    ícono, así que el reinicio del ciclo no se ve. */
 @media (prefers-reduced-motion: no-preference) {
@@ -1136,6 +1137,127 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   0%   { transform: scale(1);    box-shadow: 0 0 0 0 oklch(1 0 0 / 0.45); }
   50%  { transform: scale(1.04); }
   100% { transform: scale(1);    box-shadow: 0 0 0 18px oklch(1 0 0 / 0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Ficha de asesoría (mig 238) — src/components/barber/ficha-asesoria/*.
+   La ficha sale de la ranura del reloj, debajo de la hora (que nunca se tapa),
+   como una ficha que la máquina imprime; cada respuesta perfora su agujero y,
+   completa, le cae el sello. Todo quieto con prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* El contenedor recorta sólo por arriba (como .ranura): la ficha nace de
+   adentro de la boca grafito y las sombras de los costados quedan enteras. */
+.ficha-hoja {
+  padding-top: 0.4375rem;
+  clip-path: inset(0 -3rem -6rem -3rem);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ficha-hoja[data-state='open'] > .ficha-carton {
+    animation: ficha-sale 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Radix espera la animación del Content para desmontarlo: ésta no se ve, sólo
+     marca el tiempo; la que se ve es la de la ficha volviendo a la ranura. */
+  .ficha-hoja[data-state='closed'] {
+    animation: ficha-quieta 220ms linear both;
+  }
+  .ficha-hoja[data-state='closed'] > .ficha-carton {
+    animation: ficha-vuelve 220ms cubic-bezier(0.55, 0, 1, 0.45) both;
+  }
+  /* El aviso «pidió asesoría» llega cuando la ficha ya salió. */
+  .ficha-aviso-inicio {
+    animation: ficha-aviso 380ms 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Lo que se elige asiente (un toque, sin agrandar la grilla). */
+  .ficha-elegida {
+    animation: ficha-elige 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* El agujero que se perfora salta y suelta un anillo fucsia. */
+  .ficha-perforado {
+    animation: ficha-perfora 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Ficha completa: los agujeros hacen una ola (va después de .ficha-perforado:
+     dos `animation` sobre el mismo elemento se pisan y tiene que ganar ésta). */
+  .ficha-ola {
+    animation: ficha-ola 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .ficha-sello-golpe {
+    animation: ficha-sello 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Zonas craneales prendidas: un halo que respira despacio. */
+  .ficha-zona-halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: ficha-halo 2.2s ease-out infinite;
+  }
+  .ficha-trazo {
+    animation: ficha-aviso 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* El ícono de «Completá su ficha» en la tarjeta del corte. */
+  .asesoria-respira-suave {
+    animation: asesoria-respira-suave 2.4s ease-out infinite;
+  }
+}
+@keyframes ficha-sale {
+  from { transform: translateY(-102%); }
+  to   { transform: none; }
+}
+@keyframes ficha-vuelve {
+  from { transform: none; }
+  to   { transform: translateY(-102%); }
+}
+@keyframes ficha-quieta {
+  from { opacity: 1; }
+  to   { opacity: 1; }
+}
+@keyframes ficha-aviso {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ficha-elige {
+  0%   { transform: scale(0.965); }
+  60%  { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+@keyframes ficha-perfora {
+  0%   { transform: scale(1.5);  box-shadow: inset 0 2px 3px oklch(0 0 0 / 0.35), 0 0 0 0 oklch(0.59 0.26 323 / 0.55); }
+  55%  { transform: scale(0.9); }
+  100% { transform: scale(1);    box-shadow: inset 0 2px 3px oklch(0 0 0 / 0.35), 0 0 0 10px oklch(0.59 0.26 323 / 0); }
+}
+@keyframes ficha-ola {
+  0%   { transform: none; }
+  40%  { transform: translateY(-6px) scale(1.15); }
+  100% { transform: none; }
+}
+@keyframes ficha-sello {
+  0%   { opacity: 0; transform: scale(1.9); }
+  55%  { opacity: 1; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes ficha-halo {
+  0%   { transform: scale(0.55); opacity: 0.55; }
+  100% { transform: scale(1.4);  opacity: 0; }
+}
+@keyframes asesoria-respira-suave {
+  0%   { box-shadow: 0 0 0 0 oklch(0.59 0.26 323 / 0.4); }
+  100% { box-shadow: 0 0 0 14px oklch(0.59 0.26 323 / 0); }
+}
+
+/* Los números del fade son peines de máquina: los dientes arriba, la cifra
+   abajo. Los dientes toman el color del texto (blanco sobre el grafito). */
+.ficha-peine::before {
+  content: '';
+  position: absolute;
+  top: 0.625rem;
+  left: 18%;
+  right: 18%;
+  height: 1.25rem;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px);
+  opacity: 0.28;
+}
+.ficha-peine[aria-pressed='true']::before {
+  opacity: 0.85;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

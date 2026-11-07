@@ -15,6 +15,8 @@ import { invalidarUltimosCortes } from '@/hooks/use-ultimos-cortes'
 import { primerNombre } from '@/lib/fotos-corte/textos'
 import { vibrate } from '@/lib/barber-feedback'
 import { FotosDelCobro } from './fotos-del-cobro'
+import { useFichaAsesoriaStore } from '@/stores/ficha-asesoria-store'
+import { enumerar, productosRecomendados } from '@/lib/asesoria/ficha'
 import { AsesoriaBadge } from './asesoria-badge'
 import type { QueueEntry, Service, PaymentMethod } from '@/lib/types/database'
 import { useProductosDeSucursal } from '@/hooks/use-productos-de-sucursal'
@@ -63,6 +65,7 @@ import {
   Wallet,
   RefreshCw,
   MessageCircleQuestionMark,
+  NotebookPen,
   Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -256,6 +259,14 @@ export function CompleteServiceDialog({
   // confirmación (mismo motivo) y si el cierre está en vuelo.
   const [confirmarSoloAsesoriaDe, setConfirmarSoloAsesoriaDe] = useState<string | null>(null)
   const [cerrandoAsesoria, setCerrandoAsesoria] = useState(false)
+  // Ficha de asesoría (mig 238): en el panel, el cobro de una asesoría pide la
+  // foto del corte terminado. Si no la tiene, «Continuar al cobro» avisa una
+  // vez (`avisoFotoDe`) y «Seguir sin foto» (`fotoOmitidaDe`) deja seguir:
+  // la foto se pide, no traba un cobro de un viernes a las 19.
+  const [avisoFotoDe, setAvisoFotoDe] = useState<string | null>(null)
+  const [fotoOmitidaDe, setFotoOmitidaDe] = useState<string | null>(null)
+  const scrollPaso1Ref = useRef<HTMLDivElement>(null)
+  const fotosRef = useRef<HTMLDivElement>(null)
   // Cuántas fotos de ESTE cobro se descartarían al cerrarlo como solo asesoría
   // (store global; las que fallaron nunca se guardaron). El selector devuelve un
   // número: el diálogo no se vuelve a dibujar con cada 5 % de progreso de subida.
@@ -1067,6 +1078,46 @@ export function CompleteServiceDialog({
   // Con un cobro o un cierre en vuelo no se toca nada ni se sale del diálogo.
   const ocupado = loading || cerrandoAsesoria
 
+  // ── Ficha de asesoría (mig 238) ───────────────────────────────────────────
+  // Lo que el panel ya tiene de la ficha (la cargó la tarjeta del corte): sin
+  // pedir nada. En el dashboard no hay, y no se muestra nada.
+  const clienteIdCobro = entry?.client?.id ?? entry?.client_id ?? null
+  const fichaDelCliente = useFichaAsesoriaStore((s) => (clienteIdCobro ? s.fichas[clienteIdCobro] : undefined))
+  const recomendados = productosRecomendados(fichaDelCliente?.carga.tipo === 'lista' ? fichaDelCliente.datos : null)
+  const fichaEnEstaVisita = !!entry && !!fichaDelCliente?.entradasTocadas.includes(entry.id)
+  // La foto del corte terminado es parte de la ficha: se pide en el panel a
+  // quien se asesoró (o a quien se le armó la ficha en esta visita).
+  const pideFotoFicha = !!staffIdDelPanel && !!entry && (esAsesoria || fichaEnEstaVisita)
+  const hayFotoDelCorte = fotosADescartar > 0
+  const mostrarAvisoFoto = pideFotoFicha && !!entry && avisoFotoDe === entry.id && !hayFotoDelCorte
+
+  /**
+   * «Continuar al cobro»: con una asesoría sin foto, el primer toque la pide y
+   * el botón pasa a decir «Seguir sin foto»; el segundo sigue (el dedo no tiene
+   * que ir a buscar otro botón).
+   */
+  function continuarAlCobro() {
+    if (faltaServicioAsesoria || !entry) return
+    if (mostrarAvisoFoto) {
+      vibrate(8)
+      setFotoOmitidaDe(entry.id)
+      setAvisoFotoDe(null)
+      setStep(2)
+      return
+    }
+    if (pideFotoFicha && !hayFotoDelCorte && fotoOmitidaDe !== entry.id) {
+      setAvisoFotoDe(entry.id)
+      vibrate([20, 60, 20])
+      // A mano y con offsetTop: con la tablet girada 180° los rectángulos de
+      // pantalla van al revés (ver appointment-strip).
+      const cont = scrollPaso1Ref.current
+      const fotos = fotosRef.current
+      if (cont && fotos) cont.scrollTo({ top: Math.max(0, fotos.offsetTop - 16), behavior: 'smooth' })
+      return
+    }
+    setStep(2)
+  }
+
   function elegirPrincipal(id: string) {
     vibrate(8)
     if (selectedService === id) {
@@ -1222,7 +1273,11 @@ export function CompleteServiceDialog({
         </DialogHeader>
 
         {/* key: cada paso arranca arriba de todo, no donde quedó el scroll del otro. */}
-        <div key={step} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 sm:px-7">
+        <div
+          key={step}
+          ref={step === 1 ? scrollPaso1Ref : undefined}
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 sm:px-7"
+        >
           {step === 1 ? (
             <div className="space-y-8">
               {/* Servicio principal. Se dibuja SIEMPRE: antes vivía adentro de
@@ -1464,6 +1519,17 @@ export function CompleteServiceDialog({
                 <TituloCobro id="cobro-productos" opcional>
                   Productos
                 </TituloCobro>
+                {recomendados.length > 0 && (
+                  <p className="mb-2.5 flex items-start gap-2 rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/[0.06] px-3.5 py-2.5 text-[0.9375rem] leading-snug">
+                    <NotebookPen className={cn('mt-0.5 size-4 shrink-0', tono === 'claro' ? 'text-fuchsia-700' : 'text-fuchsia-300')} aria-hidden />
+                    <span>
+                      En la asesoría le recomendaste{' '}
+                      <span className="font-semibold">{enumerar(recomendados.map((r) => r.toLowerCase()))}</span>.
+                      {/* «Sumalo acá» sólo si hay algo que sumar. */}
+                      {productos.estado.tipo === 'listo' && productos.estado.productos.length > 0 && ' Si se lo lleva, sumalo acá.'}
+                    </span>
+                  </p>
+                )}
                 <SelectorProductos
                   variante="compacta"
                   estado={productos.estado}
@@ -1477,7 +1543,44 @@ export function CompleteServiceDialog({
               {/* Fotos del corte: se suben solas apenas se eligen y el cobro no
                   las espera (key: cada cobro tiene su propio estado de QR). */}
               {entry && (
-                <FotosDelCobro key={entry.id} entradaId={entry.id} abierto={!!entry} deshabilitado={ocupado} />
+                <div
+                  ref={fotosRef}
+                  className={cn(
+                    pideFotoFicha && '-mx-1 rounded-[1.5rem] border-2 p-4',
+                    pideFotoFicha && (mostrarAvisoFoto ? 'border-fuchsia-500/70 bg-fuchsia-500/[0.06]' : 'border-fuchsia-500/30'),
+                  )}
+                >
+                  <FotosDelCobro
+                    key={entry.id}
+                    entradaId={entry.id}
+                    abierto={!!entry}
+                    deshabilitado={ocupado}
+                    encabezado={
+                      pideFotoFicha ? (
+                        <TituloCobro
+                          detalle={
+                            <Sello tono="fucsia" className="bg-transparent">
+                              <NotebookPen aria-hidden />
+                              Para su ficha
+                            </Sello>
+                          }
+                        >
+                          Foto del corte terminado
+                        </TituloCobro>
+                      ) : undefined
+                    }
+                  />
+                  {mostrarAvisoFoto && (
+                    <div role="alert" className="mt-3 rounded-2xl bg-card p-3.5 shadow-sm ring-1 ring-fuchsia-500/30">
+                      <p className="text-[0.9375rem] font-semibold leading-snug">
+                        Falta la foto del corte terminado de {nombreCliente}.
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        Queda en su ficha de asesoría para la próxima vez. Sacala con tu celular, o tocá «Seguir sin foto» abajo.
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
 
               <section aria-labelledby="cobro-notas">
@@ -1914,11 +2017,9 @@ export function CompleteServiceDialog({
                   size="lg"
                   disabled={ocupado || faltaServicioAsesoria}
                   aria-describedby={faltaServicioAsesoria ? 'cobro-falta-servicio' : undefined}
-                  onClick={() => {
-                    if (!faltaServicioAsesoria) setStep(2)
-                  }}
+                  onClick={continuarAlCobro}
                 >
-                  Continuar al cobro
+                  {mostrarAvisoFoto ? 'Seguir sin foto' : 'Continuar al cobro'}
                   <ArrowRight />
                 </Button>
               </div>

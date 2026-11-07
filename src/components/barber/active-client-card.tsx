@@ -14,6 +14,7 @@ import { AsesoriaBadge } from './asesoria-badge'
 import { ReglaMinutos } from './fila/regla-minutos'
 import { MinutosEnVivo } from './fila/minutos-en-vivo'
 import { Sello } from './fila/sello'
+import { FichaEnLaSilla } from './ficha-asesoria/receta-ficha'
 
 /**
  * Cortes que pide la tarjeta del cliente actual. Lo exporta para que el pop-up
@@ -38,10 +39,11 @@ interface ActiveClientCardProps {
   /** Disabled del botón principal (loading state). */
   actionLoading?: boolean
   /**
-   * El cliente pidió asesoría (mig 217): tocar el sello reabre el pop-up en
-   * modo consulta. Sin handler el sello se muestra igual, pero no es botón.
+   * Abre la ficha de asesoría del cliente (mig 238): la receta de la tarjeta,
+   * el sello «Asesoría» y la invitación a completarla. Sin handler el sello se
+   * muestra igual, pero no es botón, y la ficha no se dibuja.
    */
-  onVerAsesoria?: () => void
+  onAbrirFicha?: () => void
 }
 
 /** Tokens CSS del semáforo por etapa (definidos en globals.css).
@@ -72,7 +74,7 @@ export function ActiveClientCard({
   entry,
   onComplete,
   actionLoading,
-  onVerAsesoria,
+  onAbrirFicha,
 }: ActiveClientCardProps) {
   const handleStageChange = useCallback((next: TimerStage) => {
     // Sólo haptics silenciosos durante el corte: nada de sonido para no
@@ -150,8 +152,8 @@ export function ActiveClientCard({
                   <AsesoriaBadge
                     tono="claro"
                     tamano="md"
-                    onClick={onVerAsesoria}
-                    ariaLabel={`Ver el pedido de asesoría de ${clientName}`}
+                    onClick={onAbrirFicha}
+                    ariaLabel={`Abrir la ficha de asesoría de ${clientName}`}
                     className={SELLO_SOBRE_CRONOMETRO}
                   />
                 )}
@@ -173,10 +175,12 @@ export function ActiveClientCard({
           />
         </div>
 
-        {/* Siempre que haya cliente: observaciones, Instagram y sus últimos
-            cortes con fotos, para repetir lo que se hizo la vez pasada. */}
+        {/* Siempre que haya cliente: su ficha de asesoría (la receta del corte,
+            arriba de todo: es lo que se mira con la máquina en la mano), las
+            observaciones, el Instagram y sus últimos cortes con fotos. */}
         {clienteId && (
-          <div className="mt-5 border-t border-current/15 pt-5">
+          <div className="mt-5 space-y-4 border-t border-current/15 pt-5">
+            {onAbrirFicha && <FichaEnLaSilla entrada={entry} onAbrir={onAbrirFicha} />}
             <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
           </div>
         )}

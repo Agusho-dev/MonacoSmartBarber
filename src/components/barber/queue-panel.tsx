@@ -90,7 +90,8 @@ import { DirectSaleDialog } from './direct-sale-dialog'
 import { ClientProfileSheet } from './client-profile-sheet'
 import { ActiveClientCard, ActiveBreakCard } from './active-client-card'
 import { NextClientAlert } from './next-client-alert'
-import { AsesoriaInicioDialog, type ModoAsesoriaDialog } from './asesoria-inicio-dialog'
+import { FichaAsesoriaHoja, type ModoFicha } from './ficha-asesoria/ficha-asesoria-hoja'
+import { useFichasDeLaFila } from '@/hooks/use-ficha-asesoria'
 import { mostrarAvisosAsesoria } from './asesoria-aviso'
 import { playAsesoriaChime, playBeep, primeAudioContext, vibrate } from '@/lib/barber-feedback'
 import {
@@ -143,7 +144,16 @@ interface QueuePanelProps {
    * igual que la app y el dashboard; `tier_code` queda cargado en el estado.
    */
   loyaltyEnabled?: boolean
+  /**
+   * `branches.asesoria_habilitada` al abrir el panel. Prende la ficha de
+   * asesoría (mig 238); después la actualiza `fetchBranchAssignmentData` en
+   * cada evento de la fila, así que prenderla no obliga a recargar las tablets.
+   */
+  asesoriaHabilitada?: boolean
 }
+
+/** Sin la ficha prendida, la fila no pregunta por las fichas de nadie. */
+const SIN_CLIENTES: readonly string[] = []
 
 interface BreakRequestRow {
   id: string
@@ -247,8 +257,15 @@ export function QueuePanel({
   timezone,
   bufferMinutes,
   loyaltyEnabled = true,
+  asesoriaHabilitada = false,
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
+  // Ficha de asesoría prendida en esta sucursal (mig 238): el valor al abrir y,
+  // después, el que trae cada lectura de los datos de asignación (null = todavía
+  // ninguna). Apagada, la ficha sólo se abre para quien YA pidió asesoría: un
+  // pedido hecho se respeta, como en el kiosko.
+  const [asesoriaLeida, setAsesoriaLeida] = useState<boolean | null>(null)
+  const fichaHabilitada = asesoriaLeida ?? asesoriaHabilitada
   // true desde la primera lectura EXITOSA de la fila. `loading` no sirve para
   // esto: se apaga aunque la lectura falle, y el aviso de asesoría tiene que
   // sembrar lo visto con datos reales (si sembrara con la fila vacía de un
@@ -285,6 +302,9 @@ export function QueuePanel({
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [profileClient, setProfileClient] = useState<Client | null>(null)
+  // La entrada de la fila desde la que se abrió la ficha del cliente: la ficha
+  // de asesoría se guarda con esa visita.
+  const [profileEntradaId, setProfileEntradaId] = useState<string | null>(null)
   // Break request state
   const [breakDialogOpen, setBreakDialogOpen] = useState(false)
   const [selectedBreakConfig, setSelectedBreakConfig] = useState('')
@@ -414,6 +434,7 @@ export function QueuePanel({
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
+    if (typeof data.asesoriaHabilitada === 'boolean') setAsesoriaLeida(data.asesoriaHabilitada)
     // Hora del fichaje de entrada vigente (criterio 0b del hint de Menor espera
     // por WhatsApp). Sale de esta action —y no de la consulta de fichajes de
     // `fetchBarbersAndSchedules`— a propósito: esa corre al abrir el panel y cada
@@ -526,6 +547,7 @@ export function QueuePanel({
       setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
       setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
       setLastClockInAt(assignmentData.latestClockInAt ?? {})
+      if (typeof assignmentData.asesoriaHabilitada === 'boolean') setAsesoriaLeida(assignmentData.asesoriaHabilitada)
     }
     if (barbersRes.data) setBarberosLeidos(true)
   }, [supabase, session.branch_id, session.staff_id, session.organization_id])
@@ -722,6 +744,15 @@ export function QueuePanel({
 
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  // Quién de la fila tiene ficha de asesoría (mig 238): el sello «Ficha» y la
+  // receta del que sigue. Se pregunta una vez por conjunto de clientes, no en
+  // cada evento de Realtime (ver useFichasDeLaFila).
+  const idsClientesEnFila = useMemo(
+    () => entries.filter((e) => !e.is_break && e.client_id).map((e) => e.client_id as string),
+    [entries],
+  )
+  const fichasDeLaFila = useFichasDeLaFila(session.branch_id, fichaHabilitada ? idsClientesEnFila : SIN_CLIENTES)
 
   // Un turno cuyo cliente YA está en la fila no deja al barbero frenado: la
   // ventana de protección bloquea walk-ins, pero `claim_next_for_barber` sí le
@@ -946,19 +977,21 @@ export function QueuePanel({
     marcarAsesoriasRecientes,
   ])
 
-  // ── Pop-up de asesoría al atender ──
-  // `inicio` sale del ESTADO de la entrada en curso (pidió asesoría y nadie la
-  // confirmó), no del botón que la arrancó: cubre Atender, Reclamar, la alerta
-  // de inactividad y el inicio desde el dashboard. Cualquier cierre la confirma
-  // (`marcarAsesoriaVista`, optimista) y el id queda acá para no reabrirla.
-  // `consulta` la reabre el sello de la tarjeta del cliente actual.
+  // ── Ficha de asesoría al atender ──
+  // Ficha de asesoría (mig 238). `inicio` sale del ESTADO de la entrada en
+  // curso (pidió asesoría y nadie la confirmó), no del botón que la arrancó:
+  // cubre Atender, Reclamar, la alerta de inactividad y el inicio desde el
+  // dashboard. Cualquier cierre la confirma (`marcarAsesoriaVista`, optimista)
+  // y el id queda acá para no reabrirla. `consulta` la abre el barbero: la
+  // tarjeta del corte, el sello o la ficha del cliente (también de uno que
+  // espera, para ir adelantando).
   const [asesoriasConfirmadas, setAsesoriasConfirmadas] = useState<ReadonlySet<string>>(() => new Set())
-  const [consultaAsesoriaDe, setConsultaAsesoriaDe] = useState<string | null>(null)
+  const [fichaConsultaDe, setFichaConsultaDe] = useState<string | null>(null)
   // No se abre encima de otro modal del panel: con dos diálogos hermanos
   // apilados, al cerrar el de arriba Radix devuelve el foco a SU disparador, y
-  // este pop-up no tiene (lo abre el estado): el foco cae al <body> mientras el
+  // esta hoja no tiene (la abre el estado): el foco cae al <body> mientras el
   // de abajo sigue atrapándolo. Espera a que el otro se cierre y aparece
-  // enseguida. El cobro sobre todo: si ya están cobrando, el pop-up llega tarde.
+  // enseguida. El cobro sobre todo: si ya están cobrando, la ficha llega tarde.
   // La entrada del "no vino", mientras siga esperando: si otra tablet la tomó o
   // la sacó, el diálogo se cierra solo (como cuando vivía en la ficha y la
   // ficha desaparecía) y nunca se confirma sobre alguien que ya no espera.
@@ -980,11 +1013,18 @@ export function QueuePanel({
     myActiveEntry.pidio_asesoria === true &&
     !myActiveEntry.asesoria_vista_at &&
     !asesoriasConfirmadas.has(myActiveEntry.id)
-  const modoAsesoria: ModoAsesoriaDialog | null =
-    asesoriaSinConfirmar && !hayOtroModalAbierto
-      ? 'inicio'
-      : myActiveEntry?.pidio_asesoria === true && consultaAsesoriaDe === myActiveEntry.id
-        ? 'consulta'
+  // La de consulta, mientras su entrada siga en la fila (si la cobraron desde
+  // otra pantalla, la hoja se cierra sola).
+  const entradaFichaConsulta = fichaConsultaDe
+    ? myActiveEntry?.id === fichaConsultaDe
+      ? myActiveEntry
+      : (allWaitingEntries.find((e) => e.id === fichaConsultaDe && !e.is_break) ?? null)
+    : null
+  const fichaAbierta: { entrada: QueueEntry; modo: ModoFicha } | null =
+    asesoriaSinConfirmar && myActiveEntry && !hayOtroModalAbierto
+      ? { entrada: myActiveEntry, modo: 'inicio' }
+      : entradaFichaConsulta && !hayOtroModalAbierto
+        ? { entrada: entradaFichaConsulta, modo: 'consulta' }
         : null
 
   function avisarAsesoriaSinRegistrar(detalle: string | null) {
@@ -1005,7 +1045,7 @@ export function QueuePanel({
       .catch((e: unknown) => {
         console.error('[queue-panel] marcarAsesoriaVista:', e)
         // Con el bundle de un deploy anterior: se recarga y, como no quedó
-        // registrada, el pop-up vuelve a salir para confirmarla.
+        // registrada, la ficha vuelve a salir para confirmarla.
         if (esErrorDeVersion(e)) {
           if (!avisarYRecargarPorVersion()) toast.error(TEXTO_RECARGA_MANUAL, { id: 'recarga-manual' })
           return
@@ -1014,9 +1054,16 @@ export function QueuePanel({
       })
   }
 
-  function cerrarAsesoria() {
-    if (modoAsesoria === 'inicio' && myActiveEntry) confirmarAsesoria(myActiveEntry.id)
-    setConsultaAsesoriaDe(null)
+  function cerrarFicha() {
+    if (fichaAbierta?.modo === 'inicio') confirmarAsesoria(fichaAbierta.entrada.id)
+    setFichaConsultaDe(null)
+  }
+
+  /** Abre la ficha de asesoría de una entrada (cierra antes la ficha del cliente: nunca dos hojas apiladas). */
+  function abrirFicha(entradaId: string) {
+    setProfileClient(null)
+    setProfileEntradaId(null)
+    setFichaConsultaDe(entradaId)
   }
 
   // ── Next client alert logic ──
@@ -1628,7 +1675,13 @@ export function QueuePanel({
       onNoVino: () => setNoVinoId(entry.id),
       // El nombre abre la ficha (observaciones, Instagram y cortes con fotos,
       // por server action: la fila no trae esas columnas).
-      onVerFicha: cliente ? () => setProfileClient(cliente) : undefined,
+      onVerFicha: cliente
+        ? () => {
+            setProfileClient(cliente)
+            setProfileEntradaId(entry.id)
+          }
+        : undefined,
+      fichaAsesoria: fichaHabilitada && cliente ? (fichasDeLaFila[cliente.id] ?? null) : null,
     }
   }
 
@@ -1698,7 +1751,9 @@ export function QueuePanel({
       entry={myActiveEntry}
       onComplete={() => setCompletingEntry(myActiveEntry)}
       actionLoading={actionLoading === myActiveEntry.id}
-      onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
+      onAbrirFicha={
+        fichaHabilitada || myActiveEntry.pidio_asesoria === true ? () => abrirFicha(myActiveEntry.id) : undefined
+      }
     />
   ) : subeALaSilla?.is_break ? (
     <SillaDescansoProximo key={subeALaSilla.id} />
@@ -1891,7 +1946,7 @@ export function QueuePanel({
       </DisposicionFila>
 
       {/* Next client waiting warning overlay */}
-      {showWaitWarning && (
+      {showWaitWarning && !fichaAbierta && (
         <NextClientAlert
           clientName={myRealWaitingEntries[0]?.client?.name ?? null}
           pidioAsesoria={myRealWaitingEntries[0]?.pidio_asesoria === true}
@@ -1900,12 +1955,13 @@ export function QueuePanel({
         />
       )}
 
-      {/* Pop-up de asesoría: se abre solo al empezar a atender a quien la pidió
-          (ver `modoAsesoria`) y se reabre en consulta desde el sello. */}
-      <AsesoriaInicioDialog
-        entry={myActiveEntry ?? null}
-        modo={modoAsesoria}
-        onCerrar={cerrarAsesoria}
+      {/* Ficha de asesoría: se abre sola al empezar a atender a quien la pidió
+          (ver `fichaAbierta`) y el barbero la abre desde la tarjeta del corte,
+          el sello o la ficha del cliente. */}
+      <FichaAsesoriaHoja
+        entrada={fichaAbierta?.entrada ?? null}
+        modo={fichaAbierta?.modo ?? null}
+        onCerrar={cerrarFicha}
       />
 
       <CompleteServiceDialog
@@ -1999,7 +2055,13 @@ export function QueuePanel({
       <ClientProfileSheet
         client={profileClient}
         isOpen={!!profileClient}
-        onClose={() => setProfileClient(null)}
+        entradaId={profileEntradaId}
+        fichaHabilitada={fichaHabilitada}
+        onClose={() => {
+          setProfileClient(null)
+          setProfileEntradaId(null)
+        }}
+        onAbrirFicha={fichaHabilitada && profileEntradaId ? () => abrirFicha(profileEntradaId) : undefined}
       />
 
       {/* ¿No se presentó? (ver `noVinoId`) */}

@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, Clock, Instagram, NotebookPen, RefreshCw, User, X } from 'lucide-react'
+import { AlertTriangle, Clock, Instagram, NotebookPen, RefreshCw, Sparkles, User, X } from 'lucide-react'
 import {
   Sheet,
   SheetClose,
@@ -13,13 +13,22 @@ import { Button } from '@/components/ui/button'
 import type { Client } from '@/lib/types/database'
 import { useUltimosCortes } from '@/hooks/use-ultimos-cortes'
 import { haceCuanto, primerNombre } from '@/lib/fotos-corte/textos'
+import { fichaVacia, progresoFicha, type DatosFicha, type FotoDeFicha } from '@/lib/asesoria/ficha'
+import { useFichaAsesoria } from '@/hooks/use-ficha-asesoria'
 import { ClientHistory } from './client-history'
+import { RecetaFicha } from './ficha-asesoria/receta-ficha'
 
 interface ClientProfileSheetProps {
   /** El cliente de la entrada de la fila (sólo trae id, nombre y teléfono). */
   client: Client | null
   isOpen: boolean
   onClose: () => void
+  /** La entrada de la fila desde la que se abrió (la ficha de asesoría se guarda con ella). */
+  entradaId?: string | null
+  /** Abre la ficha de asesoría para verla o completarla. Sin esto, se muestra sin botón. */
+  onAbrirFicha?: () => void
+  /** Ficha de asesoría prendida en la sucursal (mig 238). Apagada, la sección no se pide ni se dibuja. */
+  fichaHabilitada?: boolean
 }
 
 /**
@@ -34,8 +43,20 @@ interface ClientProfileSheetProps {
  *
  * La abre el NOMBRE del cliente en las tarjetas de la fila (queue-panel).
  */
-export function ClientProfileSheet({ client, isOpen, onClose }: ClientProfileSheetProps) {
+export function ClientProfileSheet({
+  client,
+  isOpen,
+  onClose,
+  entradaId = null,
+  onAbrirFicha,
+  fichaHabilitada = false,
+}: ClientProfileSheetProps) {
   const { estado, reintentar } = useUltimosCortes(isOpen && client ? client.id : null, { limite: 12 })
+  const { ficha, reintentar: reintentarFicha } = useFichaAsesoria(
+    fichaHabilitada ? (client?.id ?? null) : null,
+    entradaId,
+    isOpen && !!client && fichaHabilitada,
+  )
 
   if (!client) return null
 
@@ -75,6 +96,21 @@ export function ClientProfileSheet({ client, isOpen, onClose }: ClientProfileShe
         </SheetHeader>
 
         <div className="space-y-5 px-4">
+          {/* La ficha de asesoría (mig 238), arriba de todo: es lo que el
+              barbero viene a buscar cuando toca el nombre. */}
+          {fichaHabilitada && (
+          <SeccionFichaAsesoria
+            datos={ficha?.datos ?? null}
+            fotos={ficha?.fotos ?? []}
+            actualizadaEn={ficha?.servidor?.actualizadaEn ?? null}
+            barbero={ficha?.servidor?.actualizadaPor?.nombre ?? null}
+            carga={ficha?.carga.tipo ?? 'cargando'}
+            error={ficha?.carga.tipo === 'error' ? ficha.carga.error : null}
+            onReintentar={reintentarFicha}
+            onAbrir={onAbrirFicha}
+          />
+          )}
+
           {estado.tipo === 'error' ? (
             <div role="alert" className="flex items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 py-2 pl-3 pr-1.5 text-amber-800 dark:text-amber-300">
               <AlertTriangle className="size-5 shrink-0" aria-hidden />
@@ -134,5 +170,73 @@ export function ClientProfileSheet({ client, isOpen, onClose }: ClientProfileShe
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+/** La ficha de asesoría en la ficha del cliente: la receta entera o cómo armarla. */
+function SeccionFichaAsesoria({
+  datos,
+  fotos,
+  actualizadaEn,
+  barbero,
+  carga,
+  error,
+  onReintentar,
+  onAbrir,
+}: {
+  datos: DatosFicha | null
+  fotos: FotoDeFicha[]
+  actualizadaEn: string | null
+  barbero: string | null
+  carga: 'cargando' | 'error' | 'lista'
+  error: string | null
+  onReintentar: () => void
+  onAbrir?: () => void
+}) {
+  if (datos && !fichaVacia(datos)) {
+    return (
+      <RecetaFicha
+        datos={datos}
+        fotos={fotos}
+        actualizadaEn={actualizadaEn}
+        barbero={barbero}
+        variante="completa"
+        enCurso={!progresoFicha(datos).completa}
+        onAbrir={onAbrir}
+      />
+    )
+  }
+  if (carga === 'cargando') return <div className="h-24 rounded-2xl bg-muted motion-safe:animate-pulse" />
+  if (carga === 'error') {
+    return (
+      <div role="alert" className="flex items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 py-2 pl-3 pr-1.5 text-amber-800">
+        <AlertTriangle className="size-5 shrink-0" aria-hidden />
+        <p className="min-w-0 flex-1 text-sm font-semibold">{error ?? 'No pudimos cargar su ficha de asesoría.'}</p>
+        <button
+          type="button"
+          onClick={onReintentar}
+          className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold hover:underline"
+        >
+          <RefreshCw className="size-4" aria-hidden />
+          Reintentar
+        </button>
+      </div>
+    )
+  }
+  if (!onAbrir) return null
+  return (
+    <button
+      type="button"
+      onClick={onAbrir}
+      className="flex w-full items-center gap-3 rounded-2xl border-2 border-dashed border-fuchsia-500/45 px-4 py-3.5 text-left outline-none touch-manipulation hover:bg-fuchsia-500/5 focus-visible:ring-2 focus-visible:ring-fuchsia-500/60"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/12 text-fuchsia-700">
+        <Sparkles className="size-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[0.9375rem] font-semibold">Todavía no tiene ficha de asesoría</span>
+        <span className="block text-sm text-muted-foreground">Armala ahora y la próxima vez la tenés a mano.</span>
+      </span>
+    </button>
   )
 }

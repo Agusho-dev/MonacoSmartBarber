@@ -1,7 +1,8 @@
 'use client'
 
-import { CalendarClock, ChevronRight, Coffee, MessageCircle, Scissors, User, X, Zap } from 'lucide-react'
+import { CalendarClock, ChevronRight, Coffee, MessageCircle, NotebookPen, Scissors, User, X, Zap } from 'lucide-react'
 import type { QueueEntry } from '@/lib/types/database'
+import type { FichaEnFila } from '@/hooks/use-ficha-asesoria'
 import type { LoyaltyTierLite } from '@/lib/loyalty-checkout'
 import { leerLoyaltyEmbed } from '@/lib/loyalty-embed'
 import { cn } from '@/lib/utils'
@@ -67,6 +68,11 @@ export interface TarjetaEsperaProps {
   onNoVino: () => void
   /** Abre la ficha del cliente (observaciones, Instagram, cortes con fotos). */
   onVerFicha?: () => void
+  /**
+   * Su ficha de asesoría, si tiene (mig 238): sello «Ficha» y, en la silla, la
+   * receta del corte para ir preparando la máquina.
+   */
+  fichaAsesoria?: FichaEnFila | null
 }
 
 const TONO_ESPERA: Record<NivelEspera, string> = {
@@ -176,6 +182,14 @@ function sellosDe(props: TarjetaEsperaProps): React.ReactNode[] {
       </Sello>,
     )
   }
+  if (props.fichaAsesoria) {
+    sellos.push(
+      <Sello key="ficha" tono="fucsia" title="Tiene ficha de asesoría" className="bg-transparent">
+        <NotebookPen aria-hidden />
+        Ficha
+      </Sello>,
+    )
+  }
   if (entrada.pidio_asesoria === true) {
     sellos.push(
       <AsesoriaBadge
@@ -207,6 +221,18 @@ function Servicio({ entrada, className }: { entrada: QueueEntry; className?: str
       ) : (
         <span className="font-semibold text-fuchsia-700">Quiere asesoría</span>
       )}
+    </p>
+  )
+}
+
+/** La receta de su ficha de asesoría en un renglón: «French Crop · Mid Fade desde el 0,5». */
+function RecetaCorta({ ficha }: { ficha: FichaEnFila | null | undefined }) {
+  const titular = ficha?.titular ?? null
+  if (!titular) return null
+  return (
+    <p className="mt-1.5 flex items-start gap-1.5 text-base font-semibold text-fuchsia-800 max-sm:text-[0.9375rem]">
+      <NotebookPen className="mt-[0.2em] size-4 shrink-0" aria-hidden />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{titular}</span>
     </p>
   )
 }
@@ -407,6 +433,7 @@ function FichaEnSilla(props: TarjetaEsperaProps) {
             className="text-[2.25rem] font-bold leading-[1.1] tracking-[-0.02em] max-sm:text-[1.75rem]"
           />
           <Servicio entrada={entrada} className="mt-1 text-lg font-medium text-foreground/75 max-sm:text-base" />
+          <RecetaCorta ficha={props.fichaAsesoria} />
           {delLocal && (
             <p className="mt-1 text-[0.9375rem] font-semibold text-blue-700">
               Sin barbero asignado: lo atiende el primero que lo tome

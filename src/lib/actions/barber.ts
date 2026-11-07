@@ -321,6 +321,14 @@ export async function fetchBranchAssignmentData(branchId: string): Promise<{
   lastCompletedAt: Record<string, string>
   latestAttendance: Record<string, string>
   latestClockInAt: Record<string, string>
+  /**
+   * `branches.asesoria_habilitada` (mig 217): también prende la ficha de
+   * asesoría en el panel (mig 238). Viaja acá porque el panel ya pide esto en
+   * cada evento de la fila: prenderla en una sucursal llega a sus tablets sin
+   * recargarlas. Opcional a propósito: los bundles viejos lo ignoran (KR#38) y
+   * sin dato (la sucursal no se pudo leer) el panel conserva lo que tenía.
+   */
+  asesoriaHabilitada?: boolean
 }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {}, latestClockInAt: {} }
@@ -330,7 +338,7 @@ export async function fetchBranchAssignmentData(branchId: string): Promise<{
   // Validar que el branch pertenece a la org del caller
   const { data: branchCheck } = await supabase
     .from('branches')
-    .select('id')
+    .select('id, asesoria_habilitada')
     .eq('id', branchId)
     .eq('organization_id', orgId)
     .maybeSingle()
@@ -399,6 +407,7 @@ export async function fetchBranchAssignmentData(branchId: string): Promise<{
     lastCompletedAt,
     latestAttendance,
     latestClockInAt,
+    asesoriaHabilitada: branchCheck.asesoria_habilitada === true,
   }
 }
 

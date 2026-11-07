@@ -21,6 +21,11 @@ interface FotosDelCobroProps {
   abierto: boolean
   /** Mientras se registra el cobro no se agregan ni se quitan fotos. */
   deshabilitado?: boolean
+  /**
+   * Reemplaza el título «Fotos del corte (opcional)»: la ficha de asesoría y el
+   * cobro de una asesoría la piden como «Foto del corte terminado».
+   */
+  encabezado?: React.ReactNode
 }
 
 /**
@@ -34,7 +39,7 @@ interface FotosDelCobroProps {
  * siguen subiendo cuando se toca Cobrar, terminan solas y quedan en la ficha
  * (ver fotos-corte-store).
  */
-export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: FotosDelCobroProps) {
+export function FotosDelCobro({ entradaId, abierto, deshabilitado = false, encabezado }: FotosDelCobroProps) {
   const f = useFotosDelCobro(entradaId, abierto)
   const tono = useTonoDelTema()
   const [fotoAbierta, setFotoAbierta] = useState<number | null>(null)
@@ -56,20 +61,22 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
   const ultimoError = [...f.fotos].reverse().find((x) => x.estado === 'error')?.error ?? null
 
   return (
-    <section aria-labelledby="cobro-fotos">
-      <TituloCobro
-        id="cobro-fotos"
-        opcional
-        detalle={
-          f.fotos.length > 0 && (
-            <span className="font-mono text-[0.9375rem] tabular-nums text-muted-foreground">
-              {f.resumen.listas + f.resumen.enCurso}/{TOPE_FOTOS_POR_CORTE}
-            </span>
-          )
-        }
-      >
-        Fotos del corte
-      </TituloCobro>
+    <section aria-labelledby={encabezado !== undefined ? undefined : 'cobro-fotos'}>
+      {encabezado ?? (
+        <TituloCobro
+          id="cobro-fotos"
+          opcional
+          detalle={
+            f.fotos.length > 0 && (
+              <span className="font-mono text-[0.9375rem] tabular-nums text-muted-foreground">
+                {f.resumen.listas + f.resumen.enCurso}/{TOPE_FOTOS_POR_CORTE}
+              </span>
+            )
+          }
+        >
+          Fotos del corte
+        </TituloCobro>
+      )}
 
       {/* Un solo camino: el celular del barbero, por QR. */}
       <button

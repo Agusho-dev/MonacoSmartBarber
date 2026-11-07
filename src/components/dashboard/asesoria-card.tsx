@@ -230,7 +230,8 @@ export function AsesoriaCard({ inicial, errorInicial, metricasIniciales }: Props
               <TituloCard />
               <CardDescription className="max-w-2xl leading-relaxed">
                 Suma en la tablet de check-in la opción “¿No sabés qué hacerte?”: el cliente pide asesoría sin costo. En
-                el panel, su tarjeta lleva el sello “Asesoría” y el barbero ve el pedido al empezar el corte.
+                el panel, el barbero completa su ficha de asesoría mientras lo asesora y la próxima vez la tiene a la
+                vista. Prendida, la ficha también se puede armar para cualquier cliente de esa sucursal.
               </CardDescription>
             </div>
             <Badge

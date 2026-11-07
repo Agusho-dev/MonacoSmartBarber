@@ -20,7 +20,7 @@ export default async function FilaPage() {
 
   const { data: branch } = await supabase
     .from('branches')
-    .select('name, operation_mode, timezone')
+    .select('name, operation_mode, timezone, asesoria_habilitada')
     .eq('id', session.branch_id)
     .single()
 
@@ -65,6 +65,9 @@ export default async function FilaPage() {
       // buffer: el panel la calcula con el mismo número que la DB.
       bufferMinutes={settings?.buffer_minutes ?? null}
       loyaltyEnabled={loyaltySettings?.is_enabled === true}
+      // La asesoría de la sucursal también prende la ficha de asesoría (mig
+      // 238). Es el valor al abrir: después lo actualiza cada evento de la fila.
+      asesoriaHabilitada={branch?.asesoria_habilitada === true}
     />
   )
 }
