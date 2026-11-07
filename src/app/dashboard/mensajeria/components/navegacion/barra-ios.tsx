@@ -91,6 +91,16 @@ export function useCapaIos<T extends HTMLElement>(onVolver: () => void) {
 // acción principal (AccionDeBarraIos) sin que el marco tenga que saber cuál es.
 const RanuraDeLaBarra = createContext<HTMLElement | null>(null)
 
+// El «volver» de la capa (el mismo que el «‹ Chats» de la barra), para una
+// sección que va sin barra y pone su propio «‹» (Por responder: la tarjeta es
+// la pantalla entera).
+const VolverDeLaSeccion = createContext<(() => void) | null>(null)
+
+/** El «volver» animado de la sección abierta (null fuera de un MarcoSeccion). */
+export function useVolverDeLaSeccion(): (() => void) | null {
+  return useContext(VolverDeLaSeccion)
+}
+
 /** La acción principal de una sección, en la barra de iOS del celular. */
 export function AccionDeBarraIos({ children }: { children: ReactNode }) {
   const ranura = useContext(RanuraDeLaBarra)
@@ -249,14 +259,20 @@ export function BotonSecundario({
  * lista y la conversación. El área segura de abajo la deja el contenido de cada
  * sección (ContenidoSeccion, lista-ios.tsx): la lista pasa por debajo de la
  * rayita de inicio, como en iOS.
+ *
+ * `sinBarra`: la sección ocupa también el lugar de la barra (Por responder, 7/nov/2026:
+ * «el Por responder negro de arriba está de más»). Pone su propio «‹» con
+ * useVolverDeLaSeccion; el gesto de volver y la entrada del historial siguen iguales.
  */
 export function MarcoSeccion({
   titulo,
   onVolver,
+  sinBarra = false,
   children,
 }: {
   titulo: string
   onVolver: () => void
+  sinBarra?: boolean
   children: ReactNode
 }) {
   const { capaRef, volver } = useCapaIos<HTMLDivElement>(onVolver)
@@ -274,14 +290,18 @@ export function MarcoSeccion({
       // (overflow): lo hace el contenido de adentro.
       className={cn('wa-capa flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--wa-bg)] text-[var(--wa-text)]', CLASE_CAPA_IOS)}
     >
-      <BarraIos
-        titulo={titulo}
-        onVolver={volver}
-        derecha={<div ref={setRanura} className="flex items-center gap-1" />}
-        className="lg:hidden"
-      />
+      {!sinBarra && (
+        <BarraIos
+          titulo={titulo}
+          onVolver={volver}
+          derecha={<div ref={setRanura} className="flex items-center gap-1" />}
+          className="lg:hidden"
+        />
+      )}
       <RanuraDeLaBarra.Provider value={ranura}>
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-clip">{children}</div>
+        <VolverDeLaSeccion.Provider value={volver}>
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-clip">{children}</div>
+        </VolverDeLaSeccion.Provider>
       </RanuraDeLaBarra.Provider>
     </div>
   )

@@ -8,26 +8,35 @@
 // - Una tarjeta por conversación que espera (contexto-por-responder.tsx),
 //   las reseñas bajas primero y después las consultas por la ventana de 24 h
 //   que se cierra antes. Los «gracias» y «listo» van al final.
+// - Cada tarjeta es un chat entero, a pantalla completa en el celular (7/nov:
+//   «el Por responder negro de arriba está de más… que las cards ocupen toda
+//   la pantalla… que todo se sienta como un chat»): la sección va sin la
+//   barra de iOS, el «‹» está en la tarjeta y la pila (pendientes o vencidas),
+//   los avisos y «Actualizar» están en su «…». En ningún lado dice dos veces
+//   «Por responder».
 // - Cada tarjeta trae el borrador de Tex ya escrito (se pide apenas llega a
 //   las dos de arriba). Derecha = mandar ESE texto; izquierda = «Listo»; abajo
 //   («Después») = al fondo del mazo. Tocar el borrador lo abre para corregirlo.
 // - Nada sale en el acto: 5 s de «Deshacer» (como Gmail), y si la persona se
 //   va de la pantalla o la app pasa a segundo plano, sale enseguida.
-// - En la compu: los mismos botones con atajos (→ ← ↓ E) y, si hay lugar, la
-//   lista de lo que sigue al costado.
+// - En la compu: el encabezado de la sección (con la pila y los avisos), los
+//   mismos botones con atajos (→ ← ↓ E) y, si hay lugar, lo que sigue al costado.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, Bell, BellRing, Check, Clock3, Layers, MessageCircleQuestion, PenLine,
-  RefreshCw, SendHorizontal, Star, Undo2, X,
+  ArrowDown, ArrowLeft, ArrowRight, Bell, BellRing, ChevronLeft, Clock3, Ellipsis, Handshake, Layers,
+  MessageCircleQuestion, RefreshCw, Star, Undo2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { TexPose } from '@/components/tex/tex-pose'
 import { cn } from '@/lib/utils'
 import { marcarPendienteListo, marcarPendientesListos, responderPendiente } from '@/lib/actions/por-responder'
 import { haceCuanto, resumenDePila, textoNota, type Pendiente } from '@/lib/mensajeria/por-responder'
 import type { AjusteBorrador } from '@/lib/mensajeria/borrador-prompt'
-import { AccionDeBarraIos, BotonSecundario, EncabezadoSeccion } from '../navegacion/barra-ios'
+import { BotonSecundario, EncabezadoSeccion, useVolverDeLaSeccion } from '../navegacion/barra-ios'
 import { SegmentadoIos, avisarFalla } from '../navegacion/lista-ios'
 import { Avatar } from '../shared/avatar'
 import { usePorResponder } from './contexto-por-responder'
@@ -84,6 +93,8 @@ export function PorResponder({
   const { estado, error, pilas, ahora, refrescar, ocultar, mostrar } = usePorResponder()
   const { borradores, disponible, pedir, asegurar, escribir } = useBorradores()
   const avisos = useAvisosPush()
+  // El «‹» de la tarjeta: el mismo volver animado que tenía el «‹ Chats» de la barra.
+  const volver = useVolverDeLaSeccion()
 
   const [pila, setPila] = useState<Pila>('responder')
   const [postergadas, setPostergadas] = useState<string[]>([])
@@ -94,8 +105,10 @@ export function PorResponder({
   const [hechas, setHechas] = useState({ respondidas: 0, listas: 0 })
   const [cartel, setCartel] = useState(false)
   const [anuncio, setAnuncio] = useState('')
+  // Lo atendido en esta pasada, por pila: llena las rayitas de arriba de la tarjeta.
+  const [hechasSesion, setHechasSesion] = useState<{ id: string; pila: Pila }[]>([])
   const mazo = useRef<MazoRef>(null)
-  const barraAcciones = useRef<HTMLDivElement>(null)
+  const medidorBarra = useRef<HTMLDivElement>(null)
   const textoDeLaHoja = useRef<{ id: string; texto: string } | null>(null)
   const enEsperaRef = useRef<AccionEnEspera | null>(null)
   const reloj = useRef<number | null>(null)
@@ -125,6 +138,14 @@ export function PorResponder({
   const arriba = ordenadas[0] ?? null
   const ids = useMemo(() => ordenadas.slice(0, 3).map((p) => p.id), [ordenadas])
   const porId = useMemo(() => new Map([...deResponder, ...pilas.vencidas].map((p) => [p.id, p])), [deResponder, pilas.vencidas])
+
+  // Las rayitas: lo atendido de esta pila (que no volvió a aparecer) más lo que queda.
+  const visibles = useMemo(() => new Set(ordenadas.map((p) => p.id)), [ordenadas])
+  const hechasEnPila = hechasSesion.filter((h) => h.pila === pila && !visibles.has(h.id)).length
+  const totalDePila = hechasEnPila + ordenadas.length
+  const quitarHecha = useCallback((id: string) => {
+    setHechasSesion((hs) => hs.filter((h) => h.id !== id))
+  }, [])
 
   // La de arriba queda fijada: si entra algo nuevo, no se cambia la tarjeta bajo
   // el dedo. Se ajusta en el render (no en un efecto): converge en una vuelta.
@@ -156,6 +177,7 @@ export function PorResponder({
       if (!r.ok) {
         toast.error(a.tipo === 'enviar' ? `No salió el mensaje a ${a.p.nombrePila ?? a.p.nombre}: ${r.error}` : r.error)
         mostrar(a.p.id)
+        quitarHecha(a.p.id)
         setFijada(a.p.id)
         return
       }
@@ -164,9 +186,10 @@ export function PorResponder({
     } catch (e) {
       avisarFalla(e, a.tipo === 'enviar' ? 'No salió el mensaje. Revisá la conexión y probá de nuevo.' : 'No se pudo marcar. Probá de nuevo.')
       mostrar(a.p.id)
+      quitarHecha(a.p.id)
       setFijada(a.p.id)
     }
-  }, [mostrar, refrescar])
+  }, [mostrar, refrescar, quitarHecha])
 
   const encolar = useCallback((a: Omit<AccionEnEspera, 'desde'>) => {
     // La anterior sale ya: un solo «Deshacer» a la vez.
@@ -177,10 +200,11 @@ export function PorResponder({
     setEnEspera(accion)
     ocultar(a.p.id)
     setPostergadas((ps) => ps.filter((id) => id !== a.p.id))
+    setHechasSesion((hs) => [...hs.filter((h) => h.id !== a.p.id), { id: a.p.id, pila }])
     reloj.current = window.setTimeout(() => { void ejecutar(accion) }, DESHACER_MS)
     const quien = a.p.nombrePila ?? a.p.nombre
     setAnuncio(a.tipo === 'enviar' ? `Mandando la respuesta a ${quien}. Podés deshacerlo.` : `${quien}: marcada como lista.`)
-  }, [ejecutar, ocultar])
+  }, [ejecutar, ocultar, pila])
 
   const deshacer = useCallback(() => {
     const a = enEsperaRef.current
@@ -190,9 +214,10 @@ export function PorResponder({
     enEsperaRef.current = null
     setEnEspera(null)
     mostrar(a.p.id)
+    quitarHecha(a.p.id)
     setFijada(a.p.id)
     setAnuncio(`Se deshizo. ${a.p.nombrePila ?? a.p.nombre} vuelve arriba.`)
-  }, [mostrar])
+  }, [mostrar, quitarHecha])
 
   // Si la persona se va (otra sección, la app a segundo plano), lo pendiente sale ya.
   // Por ref: el efecto se arma una sola vez y su limpieza es la salida de la pantalla.
@@ -286,9 +311,11 @@ export function PorResponder({
     const lista = pilas.cierres.map((p) => p.id)
     if (lista.length === 0) return
     for (const id of lista) ocultar(id)
+    setHechasSesion((hs) => [...hs.filter((h) => !lista.includes(h.id)), ...lista.map((id) => ({ id, pila: 'responder' as const }))])
     const r = await marcarPendientesListos(lista).catch(() => null)
     if (!r || !r.ok) {
       for (const id of lista) mostrar(id)
+      setHechasSesion((hs) => hs.filter((h) => !lista.includes(h.id)))
       toast.error(r && !r.ok ? r.error : 'No se pudieron marcar. Probá de nuevo.')
       return
     }
@@ -321,10 +348,11 @@ export function PorResponder({
     return () => window.removeEventListener('keydown', alTeclear)
   }, [arriba, deshacer])
 
-  // Los avisos (toasts) van arriba de los botones, no encima: la barra publica
-  // su alto en la variable que usa el composer del chat (globals.css).
+  // Los avisos (toasts) van arriba de la barra de la tarjeta, no encima: se
+  // publica su alto (--pr-dock, con el área segura) en la variable que usa el
+  // composer del chat (globals.css). Lo mide una caja invisible del mismo alto.
   useLayoutEffect(() => {
-    const el = barraAcciones.current
+    const el = medidorBarra.current
     if (!el) return
     const raiz = document.documentElement
     const publicar = () => raiz.style.setProperty('--alto-composer-chat', `${Math.round(el.getBoundingClientRect().height)}px`)
@@ -339,34 +367,89 @@ export function PorResponder({
 
   // ── Lo que se dibuja ────────────────────────────────────────────────────
 
-  const quedan = ordenadas.length
-  const totalSesion = hechas.respondidas + hechas.listas
-  const iconoAvisos = avisos.estado === 'activo' ? BellRing : Bell
+  const avisosActivos = avisos.estado === 'activo'
   const sinAvisos = avisos.estado === 'apagado' || avisos.estado === 'instalar'
+  const IconoAvisos = avisosActivos ? BellRing : Bell
+  const cambiarPila = (v: Pila) => {
+    setPila(v)
+    setFijada(null)
+  }
+  const ocultarCartel = () => {
+    setCartel(false)
+    try { window.localStorage.setItem(CARTEL_AVISOS, 'oculto') } catch { /* sin almacenamiento */ }
+  }
 
-  const accionArriba = arriba ? accionDerecha(arriba, borradores[arriba.id], ahora) : null
-  const textoDerecha = accionArriba === 'enviar' ? 'Enviar' : accionArriba === 'chat' ? 'Abrir chat' : accionArriba === 'instagram' ? 'Instagram' : accionArriba === 'esperar' ? 'Escribiendo' : 'Escribir'
+  // El «…» de la tarjeta de arriba (celular): la pila, los cierres, los avisos y actualizar.
+  const menu = (
+    <MenuDeLaBandeja
+      pila={pila}
+      pendientes={deResponder.length}
+      vencidas={pilas.vencidas.length}
+      cierres={pila === 'responder' ? pilas.cierres.length : 0}
+      avisosActivos={avisosActivos}
+      sinAvisos={sinAvisos}
+      onPila={cambiarPila}
+      onCierres={() => { void marcarCierresListos() }}
+      onAvisos={() => setVerAvisos(true)}
+      onActualizar={refrescar}
+    />
+  )
+  // Arriba de la charla de la tarjeta de arriba, como un aviso del chat, hasta que se activan o se cierra.
+  const cartelAvisos = cartel && sinAvisos ? (
+    <div className="flex max-w-full items-center gap-2 rounded-2xl bg-[var(--wa-date-chip)] py-1.5 pl-3 pr-1 text-[13.5px] leading-[18px] text-[var(--wa-text)] shadow-sm ring-1 ring-white/[0.06] lg:text-[12.5px]">
+      <BellRing aria-hidden className="size-4 shrink-0 text-[#4cd884]" />
+      <span className="min-w-0">Que te avise cuando llegue algo</span>
+      <button
+        type="button"
+        data-sin-arrastre=""
+        onClick={() => setVerAvisos(true)}
+        className="h-7 shrink-0 rounded-full bg-[var(--wa-accent)] px-3 text-[13px] font-semibold text-[var(--wa-on-accent)] outline-none active:scale-95 focus-visible:ring-2 focus-visible:ring-white/60"
+      >
+        Activar
+      </button>
+      <button
+        type="button"
+        data-sin-arrastre=""
+        aria-label="No mostrar más"
+        onClick={ocultarCartel}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full text-white/50 outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-white/50"
+      >
+        <X aria-hidden className="size-4" />
+      </button>
+    </div>
+  ) : null
+  // Las escenas (vacía, festejo, error) no tienen tarjeta: llevan su «‹ Chats» y la campana.
+  const barraEscena = (
+    <BarraDeEscena onVolver={volver} onAvisos={() => setVerAvisos(true)} avisosActivos={avisosActivos} sinAvisos={sinAvisos} />
+  )
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <AccionDeBarraIos>
-        <button
-          type="button"
-          onClick={() => setVerAvisos(true)}
-          aria-label={avisos.estado === 'activo' ? 'Avisos activados' : 'Activar avisos'}
-          className="relative -m-1 flex size-11 items-center justify-center rounded-full text-[var(--wa-accent)] outline-none [-webkit-tap-highlight-color:transparent] active:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
-        >
-          {(() => { const I = iconoAvisos; return <I aria-hidden className="size-[22px]" strokeWidth={2} /> })()}
-          {sinAvisos && <span aria-hidden className="absolute right-2 top-2 size-2 rounded-full bg-[#ff453a]" />}
-        </button>
-      </AccionDeBarraIos>
+    <div className="pr-raiz relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* En la compu, el encabezado de la sección (en el celular no existe: la tarjeta es la pantalla). */}
       <EncabezadoSeccion
         titulo="Por responder"
-        subtitulo={estado === 'listo' ? (quedan > 0 ? `${resumenDePila(deResponder)}${pilas.vencidas.length ? ` · ${pilas.vencidas.length} ${pilas.vencidas.length === 1 ? 'vencida' : 'vencidas'}` : ''}` : 'Nada esperando') : undefined}
+        subtitulo={estado === 'listo' ? (deResponder.length > 0 ? `${resumenDePila(deResponder)}${pilas.vencidas.length ? ` · ${pilas.vencidas.length} ${pilas.vencidas.length === 1 ? 'vencida' : 'vencidas'}` : ''}` : 'Nada esperando') : undefined}
       >
+        {estado === 'listo' && (pilas.vencidas.length > 0 || pila === 'vencidas') && (
+          <SegmentadoIos
+            etiqueta="Qué pila mirar"
+            className="w-64"
+            valor={pila}
+            onCambio={cambiarPila}
+            opciones={[
+              { valor: 'responder', texto: `Pendientes · ${deResponder.length}` },
+              { valor: 'vencidas', texto: `Vencidas · ${pilas.vencidas.length}` },
+            ]}
+          />
+        )}
+        {pila === 'responder' && pilas.cierres.length > 1 && (
+          <BotonSecundario onClick={() => { void marcarCierresListos() }}>
+            <Handshake aria-hidden className="size-4" /> Marcar {pilas.cierres.length} cierres
+          </BotonSecundario>
+        )}
         <BotonSecundario onClick={() => setVerAvisos(true)}>
-          {(() => { const I = iconoAvisos; return <I aria-hidden className="size-4" /> })()}
-          {avisos.estado === 'activo' ? 'Avisos activados' : 'Activar avisos'}
+          <IconoAvisos aria-hidden className="size-4" />
+          {avisosActivos ? 'Avisos activados' : 'Activar avisos'}
         </BotonSecundario>
         <BotonSecundario onClick={refrescar}>
           <RefreshCw aria-hidden className="size-4" /> Actualizar
@@ -376,57 +459,13 @@ export function PorResponder({
       <p className="sr-only" role="status" aria-live="polite">{anuncio}</p>
 
       <div className="flex min-h-0 flex-1 lg:@min-[1100px]/columnas:grid lg:@min-[1100px]/columnas:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="mx-auto flex min-h-0 w-full max-w-[480px] flex-1 flex-col lg:px-6 lg:pt-4">
-          {cartel && sinAvisos && estado === 'listo' && (
-            <div className="mx-4 mt-2 flex items-center gap-2.5 rounded-2xl bg-[linear-gradient(135deg,rgba(33,192,99,0.16),rgba(33,192,99,0.05))] py-1.5 pl-3 pr-1.5 ring-1 ring-[var(--wa-accent)]/20 lg:mx-0">
-              <Bell aria-hidden className="size-[18px] shrink-0 text-[#4cd884]" />
-              <p className="min-w-0 flex-1 truncate text-[14px] leading-[18px] text-white/85 lg:text-[13px]">
-                Avisos de reseñas y consultas
-              </p>
-              <button
-                type="button"
-                onClick={() => setVerAvisos(true)}
-                className="h-8 shrink-0 rounded-full bg-[var(--wa-accent)] px-3 text-[14px] font-semibold text-[var(--wa-on-accent)] outline-none active:scale-95 focus-visible:ring-2 focus-visible:ring-white/60 lg:text-[13px]"
-              >
-                Activar
-              </button>
-              <button
-                type="button"
-                aria-label="No mostrar más"
-                onClick={() => {
-                  setCartel(false)
-                  try { window.localStorage.setItem(CARTEL_AVISOS, 'oculto') } catch { /* sin almacenamiento */ }
-                }}
-                className="-mr-1 flex size-8 shrink-0 items-center justify-center rounded-full text-white/50 outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-white/50"
-              >
-                <X aria-hidden className="size-4" />
-              </button>
-            </div>
-          )}
-
-          {estado === 'listo' && pilas.vencidas.length > 0 && (
-            <div className="px-4 pt-3 lg:px-0">
-              <SegmentadoIos
-                etiqueta="Qué pila mirar"
-                valor={pila}
-                onCambio={(v) => { setPila(v); setFijada(null) }}
-                opciones={[
-                  { valor: 'responder', texto: `Para responder · ${deResponder.length}` },
-                  { valor: 'vencidas', texto: `Vencidas · ${pilas.vencidas.length}` },
-                ]}
-              />
-            </div>
-          )}
-
-          <div className="relative min-h-0 flex-1 px-5 pb-3 pt-4 lg:px-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:mx-auto lg:w-full lg:max-w-[540px] lg:px-6 lg:py-5">
+          {/* La caja de la tarjeta: en el celular, la pantalla entera. */}
+          <div className="relative min-h-0 flex-1">
             {estado === 'cargando' ? (
-              <div className="pr-mazo relative h-full">
-                <div className="pr-carta absolute inset-0" data-posicion="2"><TarjetaCargando /></div>
-                <div className="pr-carta absolute inset-0" data-posicion="1"><TarjetaCargando /></div>
-                <div className="absolute inset-0"><TarjetaCargando /></div>
-              </div>
+              <TarjetaCargando onVolver={volver} />
             ) : estado === 'error' && ordenadas.length === 0 ? (
-              <Escena pose="ayuda" titulo="No pude leer lo que hay por responder" texto={error ?? 'Revisá la conexión y probá de nuevo.'}>
+              <Escena barra={barraEscena} pose="ayuda" titulo="No pude leer lo que hay por responder" texto={error ?? 'Revisá la conexión y probá de nuevo.'}>
                 <BotonEscena onClick={refrescar}><RefreshCw aria-hidden className="size-4" /> Reintentar</BotonEscena>
               </Escena>
             ) : arriba ? (
@@ -440,87 +479,63 @@ export function PorResponder({
                 render={(id, posicion) => {
                   const p = porId.get(id)
                   if (!p) return null
+                  const deArriba = posicion === 0
                   return (
                     <TarjetaPendiente
                       p={p}
                       ahora={ahora}
                       borrador={borradores[id]}
                       ia={disponible}
-                      fondo={posicion > 0}
+                      fondo={!deArriba}
+                      progreso={{ total: totalDePila, actual: hechasEnPila + posicion }}
+                      menu={deArriba ? menu : null}
+                      aviso={deArriba ? cartelAvisos : null}
+                      onVolver={volver}
                       onEditar={() => setEditando(id)}
                       onAjuste={(a) => ajustar(id, a)}
                       onPedirIgual={() => { void pedir(id, { forzar: true }) }}
                       onVerChat={() => onVerChat(p)}
+                      onListo={() => mazo.current?.lanzar('izquierda')}
+                      onDespues={() => mazo.current?.lanzar('abajo')}
+                      onDerecha={() => mazo.current?.lanzar('derecha')}
                     />
                   )
                 }}
               />
             ) : pila === 'vencidas' ? (
-              <Escena pose="logro" titulo="No quedan vencidas" texto="Todo lo de la semana está atendido.">
-                <BotonEscena onClick={() => setPila('responder')}>Volver a «Para responder»</BotonEscena>
+              <Escena barra={barraEscena} pose="logro" titulo="No quedan vencidas" texto="Todo lo de la semana está atendido.">
+                <BotonEscena onClick={() => cambiarPila('responder')}>Volver a las pendientes</BotonEscena>
               </Escena>
-            ) : totalSesion > 0 ? (
+            ) : hechas.respondidas + hechas.listas > 0 ? (
               <Festejo
+                barra={barraEscena}
                 respondidas={hechas.respondidas}
                 listas={hechas.listas}
                 vencidas={pilas.vencidas.length}
-                onVencidas={() => setPila('vencidas')}
+                onVencidas={() => cambiarPila('vencidas')}
                 onAvisos={sinAvisos ? () => setVerAvisos(true) : undefined}
               />
             ) : (
               <Escena
+                barra={barraEscena}
                 pose="saludo"
                 titulo="No hay nada esperando"
                 texto="Cuando una reseña llegue baja o una consulta quede sin responder, aparece acá como una tarjeta."
               >
                 {pilas.vencidas.length > 0 && (
-                  <BotonEscena onClick={() => setPila('vencidas')}>Ver {pilas.vencidas.length} vencidas de la semana</BotonEscena>
+                  <BotonEscena onClick={() => cambiarPila('vencidas')}>Ver {pilas.vencidas.length} vencidas de la semana</BotonEscena>
                 )}
                 {sinAvisos && (
                   <BotonEscena principal onClick={() => setVerAvisos(true)}><Bell aria-hidden className="size-4" /> Avisame cuando llegue algo</BotonEscena>
                 )}
               </Escena>
             )}
-          </div>
 
-          {/* Los botones, como los de las apps de tarjetas: Listo · Después · Escribir · Enviar. */}
-          <div
-            ref={barraAcciones}
-            className={cn(
-              'relative flex shrink-0 items-start justify-center gap-5 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-1 lg:gap-6 lg:pb-6',
-              !arriba && 'invisible',
-            )}
-          >
+            {/* «Mandando a…  Deshacer», arriba de la barra de la tarjeta. */}
             <BarraDeshacer accion={enEspera} onDeshacer={deshacer} />
-            <BotonRedondo etiqueta="Listo" atajo="←" tamano="grande" onClick={() => mazo.current?.lanzar('izquierda')}>
-              <Check aria-hidden className="size-7" strokeWidth={2.4} />
-            </BotonRedondo>
-            <BotonRedondo etiqueta="Después" atajo="↓" tamano="chico" onClick={() => mazo.current?.lanzar('abajo')}>
-              <Clock3 aria-hidden className="size-5" strokeWidth={2.2} />
-            </BotonRedondo>
-            {accionArriba !== 'chat' && accionArriba !== 'instagram' && (
-              <BotonRedondo etiqueta="Escribir" atajo="E" tamano="chico" onClick={() => arriba && setEditando(arriba.id)}>
-                <PenLine aria-hidden className="size-5" strokeWidth={2.2} />
-              </BotonRedondo>
-            )}
-            <BotonRedondo
-              etiqueta={textoDerecha}
-              atajo="→"
-              tamano="grande"
-              tono="acento"
-              apagado={accionArriba === 'esperar'}
-              onClick={() => mazo.current?.lanzar('derecha')}
-            >
-              <SendHorizontal aria-hidden className="size-7 translate-x-0.5" strokeWidth={2.3} />
-            </BotonRedondo>
+            {/* El alto de la barra de la tarjeta, para los avisos (ver el efecto de arriba). */}
+            <div ref={medidorBarra} aria-hidden className="pointer-events-none invisible absolute inset-x-0 bottom-0 h-[var(--pr-dock)]" />
           </div>
-
-          {estado === 'listo' && pila === 'responder' && pilas.cierres.length > 1 && arriba && !arriba.esCierre && (
-            <p className="-mt-2 hidden pb-4 text-center text-[12.5px] text-[var(--wa-text-2)] lg:block">
-              Al final hay {pilas.cierres.length} que parecen cierres de charla.{' '}
-              <button type="button" onClick={() => { void marcarCierresListos() }} className="font-medium text-[var(--wa-accent)] hover:underline">Marcarlas como listas</button>
-            </p>
-          )}
         </div>
 
         {/* En la compu ancha: lo que sigue, para elegir una. */}
@@ -547,51 +562,127 @@ export function PorResponder({
   )
 }
 
-function BotonRedondo({
-  etiqueta, atajo, tamano, tono = 'neutro', apagado = false, onClick, children,
+// Los del menú del chat (chat-view.tsx): el mismo «…» de vidrio oscuro.
+const MENU =
+  'wa-scope min-w-60 rounded-2xl border border-[var(--wa-divider)] bg-[var(--wa-raised)] p-1.5 text-[var(--wa-text)] shadow-2xl shadow-black/60 lg:rounded-xl lg:p-1'
+const ITEM =
+  'gap-3 rounded-xl px-3 py-2.5 text-[15px] text-[var(--wa-text)] focus:bg-[var(--wa-selected)] focus:text-[var(--wa-text)] lg:gap-2.5 lg:rounded-lg lg:px-2.5 lg:py-2 lg:text-[13.5px]'
+const ICONO_ITEM = 'size-[18px] shrink-0 text-[var(--wa-text-2)] lg:size-4'
+
+/**
+ * El «…» de la tarjeta (sólo en el celular; en la compu esto está en el
+ * encabezado de la sección): cambiar de pila, marcar los cierres, los avisos y
+ * actualizar. El punto rojo, si los avisos están apagados en este dispositivo.
+ */
+function MenuDeLaBandeja({
+  pila, pendientes, vencidas, cierres, avisosActivos, sinAvisos, onPila, onCierres, onAvisos, onActualizar,
 }: {
-  etiqueta: string
-  atajo: string
-  tamano: 'grande' | 'chico'
-  tono?: 'neutro' | 'acento'
-  apagado?: boolean
-  onClick: () => void
-  children: React.ReactNode
+  pila: Pila
+  pendientes: number
+  vencidas: number
+  cierres: number
+  avisosActivos: boolean
+  sinAvisos: boolean
+  onPila: (p: Pila) => void
+  onCierres: () => void
+  onAvisos: () => void
+  onActualizar: () => void
 }) {
+  const IconoAvisos = avisosActivos ? BellRing : Bell
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          // Tocar el «…» no arrastra la tarjeta (mazo.tsx).
+          data-sin-arrastre=""
+          aria-label={sinAvisos ? 'Más opciones (los avisos están apagados)' : 'Más opciones'}
+          className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-accent)] outline-none transition-colors [-webkit-tap-highlight-color:transparent] active:bg-[var(--wa-hover)] data-[state=open]:bg-[var(--wa-selected)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:hidden"
+        >
+          <Ellipsis aria-hidden className="size-6" />
+          {sinAvisos && <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-[#ff453a] ring-2 ring-[#0e0e0e]" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className={MENU}>
+        {pila === 'responder' ? (
+          vencidas > 0 && (
+            <DropdownMenuItem onClick={() => onPila('vencidas')} className={ITEM}>
+              <Clock3 aria-hidden className={cn(ICONO_ITEM, 'text-[#ffb340]')} />
+              <span className="flex-1">Ver las vencidas</span>
+              <span className="tabular-nums text-[var(--wa-text-2)]">{vencidas}</span>
+            </DropdownMenuItem>
+          )
+        ) : (
+          <DropdownMenuItem onClick={() => onPila('responder')} className={ITEM}>
+            <Layers aria-hidden className={cn(ICONO_ITEM, 'text-[var(--wa-accent)]')} />
+            <span className="flex-1">Volver a las pendientes</span>
+            <span className="tabular-nums text-[var(--wa-text-2)]">{pendientes}</span>
+          </DropdownMenuItem>
+        )}
+        {cierres > 1 && (
+          <DropdownMenuItem onClick={onCierres} className={ITEM}>
+            <Handshake aria-hidden className={cn(ICONO_ITEM, 'text-[#8de0b0]')} />
+            Marcar los {cierres} cierres como listos
+          </DropdownMenuItem>
+        )}
+        {(vencidas > 0 || pila === 'vencidas' || cierres > 1) && (
+          <DropdownMenuSeparator className="mx-1.5 my-1 bg-[var(--wa-divider)]" />
+        )}
+        <DropdownMenuItem onClick={onAvisos} className={ITEM}>
+          <IconoAvisos aria-hidden className={cn(ICONO_ITEM, avisosActivos && 'text-[var(--wa-accent)]')} />
+          <span className="flex-1">{avisosActivos ? 'Avisos activados' : 'Activar avisos'}</span>
+          {sinAvisos && <span aria-hidden className="size-2 rounded-full bg-[#ff453a]" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onActualizar} className={ITEM}>
+          <RefreshCw aria-hidden className={ICONO_ITEM} />
+          Actualizar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Arriba de una escena, en el celular: «‹ Chats» y la campana (no hay título: no hace falta). */
+function BarraDeEscena({ onVolver, onAvisos, avisosActivos, sinAvisos }: {
+  onVolver: (() => void) | null
+  onAvisos: () => void
+  avisosActivos: boolean
+  sinAvisos: boolean
+}) {
+  const IconoAvisos = avisosActivos ? BellRing : Bell
+  return (
+    <div className="absolute inset-x-0 top-0 z-10 flex h-12 items-center justify-between pl-1 pr-2 lg:hidden">
+      {onVolver ? (
+        <button
+          type="button"
+          onClick={onVolver}
+          className="flex h-11 items-center gap-0.5 rounded-lg pr-2 text-[17px] text-[var(--wa-accent)] outline-none transition-opacity [-webkit-tap-highlight-color:transparent] active:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
+        >
+          <ChevronLeft aria-hidden className="size-7" strokeWidth={2.2} />
+          Chats
+        </button>
+      ) : <span />}
       <button
         type="button"
-        onClick={onClick}
-        aria-label={etiqueta}
-        aria-keyshortcuts={atajo === '←' ? 'ArrowLeft' : atajo === '→' ? 'ArrowRight' : atajo === '↓' ? 'ArrowDown' : atajo}
-        className={cn(
-          'flex items-center justify-center rounded-full outline-none transition-[transform,background-color,opacity] duration-150 [-webkit-tap-highlight-color:transparent] active:scale-90 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--wa-bg)]',
-          tamano === 'grande' ? 'size-16 lg:size-14' : 'mt-2.5 size-12 lg:mt-2 lg:size-11',
-          tono === 'acento'
-            ? 'bg-[var(--wa-accent)] text-[var(--wa-on-accent)] shadow-[0_14px_30px_-10px_rgba(33,192,99,0.75)] hover:bg-[var(--wa-accent-hover)] focus-visible:ring-[var(--wa-accent)]/70'
-            : 'bg-[#1f2022] text-white/90 ring-1 ring-white/[0.08] hover:bg-[#2a2b2e] focus-visible:ring-white/50',
-          apagado && 'opacity-45',
-        )}
+        onClick={onAvisos}
+        aria-label={avisosActivos ? 'Avisos activados' : 'Activar avisos'}
+        className="relative flex size-11 items-center justify-center rounded-full text-[var(--wa-accent)] outline-none [-webkit-tap-highlight-color:transparent] active:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
       >
-        {children}
+        <IconoAvisos aria-hidden className="size-[22px]" strokeWidth={2} />
+        {sinAvisos && <span aria-hidden className="absolute right-2 top-2 size-2 rounded-full bg-[#ff453a]" />}
       </button>
-      <span className="flex items-center gap-1 text-[12px] font-medium text-[var(--wa-text-2)]">
-        {etiqueta}
-        <kbd className="hidden rounded border border-white/15 px-1 font-sans text-[10.5px] leading-4 text-white/45 lg:inline">{atajo}</kbd>
-      </span>
     </div>
   )
 }
 
-/** «Mandando a Benjamín… Deshacer», con el anillo que se vacía. */
+/** «Mandando a Benjamín… Deshacer», con el anillo que se vacía, arriba de la barra de la tarjeta. */
 function BarraDeshacer({ accion, onDeshacer }: { accion: AccionEnEspera | null; onDeshacer: () => void }) {
   if (!accion) return null
   const quien = accion.p.nombrePila ?? accion.p.nombre
   return (
     <div
       key={accion.desde}
-      className="absolute inset-x-4 bottom-[calc(100%+6px)] z-40 mx-auto flex max-w-[420px] items-center gap-3 rounded-2xl bg-[#2a2b2e]/95 px-3 py-2.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] ring-1 ring-white/10 backdrop-blur-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2"
+      className="absolute inset-x-3 bottom-[calc(var(--pr-dock)+8px)] z-40 mx-auto flex max-w-[420px] items-center gap-3 rounded-2xl bg-[#2a2b2e]/95 px-3 py-2.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] ring-1 ring-white/10 backdrop-blur-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 lg:inset-x-4"
     >
       <svg viewBox="0 0 26 26" className="size-6 shrink-0 -rotate-90" aria-hidden>
         <circle cx="13" cy="13" r="11" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
@@ -617,14 +708,17 @@ function BarraDeshacer({ accion, onDeshacer }: { accion: AccionEnEspera | null; 
   )
 }
 
-function Escena({ pose, titulo, texto, children }: {
+function Escena({ pose, titulo, texto, barra, children }: {
   pose: 'saludo' | 'logro' | 'ayuda' | 'analiza'
   titulo: string
   texto: string
+  /** Lo de arriba en el celular (BarraDeEscena). */
+  barra?: React.ReactNode
   children?: React.ReactNode
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+    <div className="relative flex h-full flex-col items-center justify-center px-6 pb-[env(safe-area-inset-bottom,0px)] text-center">
+      {barra}
       <TexPose pose={pose} alto={150} halo entrada={pose === 'logro' ? 'logro' : 'suave'} prioridad />
       <p className="mt-5 text-[22px] font-bold leading-7 tracking-tight text-white lg:text-[19px]">{titulo}</p>
       <p className="mt-1.5 max-w-xs text-[15px] leading-5 text-[var(--wa-text-2)] lg:text-[13.5px]">{texto}</p>
@@ -651,7 +745,8 @@ function BotonEscena({ children, onClick, principal = false }: { children: React
 const COLORES_PAPELITOS = ['#21c063', '#ffb340', '#64b5ff', '#ff6961', '#bf5af2', '#f5f5f5']
 
 /** «Todo respondido»: Tex con la copa, los papelitos y lo que se hizo. */
-function Festejo({ respondidas, listas, vencidas, onVencidas, onAvisos }: {
+function Festejo({ barra, respondidas, listas, vencidas, onVencidas, onAvisos }: {
+  barra?: React.ReactNode
   respondidas: number
   listas: number
   vencidas: number
@@ -694,7 +789,7 @@ function Festejo({ respondidas, listas, vencidas, onVencidas, onAvisos }: {
           />
         ))}
       </div>
-      <Escena pose="logro" titulo="Todo respondido" texto={partes.length > 0 ? `${partes.join(' y ')}. Nadie quedó esperando.` : 'Nadie quedó esperando.'}>
+      <Escena barra={barra} pose="logro" titulo="Todo respondido" texto={partes.length > 0 ? `${partes.join(' y ')}. Nadie quedó esperando.` : 'Nadie quedó esperando.'}>
         {vencidas > 0 && <BotonEscena onClick={onVencidas}>Ver {vencidas} vencidas de la semana</BotonEscena>}
         {onAvisos && <BotonEscena principal onClick={onAvisos}><Bell aria-hidden className="size-4" /> Avisame cuando llegue algo</BotonEscena>}
       </Escena>

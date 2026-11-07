@@ -1,7 +1,9 @@
 'use client'
 
 // El mazo de «Por responder» (6/nov/2026): la tarjeta de arriba se arrastra
-// con el dedo (o el mouse) y las dos de atrás asoman abajo, más chicas.
+// con el dedo (o el mouse) y las dos de atrás esperan debajo, más chicas. En
+// el celular la tarjeta es la pantalla entera (7/nov/2026): las de atrás se
+// ven recién cuando se la arrastra, y crecen a su lugar mientras se va.
 //
 // - Derecha: lo que diga la tarjeta (mandar el borrador, escribir, abrir el
 //   chat). Izquierda: «Listo». Pasado el umbral (110 px) o con un tirón rápido
@@ -15,8 +17,10 @@
 //   chips ([data-sin-arrastre], que scrollea de costado) no arrastra.
 //   `touch-action: pan-y` en la carta y en cada cosa que scrollea adentro: el
 //   navegador se queda con lo vertical y nos deja lo horizontal.
-// - En iOS el borde izquierdo es del sistema (el «atrás»): el mazo deja 20 px
-//   de margen a cada lado.
+// - Los bordes de la pantalla son del sistema (el «atrás» de iOS y de
+//   Android): un toque que arranca a menos de 16 px de un costado no arrastra.
+//   El «volver» propio de la capa no corre sobre la tarjeta (data-sin-volver):
+//   para volver están el «‹» de la tarjeta y el «atrás» del sistema.
 
 import {
   forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, type ReactNode,
@@ -34,6 +38,8 @@ export interface MazoRef {
 
 const UMBRAL_PX = 110
 const DECIDIR_PX = 8
+/** La franja de cada costado de la pantalla que es del gesto del sistema. */
+const BORDE_DEL_SISTEMA_PX = 16
 // Un tirón rápido también suelta la tarjeta, pero mandar pide más que descartar:
 // a la derecha sale un mensaje a un cliente (probado: un arrastre de 60 px rápido
 // alcanzaba para mandar). A la izquierda alcanza con menos.
@@ -173,6 +179,7 @@ export const Mazo = forwardRef<MazoRef, {
   const alApretar = (e: React.PointerEvent<HTMLDivElement>) => {
     if (saliendo.current) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (e.pointerType !== 'mouse' && (e.clientX < BORDE_DEL_SISTEMA_PX || e.clientX > window.innerWidth - BORDE_DEL_SISTEMA_PX)) return
     // Los botones de la tarjeta (la burbuja del borrador) sí arrastran: con la
     // captura del puntero, el clic no llega a dispararse después de un arrastre.
     if ((e.target as Element).closest('[data-sin-arrastre], a, input, textarea, select')) return
@@ -236,8 +243,7 @@ export const Mazo = forwardRef<MazoRef, {
             key={id}
             ref={deArriba ? arriba : undefined}
             data-posicion={i}
-            // El arrastre de la tarjeta no es el «volver» de la capa (deslizar-para-volver.ts):
-            // ese queda para el margen de 20 px de cada lado y la barra de arriba.
+            // El arrastre de la tarjeta no es el «volver» de la capa (deslizar-para-volver.ts).
             data-sin-volver={deArriba ? '' : undefined}
             aria-hidden={deArriba ? undefined : true}
             inert={!deArriba}

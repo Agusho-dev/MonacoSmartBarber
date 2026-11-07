@@ -260,7 +260,7 @@ function MarcoMensajeria() {
           />
 
           {seccionAbierta ? (
-            <MarcoSeccion titulo={itemDe(activo).titulo} onVolver={() => irA('chats')}>
+            <MarcoSeccion titulo={itemDe(activo).titulo} onVolver={() => irA('chats')} sinBarra={section === 'responder'}>
               {section === 'broadcasts' && <BroadcastSection />}
               {section === 'automations' && <WorkflowList />}
               {section === 'responder' && <PorResponder convInicial={convPorResponder} onVerChat={verChatDesdePendiente} />}
