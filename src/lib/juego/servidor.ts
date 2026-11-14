@@ -15,6 +15,7 @@
 // =============================================================================
 
 import 'server-only'
+import { buildAppUrl } from '@/lib/app-url'
 import { createAdminClient } from '@/lib/supabase/server'
 import { ARENAS, IDS_ARENAS, arenaDeSucursal } from './arenas'
 import { leerTokenJuego, type TokenJuego } from './token'
@@ -26,6 +27,20 @@ type ClienteAdmin = ReturnType<typeof createAdminClient>
 export const SLUG_ANCLA_JUEGO = 'rondeau'
 /** La de `branches.timezone` por defecto. */
 export const ZONA_POR_DEFECTO = 'America/Argentina/Buenos_Aires'
+
+/** El dominio propio de «Corte Final» (next.config.ts, HOST_JUEGO). */
+export const ORIGEN_JUEGO = 'https://juego.monacobarberstudio.com'
+
+/**
+ * La dirección del juego con esa consulta (`t=<token>` del QR del kiosko, `d=<pase>` del pase de
+ * dueños). En producción, la raíz del dominio propio (HOST_JUEGO en next.config.ts: ahí la raíz es el
+ * juego y borrando la ruta no se llega al login del sistema); en desarrollo y en las vistas previas,
+ * /juego del mismo host. Los valores ya vienen en base64url: no hace falta codificarlos.
+ */
+export async function urlDelJuego(consulta: string): Promise<string> {
+  const base = process.env.VERCEL_ENV === 'production' ? `${ORIGEN_JUEGO}/` : `${await buildAppUrl()}/juego`
+  return `${base}?${consulta}`
+}
 
 /**
  * No se pudo LEER (red, base caída, error de PostgREST): distinto de «no

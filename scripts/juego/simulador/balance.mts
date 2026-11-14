@@ -30,6 +30,17 @@
  *     --sales=base,1      varias tandas de semillas juntas en un solo informe («base» = las de siempre)
  *     --dif=facil,normal  dificultades (def. las 3)
  *     --solo=a,b          sólo esos luchadores (contra todos)
+ *     --elenco=barberos   quiénes entran en las tablas (def. barberos): los personajes de los dueños
+ *                         (quinta tanda; sólo los eligen los dueños) no entran en las de los barberos,
+ *                         porque sus columnas moverían el kit de los barberos por peleas que ningún
+ *                         cliente juega. «duenos»: sólo los dueños, entre ellos (E de los dueños: lo
+ *                         que juegan online entre ellos). «todos»: los dos grupos juntos (como antes).
+ *                         «cruce»: sólo los dueños contra los barberos (quinta tanda, segunda parte):
+ *                         en B, la persona con cada dueño contra las CPU de los barberos (lo que juega
+ *                         un dueño con su pase en el modo local; su meta es la de las filas de los
+ *                         barberos y la perilla, la `asistencia` del dueño); en E, cada dueño contra
+ *                         los barberos y al revés (un dueño con pase contra un cliente, online); CPU
+ *                         contra CPU se informa (nadie lo ve)
  *     --hilos=K           hilos (def. 6)
  *     --informe=ruta.md   escribe el informe en Markdown
  *     --json=ruta.json    escribe los números crudos
@@ -444,7 +455,22 @@ async function principal(): Promise<void> {
   const salesArg = arg('sales')
   const sales: (number | null)[] = salesArg ? salesArg.split(',').map((s) => (s === 'base' ? null : Number(s))) : [salArg !== undefined ? Number(salArg) : null]
   const difs = (arg('dif')?.split(',') ?? DIFS) as Dificultad[]
-  const ids: IdPersonaje[] = [...IDS_PERSONAJES]
+  // Los dueños (la ficha los marca con `soloDuenos`, que suma el frente de acceso; mientras no esté,
+  // la lista del diseño de la quinta tanda).
+  const DUENOS_T5: readonly string[] = ['nacho', 'nehuen', 'nico_m', 'tony']
+  const esDueno = (id: IdPersonaje) => (PERSONAJES[id] as { soloDuenos?: boolean }).soloDuenos === true || DUENOS_T5.includes(id)
+  const elenco = arg('elenco') ?? 'barberos'
+  if (!['barberos', 'duenos', 'todos', 'cruce'].includes(elenco)) throw new Error(`--elenco: barberos, duenos, todos o cruce (no «${elenco}»)`)
+  const cruce = elenco === 'cruce'
+  const ids: IdPersonaje[] = IDS_PERSONAJES.filter((id) => elenco === 'todos' || cruce || (elenco === 'duenos') === esDueno(id))
+  // Las filas (el personaje de la persona en B) y las columnas (la CPU, y el rival en E): en «cruce», los
+  // dueños contra los barberos; si no, todos contra todos.
+  const filas = cruce ? ids.filter(esDueno) : ids
+  const columnas = cruce ? ids.filter((id) => !esDueno(id)) : ids
+  // Los cruces de CPU contra CPU y de persona contra persona (en «cruce», de los dos lados).
+  const pares: [IdPersonaje, IdPersonaje][] = cruce
+    ? [...filas.flatMap((a) => columnas.map((b) => [a, b] as [IdPersonaje, IdPersonaje])), ...columnas.flatMap((a) => filas.map((b) => [a, b] as [IdPersonaje, IdPersonaje]))]
+    : ids.flatMap((a) => ids.map((b) => [a, b] as [IdPersonaje, IdPersonaje]))
   const solo = arg('solo')?.split(',') as IdPersonaje[] | undefined
   const hilos = Math.max(1, Math.min(Number(arg('hilos') ?? 6), availableParallelism()))
   const rutaAjuste = arg('ajuste')
@@ -459,20 +485,19 @@ async function principal(): Promise<void> {
     let bPer = 1
     for (const dif of difs) {
       const n = dif === 'normal' ? semillasNormal : semillas
-      for (const a of ids) {
-        for (const b of ids) {
-          for (let s = 0; s < n; s++) {
-            const semilla = semillaDe(bCpu++, 7919, sal)
-            if (!solo || solo.includes(a) || solo.includes(b)) trabajos.push({ a, b, dif, semilla, tipo: 'cpu', humano: null, bot: null, demora: 0 })
-          }
+      for (const [a, b] of pares) {
+        for (let s = 0; s < n; s++) {
+          const semilla = semillaDe(bCpu++, 7919, sal)
+          if (!solo || solo.includes(a) || solo.includes(b)) trabajos.push({ a, b, dif, semilla, tipo: 'cpu', humano: null, bot: null, demora: 0 })
         }
       }
-      // Los humanos: cada barbero del humano contra los 13 rivales, alternando el lado de la pantalla.
-      // Todos los humanos juegan las mismas partidas (la misma semilla para la misma celda y vuelta).
+      // Los humanos: cada barbero del humano (las filas) contra todos los rivales (las columnas),
+      // alternando el lado de la pantalla. Todos los humanos juegan las mismas partidas (la misma
+      // semilla para la misma celda y vuelta).
       const nh = dif === 'normal' ? semillasHumanoNormal : semillasHumano
-      for (const yo of ids) {
+      for (const yo of filas) {
         for (let s = 0; s < nh; s++) {
-          const rival = ids[Math.floor(s / 2) % ids.length]
+          const rival = columnas[Math.floor(s / 2) % columnas.length]
           const semilla = semillaDe(bHum++, 104729, sal)
           if (solo && !solo.includes(yo) && !solo.includes(rival)) continue
           const lado = (s % 2) as Lado
@@ -484,14 +509,12 @@ async function principal(): Promise<void> {
     // Persona contra persona (no hay CPU: la dificultad no cambia nada; va como normal). Todas las
     // personas y demoras juegan las mismas partidas.
     if (semillasNovatos > 0) {
-      for (const a of ids) {
-        for (const b of ids) {
-          for (let s = 0; s < semillasNovatos; s++) {
-            const semilla = semillaDe(bPer++, 1299709, sal)
-            if (solo && !solo.includes(a) && !solo.includes(b)) continue
-            trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'novatos', humano: null, bot: NOVATO_REF, demora: 0 })
-            for (const bot of personas) for (const demora of demoras) trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'personas', humano: null, bot, demora })
-          }
+      for (const [a, b] of pares) {
+        for (let s = 0; s < semillasNovatos; s++) {
+          const semilla = semillaDe(bPer++, 1299709, sal)
+          if (solo && !solo.includes(a) && !solo.includes(b)) continue
+          trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'novatos', humano: null, bot: NOVATO_REF, demora: 0 })
+          for (const bot of personas) for (const demora of demoras) trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'personas', humano: null, bot, demora })
         }
       }
     }
@@ -519,6 +542,9 @@ async function principal(): Promise<void> {
     {
       difs,
       ids,
+      filas,
+      columnas,
+      cruce,
       seg,
       partidas: trabajos.length,
       semillas,
@@ -555,6 +581,12 @@ function ic(v: number, n: number): number {
 interface Opciones {
   difs: Dificultad[]
   ids: IdPersonaje[]
+  /** Los personajes de la persona en B y las filas de las matrices (en «cruce», los dueños). */
+  filas: IdPersonaje[]
+  /** Las CPU de B y las columnas de las matrices (en «cruce», los barberos). */
+  columnas: IdPersonaje[]
+  /** --elenco=cruce: sólo los dueños contra los barberos. CPU contra CPU, las columnas de B y D se informan. */
+  cruce: boolean
   seg: number
   partidas: number
   semillas: number
@@ -616,7 +648,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     s[1] += g0
   }
   if (Object.keys(ac.cruces).length) {
-    L('## C. Victorias por luchador (CPU contra CPU, sin espejos)')
+    L(`## C. Victorias por luchador (CPU contra CPU, sin espejos)${o.cruce ? ': los dueños contra los barberos (se informa, no es meta)' : ''}`)
     L()
     L(`| Luchador | ${o.difs.join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
@@ -624,8 +656,9 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       const celdas = o.difs.map((d) => {
         const x = porLuchador[d]?.[id]
         const v = x ? pct(x[1], x[0]) : NaN
-        if (Number.isFinite(v) && (v < 45 || v > 55)) fallas.push(`${nombre(id)} gana ${f1(v)} % en ${d} (meta 45–55)`)
-        return `${f1(v)} ±${f1(ic(v, x?.[0] ?? 0))}${Number.isFinite(v) && (v < 45 || v > 55) ? ' (!)' : ''}`
+        const malo = !o.cruce && Number.isFinite(v) && (v < 45 || v > 55)
+        if (malo) fallas.push(`${nombre(id)} gana ${f1(v)} % en ${d} (meta 45–55)`)
+        return `${f1(v)} ±${f1(ic(v, x?.[0] ?? 0))}${malo ? ' (!)' : ''}`
       })
       L(`| ${nombre(id)} | ${celdas.join(' | ')} |`)
     }
@@ -636,7 +669,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       const e = espejo[d]
       const v = s ? pct(s[1], s[0]) : NaN
       const ve = e ? pct(e[1], e[0]) : NaN
-      if (Math.abs(v - 50) >= 3) fallas.push(`sesgo de lado en ${d}: ${f1(v)} %`)
+      if (!o.cruce && Math.abs(v - 50) >= 3) fallas.push(`sesgo de lado en ${d}: ${f1(v)} %`)
       L(`- ${d}: izquierda ${f1(v)} % (${s?.[0] ?? 0} partidas); espejos: izquierda ${f1(ve)} % (${e?.[0] ?? 0})`)
     }
     L()
@@ -645,14 +678,14 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     const dm: Dificultad = o.difs.includes('normal') ? 'normal' : o.difs[0]
     L(`## C. Cruces en ${dm} (gana la fila contra la columna, los dos lados juntos)`)
     L()
-    L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} |`)
-    L(`|---|${o.ids.map(() => '---:').join('|')}|`)
+    L(`| | ${o.columnas.map((id) => nombre(id)).join(' | ')} |`)
+    L(`|---|${o.columnas.map(() => '---:').join('|')}|`)
     const fueraLista: string[] = []
     const indicativos: string[] = []
     let peor = { v: 50, a: '', b: '', n: 0 }
     let nMin = Infinity
-    for (const a of o.ids) {
-      const celdas = o.ids.map((b) => {
+    for (const a of o.filas) {
+      const celdas = o.columnas.map((b) => {
         if (a === b) return '·'
         const x = ac.cruces[`${dm}|${a}|${b}`]
         const y = ac.cruces[`${dm}|${b}|${a}`]
@@ -662,7 +695,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
         if (n > 0) nMin = Math.min(nMin, n)
         if (Number.isFinite(v) && Math.abs(v - 50) > Math.abs(peor.v - 50)) peor = { v, a: nombre(a), b: nombre(b), n }
         const malo = Number.isFinite(v) && (v < 35 || v > 65)
-        if (malo && a < b) (n >= CRUCE_DECIDE ? fueraLista : indicativos).push(`${nombre(a)}–${nombre(b)} ${f1(v)} (${n})`)
+        if (malo && (o.cruce || a < b)) (n >= CRUCE_DECIDE ? fueraLista : indicativos).push(`${nombre(a)}–${nombre(b)} ${f1(v)} (${n})`)
         return `${Number.isFinite(v) ? v.toFixed(0) : '–'}${malo ? '(!)' : ''}`
       })
       L(`| ${nombre(a)} | ${celdas.join(' | ')} |`)
@@ -673,7 +706,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
         (indicativos.length ? ` Con menos partidas (indicativos, no deciden): ${indicativos.join(', ')}.` : '') +
         ` El más desparejo: ${peor.a} contra ${peor.b}, ${f1(peor.v)} % (${peor.n} partidas, ±${f1(ic(peor.v, peor.n))}).`,
     )
-    if (fueraLista.length > 0 && dm === 'normal') fallas.push(`${fueraLista.length} cruces fuera de 35–65 % en normal: ${fueraLista.join(', ')}`)
+    if (fueraLista.length > 0 && dm === 'normal' && !o.cruce) fallas.push(`${fueraLista.length} cruces fuera de 35–65 % en normal: ${fueraLista.join(', ')}`)
     if (dm === 'normal' && Number.isFinite(nMin) && nMin < CRUCE_DECIDE) L(`Los cruces tienen ${nMin} partidas: para decidirlos hacen falta ${CRUCE_DECIDE} (--semillasNormal=${CRUCE_DECIDE / 2} o dos sales).`)
     L()
 
@@ -685,7 +718,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       const media = rs.reduce((s, x) => s + x, 0) / Math.max(1, rs.length)
       const p = (q: number) => rs[Math.min(rs.length - 1, Math.floor(q * rs.length))] ?? 0
       const tiempo = pct(ac.tiempos[d] ?? 0, ac.totalRounds[d] ?? 0)
-      if (tiempo > 3) fallas.push(`en ${d} el ${f1(tiempo)} % de los rounds termina por tiempo`)
+      if (tiempo > 3 && !o.cruce) fallas.push(`en ${d} el ${f1(tiempo)} % de los rounds termina por tiempo`)
       L(`- ${d}: media ${f1(media)} s (p10 ${f1(p(0.1))}, p50 ${f1(p(0.5))}, p90 ${f1(p(0.9))}); por tiempo ${f1(tiempo)} %`)
     }
     L()
@@ -712,7 +745,9 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
         usosN.push(u)
         const porPartida = u / Math.max(1, j)
         const acierta = pct(h, u)
-        if (u === 0 || h === 0) fallas.push(`${nombre(id)}: ${PERSONAJES[id].especiales[n - 1].nombre} nunca ${u === 0 ? 'se usa' : 'acierta'}`)
+        if (o.cruce) {
+          /* se informa */
+        } else if (u === 0 || h === 0) fallas.push(`${nombre(id)}: ${PERSONAJES[id].especiales[n - 1].nombre} nunca ${u === 0 ? 'se usa' : 'acierta'}`)
         else if (porPartida < 0.4) fallas.push(`${nombre(id)}: ${PERSONAJES[id].especiales[n - 1].nombre} casi no se usa (${porPartida.toFixed(2)} por partida)`)
         fila.push(PERSONAJES[id].especiales[n - 1].nombre, porPartida.toFixed(2), `${f1(acierta)} %`)
       }
@@ -737,7 +772,11 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
   const botsHumanos = o.humanos.filter((bot) => Object.keys(ac.humanos).some((k) => k.startsWith(`${bot}|`)))
   if (botsHumanos.length) {
     // Resumen de B: cada persona contra la CPU en cada dificultad (todas las celdas juntas).
-    L('## B. Personas contra la CPU: % que gana la persona (los 13 barberos y los 13 rivales, los dos lados)')
+    L(
+      o.cruce
+        ? '## B. Personas con los dueños contra las CPU de los barberos: % que gana la persona (los dos lados)'
+        : '## B. Personas contra la CPU: % que gana la persona (todos los barberos y todos los rivales, los dos lados)',
+    )
     L()
     L(`Oficiales para la meta B: ${OFICIALES.filter((b) => botsHumanos.includes(b)).map(rotulo).join(', ') || 'ninguno'}. Referencia: ${botsHumanos.filter((b) => !OFICIALES.includes(b)).map(rotulo).join(', ') || 'ninguna'}.`)
     L()
@@ -754,13 +793,13 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
   }
   for (const bot of botsHumanos) {
     const oficial = OFICIALES.includes(bot)
-    L(`## B. Humano «${bot}»${oficial ? ' (oficial)' : ' (referencia)'} contra la CPU: % que gana con cada barbero (los 13 rivales, los dos lados)`)
+    L(`## B. Humano «${bot}»${oficial ? ' (oficial)' : ' (referencia)'} contra la CPU: % que gana con cada ${o.cruce ? 'dueño (contra las CPU de los barberos' : 'barbero (todos los rivales'}, los dos lados)`)
     L()
     L(`Reacción: ${rotulo(bot)}.`)
     L()
-    L(`| Barbero del humano | ${o.difs.join(' | ')} |`)
+    L(`| ${o.cruce ? 'Dueño' : 'Barbero'} del humano | ${o.difs.join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
-    for (const id of o.ids) {
+    for (const id of o.filas) {
       const celdas = o.difs.map((d) => {
         const [n, g] = hum(bot, d, (yo) => yo === id)
         const v = pct(g, n)
@@ -783,10 +822,10 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     const [lo, hi] = META_HUMANO_NORMAL
     L(`### Matriz humano «${bot}» × CPU en normal (fila: barbero del humano; columna: barbero de la CPU; % que gana el humano)`)
     L()
-    L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} | por barbero del humano |`)
-    L(`|---|${o.ids.map(() => '---:').join('|')}|---:|`)
-    for (const yo of o.ids) {
-      const celdas = o.ids.map((cpu) => {
+    L(`| | ${o.columnas.map((id) => nombre(id)).join(' | ')} | por ${o.cruce ? 'dueño' : 'barbero'} del humano |`)
+    L(`|---|${o.columnas.map(() => '---:').join('|')}|---:|`)
+    for (const yo of o.filas) {
+      const celdas = o.columnas.map((cpu) => {
         const [n, g] = hum(bot, 'normal', (y, c) => y === yo && c === cpu)
         return n ? pct(g, n).toFixed(0) : '–'
       })
@@ -796,10 +835,12 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       if (malo) fallas.push(`humano ${bot} en normal con ${nombre(yo)} gana ${f1(v)} % (meta ${lo}–${hi})`)
       L(`| ${nombre(yo)} | ${celdas.join(' | ')} | ${f1(v)} ±${f1(ic(v, n))}${malo ? ' (!)' : ''} |`)
     }
-    const porCpu = o.ids.map((cpu) => {
+    // En «cruce», la columna (la CPU de un barbero contra las personas con los dueños) se informa: su
+    // meta es la de la tabla de los barberos.
+    const porCpu = o.columnas.map((cpu) => {
       const [n, g] = hum(bot, 'normal', (_y, c) => c === cpu)
       const v = pct(g, n)
-      const malo = oficial && Number.isFinite(v) && (v < lo || v > hi)
+      const malo = oficial && !o.cruce && Number.isFinite(v) && (v < lo || v > hi)
       if (malo) fallas.push(`humano ${bot} en normal contra la CPU ${nombre(cpu)} gana ${f1(v)} % (meta ${lo}–${hi})`)
       return `${f1(v)}${malo ? ' (!)' : ''}`
     })
@@ -810,18 +851,18 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
 
   // ─── Reparto de especiales de la CPU contra el humano simple (oficial) ───
   if (Object.keys(ac.especialesCpu).some((k) => k.startsWith('simple|'))) {
-    L('## D. Especiales de la CPU contra el humano simple (oficial): parte de cada especial (y usos por partida)')
+    L(`## D. Especiales de la CPU contra el humano simple (oficial): parte de cada especial (y usos por partida)${o.cruce ? ' (se informa: la meta es la de los barberos)' : ''}`)
     L()
     L(`| CPU | ${o.difs.map((d) => `${d}: e1 / e2 (usos)`).join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
-    for (const id of o.ids) {
+    for (const id of o.columnas) {
       const celdas = o.difs.map((d) => {
         const x = ac.especialesCpu[`simple|${d}|${id}`]
         if (!x) return '–'
         const total = x[0] + x[1]
         const v1 = pct(x[0], total)
         const v2 = pct(x[1], total)
-        const malo = total > 0 && Math.min(v1, v2) < MIN_ESPECIAL_CPU
+        const malo = !o.cruce && total > 0 && Math.min(v1, v2) < MIN_ESPECIAL_CPU
         if (malo) {
           const flojo = v1 < v2 ? 0 : 1
           fallas.push(`la CPU ${nombre(id)} en ${d} usa ${PERSONAJES[id].especiales[flojo].nombre} ${f1(Math.min(v1, v2))} % de las veces contra el humano simple (meta ≥ ${MIN_ESPECIAL_CPU})`)
@@ -852,11 +893,11 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     return { fila, lado: pct(g0, n0), n: n0 }
   }
   const matriz = (reg: Record<string, [number, number, number]>) => {
-    L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} | total |`)
-    L(`|---|${o.ids.map(() => '---:').join('|')}|---:|`)
+    L(`| | ${o.columnas.map((id) => nombre(id)).join(' | ')} | total |`)
+    L(`|---|${o.columnas.map(() => '---:').join('|')}|---:|`)
     const { fila } = marginales(reg)
-    for (const a of o.ids) {
-      const celdas = o.ids.map((b) => {
+    for (const a of o.filas) {
+      const celdas = o.columnas.map((b) => {
         if (a === b) return '·'
         const x = reg[`${a}|${b}`]
         const y = reg[`${b}|${a}`]
@@ -881,7 +922,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     const [clo, chi] = META_E_CELDA
     // «simple contra simple» (sólo GOLPE) se informa pero no cuenta para la meta (ver el encabezado).
     const cuenta = (c: string) => !c.startsWith('simple|') && !c.startsWith('simple@')
-    L('## E. Persona contra persona (la pelea online): % que gana cada barbero, por persona y demora de entrada')
+    L(`## E. Persona contra persona (la pelea online): % que gana cada ${o.cruce ? 'dueño contra los barberos' : 'barbero'}, por persona y demora de entrada`)
     L()
     L(
       `Cada columna es una persona contra sí misma con la demora del online (D ticks: lo que aprieta en el tick n se aplica en n + D; ` +
@@ -898,7 +939,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     const fueraCelda: string[] = []
     const fueraPromedio: string[] = []
     const margs = Object.fromEntries(combos.map((c) => [c, marginales(regPersona[c])]))
-    for (const id of o.ids) {
+    for (const id of o.filas) {
       const vs: number[] = []
       const celdas = combos.map((c) => {
         const [n, g] = margs[c].fila[id] ?? [0, 0]
@@ -918,7 +959,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       L(`| ${nombre(id)} | ${celdas.join(' | ')} | ${f1(prom)}${malo ? ' (!)' : ''} | ${rango} |`)
     }
     L(`| lado izquierdo | ${combos.map((c) => f1(margs[c].lado)).join(' | ')} | | |`)
-    const nPorFila = combos.map((c) => Object.values(margs[c].fila)[0]?.[0] ?? 0)
+    const nPorFila = combos.map((c) => margs[c].fila[o.filas[0]]?.[0] ?? 0)
     L()
     L(`Partidas por barbero en cada columna: ${Math.min(...nPorFila)} (±${f1(ic(50, Math.min(...nPorFila)))} en el medio).`)
     L()

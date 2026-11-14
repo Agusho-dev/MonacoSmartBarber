@@ -3,13 +3,13 @@
 import { Check, LoaderCircle, Swords, X } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { ELECCION_MS, type EstadoDuelo } from '@/lib/juego/online/duelo'
-import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
+import { IDS_PARA_CLIENTES, PERSONAJES } from '@/lib/juego/personajes'
 import type { IdPersonaje } from '@/lib/juego/tipos'
 import { plantelOrdenado, proximamenteOrdenado, sucursalesDelPlantel } from '@/lib/juego/ui/plantel'
 import { ImagenJuego } from '../imagen-juego'
-import { EspecialesLuchador, FiltroSucursal, GrillaPlantel, HeroeLuchador, ProximamentePlantel } from '../plantel'
+import { EspecialesLuchador, FiltroSucursal, GrillaPlantel, GrupoDuenos, HeroeLuchador, ProximamentePlantel } from '../plantel'
 
-/** Las sucursales del filtro salen del catálogo (una vez). */
+/** Las sucursales del filtro salen del catálogo (una vez; sólo los barberos). */
 const SUCURSALES = sucursalesDelPlantel()
 
 /** Segundos que quedan para elegir: arranca en 20 al entrar a la elección. */
@@ -28,11 +28,14 @@ function useReloj(activo: boolean, confirmada: boolean): number {
 
 /**
  * La elección de la pelea online: los mismos luchadores que contra la CPU (grilla, filtro por
- * sucursal y ficha grande), sin rival que elegir (es el otro jugador) y con el reloj de 20 s.
+ * sucursal, el grupo de los dueños con el pase y ficha grande), sin rival que elegir (es el otro
+ * jugador) y con el reloj de 20 s. El personaje del rival puede ser un dueño (si el otro tiene el
+ * pase): el protocolo acepta todo el catálogo.
  */
 export function EleccionOnline({
   estado,
   sucursal,
+  duenos,
   onElegir,
   onConfirmar,
   onSalir,
@@ -42,6 +45,8 @@ export function EleccionOnline({
   estado: EstadoDuelo
   /** La sucursal de la sala (sus barberos van primero). */
   sucursal: string | null
+  /** Los personajes de los dueños que este celular ve (con el pase; si no, vacío). */
+  duenos: readonly IdPersonaje[]
   onElegir: (id: IdPersonaje) => void
   onConfirmar: () => void
   onSalir: () => void
@@ -112,7 +117,7 @@ export function EleccionOnline({
           <FiltroSucursal
             sucursales={SUCURSALES}
             filtro={filtro}
-            total={IDS_PERSONAJES.length}
+            total={IDS_PARA_CLIENTES.length}
             propia={sucursal}
             onFiltro={(f) => {
               if (f === filtro) return
@@ -121,6 +126,7 @@ export function EleccionOnline({
             }}
           />
           <GrillaPlantel ids={ids} jugador={estado.mia} bloqueada={estado.confirmada} onElegir={onElegir} />
+          <GrupoDuenos ids={duenos} jugador={estado.mia} bloqueada={estado.confirmada} onElegir={onElegir} />
           <ProximamentePlantel lista={prontos} onBloqueado={onBloqueado} />
           <EspecialesLuchador ficha={ficha} />
         </div>

@@ -527,6 +527,121 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
   ok(Math.abs(xl - lu.luchadores[0].x - 145) < 1, 'Acelerado: esquiva más larga', (xl - lu.luchadores[0].x).toFixed(1))
 }
 
+// ─── Quinta tanda (14/nov): cómo se cruzan las piezas nuevas ───
+/** Carga 10 para los dos durante toda la prueba (los especiales salen cuando se aprietan). */
+function cargados(p: Partida) {
+  p.luchadores[0].carga = 10
+  p.luchadores[1].carga = 10
+}
+// El Smash devuelve el lente de Fran: el hipnotizado es Fran y camina hacia Nehuen.
+{
+  let casos = 0
+  let bien = 0
+  for (let t0 = 20; t0 <= 80; t0 += 2) {
+    const p = nueva(['nehuen', 'fran'], 300, 700)
+    cargados(p)
+    let hacia: number | null | undefined
+    const evs = correr(p, 260, (t, q) => {
+      if (q.luchadores[1].efectos.hipnotizado > 0 && hacia === undefined) hacia = internoDe(q).luchadores[1].hipnotizadoPor
+      return [{ especial2: t >= t0 && t < t0 + 2 }, { especial1: t < 2 }]
+    })
+    if (!de(evs, 'devuelto').some((d) => d.proyectil === 'hipnosis')) continue
+    casos++
+    if (de(evs, 'hipnotizado').some((h) => h.quien === 1) && hacia === 0 && !de(evs, 'hipnotizado').some((h) => h.quien === 0)) bien++
+  }
+  ok(casos > 0 && bien === casos, 'smash: el lente devuelto hipnotiza a Fran, que camina hacia Nehuen', `${bien}/${casos}`)
+}
+// El Smash devuelve el pañal de Lucas: la nube es de Nehuen.
+{
+  let casos = 0
+  let bien = 0
+  for (let t0 = 20; t0 <= 90; t0 += 2) {
+    const p = nueva(['nehuen', 'lucas'], 300, 700)
+    cargados(p)
+    const evs = correr(p, 300, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, { especial2: t < 2 }])
+    if (!de(evs, 'devuelto').some((d) => d.proyectil === 'panal')) continue
+    casos++
+    const nubes = de(evs, 'nube')
+    if (nubes.length > 0 && nubes.every((n) => n.quien === 0)) bien++
+  }
+  ok(casos > 0 && bien === casos, 'smash: el pañal devuelto deja la nube de Nehuen', `${bien}/${casos}`)
+}
+// Una carta devuelta dispara el All In del que la tiró.
+{
+  let devueltasConContra = 0
+  let cartaAChino = 0
+  for (let t0 = 20; t0 <= 60; t0 += 2) {
+    const p = nueva(['nehuen', 'chino'], 300, 700)
+    cargados(p)
+    const evs = correr(p, 260, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, { especial1: t < 2, especial2: t >= 30 && t % 4 < 2 }])
+    if (!de(evs, 'devuelto').some((d) => d.proyectil === 'carta')) continue
+    if (de(evs, 'contra').some((c) => c.quien === 1)) devueltasConContra++
+    cartaAChino += de(evs, 'golpe').filter((g) => g.victima === 1 && g.herramienta === 'carta' && !g.bloqueado).length
+  }
+  ok(devueltasConContra > 0, 'contra: una carta devuelta por Nehuen dispara el All In de Chino', `${devueltasConContra} casos (${cartaAChino} cartas le entraron en otros)`)
+}
+// Lo que no vuela no se devuelve: el spray (un chorro) y el bombo (va por el piso).
+{
+  let devueltos = 0
+  for (let t0 = 10; t0 <= 70; t0 += 3) {
+    for (const [rival, n] of [['leo', 2], ['nico_u', 1]] as const) {
+      const p = nueva(['nehuen', rival], 300, rival === 'leo' ? 480 : 700)
+      cargados(p)
+      const evs = correr(p, 220, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, n === 1 ? { especial1: t < 2 } : { especial2: t < 2 }])
+      devueltos += de(evs, 'devuelto').length
+    }
+  }
+  ok(devueltos === 0, 'smash: no devuelve el spray de Leo ni el bombo de Nico U.', `${devueltos} devueltos`)
+}
+// El espejo del All In: dos dominios y nadie pega; salen las dos embestidas flojas.
+{
+  const p = nueva(['chino', 'chino'], 400, 560)
+  cargados(p)
+  const evs = correr(p, 140, (t) => [{ especial2: t < 2 }, { especial2: t < 2 }])
+  const g = de(evs, 'golpe').filter((x) => x.herramienta === 'dominio')
+  ok(de(evs, 'contra').length === 0 && g.length >= 1, 'contra: espejo de Chino, ninguna contra y salen las embestidas', `${g.length} golpes de las embestidas`)
+}
+// Una púa en el aire se devuelve (y la devuelta es de Nehuen); clavada, no.
+{
+  let casos = 0
+  let bien = 0
+  for (let t0 = 20; t0 <= 80; t0 += 2) {
+    const p = nueva(['nehuen', 'nico_m'], 300, 650)
+    cargados(p)
+    const evs = correr(p, 260, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, { especial2: t < 2 }])
+    if (!de(evs, 'devuelto').some((d) => d.proyectil === 'espina')) continue
+    casos++
+    const plantadasDeNehuen = de(evs, 'plantada').filter((e) => e.quien === 0).length
+    const aNicoM = de(evs, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'espinas').length
+    if (plantadasDeNehuen + aNicoM > 0) bien++
+  }
+  ok(casos > 0 && bien === casos, 'smash: una púa en el aire se devuelve y queda de Nehuen', `${bien}/${casos}`)
+}
+// El Despido contra el que ya está inmune al control: el arrodillado queda en el piso de ESCALADO_STUN.
+{
+  const p = nueva(['tony', 'simon'], 400, 520)
+  cargados(p)
+  let stunMax = 0
+  correr(p, 60, (t, q) => {
+    internoDe(q).luchadores[1].sinControl = 180
+    stunMax = Math.max(stunMax, internoDe(q).luchadores[1].stun)
+    return [{ especial2: t < 2 }, {}]
+  })
+  const sp = K.tony.especiales[1].siPega
+  ok(!!sp && stunMax > 0 && stunMax <= Math.ceil(sp.aturde * 0.3) + 1, 'despido: al que está inmune al control casi no lo arrodilla', `${stunMax} ticks`)
+}
+
+// El hipnotizado es un estado de control: no entra en el que ya está inmune al control (TOPE_ENCIERRO).
+{
+  const p = nueva(['fran', 'simon'])
+  const I = internoDe(p)
+  I.luchadores[1].sinControl = 180
+  ok(!ponerEstado(p, I, 1, 'hipnotizado', 45), 'hipnotizado: no entra en el que ya lleva demasiado encerrado')
+  I.luchadores[1].sinControl = 0
+  ok(ponerEstado(p, I, 1, 'hipnotizado', 45) && p.luchadores[1].efectos.hipnotizado === 45, 'hipnotizado: entra en el que no')
+  ok(ponerEstado(p, I, 1, 'cegado', 75), 'cegado: entra aunque esté encerrado (no saca el control)')
+}
+
 // ─── Fichas y kits coherentes ───
 {
   let bien = true

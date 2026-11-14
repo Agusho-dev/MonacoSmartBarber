@@ -9,6 +9,7 @@
  */
 import { cuadroFx, dibujarFx, duracionFx, fx, FX_HIELO_TROZO, FX_MECHONES, FX_POLVO, FX_VIDRIO } from './efectos'
 import { enMundo, spriteMundo, type Escena } from './escena'
+import type { NombreUtileria } from './utileria'
 import { azar, salidaCubica, TAU } from './util'
 
 export const P_CHISPA = 0
@@ -30,7 +31,11 @@ export const P_NOTA = 12
 export const P_CRUZ = 13
 /** Burbuja verdosa (estado lento). */
 export const P_BURBUJA = 14
-/** Trozo que cae y rebota: paleta 0 = roca (cuadro = forma), 1 = vidrio ámbar, 2 = casquillo. */
+/**
+ * Trozo que cae y rebota: paleta 0 = roca (cuadro = forma), 1 = vidrio ámbar, 2 = casquillo. Desde la
+ * quinta tanda, los que son un objeto de la utilería (TROZO_UTILERIA): naipe rojo y violeta, roca con
+ * borde cian, púa dorada, dígito cian o rojo (cuadro = 0 o 1) y lágrima.
+ */
 export const P_TROZO = 15
 /** Lengua de fuego que sube y se achica (aditiva). */
 export const P_LLAMA = 16
@@ -250,6 +255,35 @@ function esAditiva(tipo: number): boolean {
 
 const ROCAS = ['roca0', 'roca1', 'roca2'] as const
 
+/** Paletas de P_TROZO que son objetos de la utilería (quinta tanda). */
+export const TROZO_NAIPE = 3
+export const TROZO_NAIPE_VIOLETA = 4
+export const TROZO_ROCA_CIAN = 5
+export const TROZO_PUA = 6
+export const TROZO_DIGITO = 7
+export const TROZO_DIGITO_ROJO = 8
+export const TROZO_LAGRIMA = 9
+const ROCAS_CIAN = ['roca_cian0', 'roca_cian1', 'roca_cian2'] as const
+
+function trozoUtileria(pal: number, cuadro: number): NombreUtileria {
+  switch (pal) {
+    case TROZO_NAIPE:
+      return 'naipe'
+    case TROZO_NAIPE_VIOLETA:
+      return 'naipe_violeta'
+    case TROZO_ROCA_CIAN:
+      return ROCAS_CIAN[cuadro % 3]
+    case TROZO_PUA:
+      return 'pua'
+    case TROZO_DIGITO:
+      return cuadro % 2 ? 'digito1' : 'digito0'
+    case TROZO_DIGITO_ROJO:
+      return cuadro % 2 ? 'digito1_rojo' : 'digito0_rojo'
+    default:
+      return 'lagrima'
+  }
+}
+
 /** Dibuja las partículas de una capa (0 = detrás de los luchadores, 1 = adelante, 2 = encima del super flash). */
 export function dibujarParticulas(E: Escena, capa: number): void {
   const P = E.parts
@@ -388,6 +422,11 @@ export function dibujarParticulas(E: Escena, capa: number): void {
         if (pal === 0) {
           const t = P.tam[i]
           spriteMundo(E, E.util.de(ROCAS[P.cuadro[i] % 3]), x, y, t, t, P.rot[i], alfa)
+          break
+        }
+        if (pal >= TROZO_NAIPE) {
+          const t = P.tam[i]
+          spriteMundo(E, E.util.de(trozoUtileria(pal, P.cuadro[i])), x, y, t, t, P.rot[i], alfa)
           break
         }
         enMundo(E)
@@ -771,6 +810,44 @@ export function emitirTrozos(
     P.vrot[i] = azar(-14, 14)
     P.paleta[i] = paleta
     P.cuadro[i] = (Math.random() * 3) | 0
+  }
+}
+
+/**
+ * Objetos de la utilería que salen volando (quinta tanda): `paleta` = TROZO_* (naipes, rocas con borde
+ * cian, la púa, dígitos, lágrimas), con (vx, vy) de base más un desvío, su gravedad (negativa = suben,
+ * como los dígitos del código) y su tamaño en unidades de mundo.
+ */
+export function emitirObjetos(
+  E: Escena,
+  x: number,
+  y: number,
+  n: number,
+  paleta: number,
+  vx: number,
+  vy: number,
+  desvio: number,
+  grav: number,
+  tam: number,
+  vida = 0.9,
+  capa = -1,
+): void {
+  const P = E.parts
+  for (let c = cuantas(E, n); c > 0; c--) {
+    const i = P.nueva(P_TROZO, x + azar(-8, 8), y + azar(-8, 8), vida * azar(0.75, 1.25))
+    if (i < 0) return
+    const a = azar(0, TAU)
+    const d = azar(0, desvio)
+    P.vx[i] = vx + Math.cos(a) * d
+    P.vy[i] = vy + Math.sin(a) * d
+    P.grav[i] = grav
+    P.roce[i] = grav < 0 ? 2.2 : 0.6
+    P.tam[i] = tam * azar(0.8, 1.2)
+    P.rot[i] = paleta === TROZO_DIGITO || paleta === TROZO_DIGITO_ROJO || paleta === TROZO_LAGRIMA ? 0 : azar(0, TAU)
+    P.vrot[i] = paleta === TROZO_DIGITO || paleta === TROZO_DIGITO_ROJO || paleta === TROZO_LAGRIMA ? 0 : azar(-12, 12)
+    P.paleta[i] = paleta
+    P.cuadro[i] = (Math.random() * 3) | 0
+    if (capa >= 0) P.capa[i] = capa
   }
 }
 

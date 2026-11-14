@@ -20,11 +20,13 @@ import type {
 import { CLAVES_ANIMACION } from '../tipos'
 import { cuadroFx, dibujarFx, fx, FX_ARCO, FX_ESTRELLAS, FX_HIELO, type FxAnim } from './efectos'
 import { caminoRedondeado, enMundo, spriteMundo, type Escena } from './escena'
-import { dibujarEspecialVisual, especialContinuo, ICONOS_ESTELA } from './especiales'
+import { dibujarEspecialVisual, especialContinuo, ICONOS_ESTELA, ICONOS_ESTELA_SECUNDARIA } from './especiales'
+import { dibujarEncimaQuinta, MS_CLONES, pisoQuinta } from './especiales-quinta'
+import { especialEnCurso } from './kit'
 import { aroCuracion, dibujarEstadosEncima, emitirEstados } from './estados'
 import { contexto, crearLienzo, liberarLienzo, medidas } from './lienzo'
 import { emitirBrillos, emitirElectricas, emitirGotas, emitirNiebla } from './particulas'
-import { acotar, azar, ruido, salidaConRebote, suavizar, TAU } from './util'
+import { acotar, azar, ruido, salidaConRebote, salidaCubica, suavizar, TAU } from './util'
 
 export const TINTE_ALTERNO = 0
 export const TINTE_BLANCO = 1
@@ -37,7 +39,18 @@ export const TINTE_QUEMADO = 5
 export const TINTE_LENTO = 6
 /** Aura verde de la curación (como la dorada del crítico). */
 export const TINTE_AURA_VERDE = 7
-const PAD_TINTE = [0, 0, 0, 12, 0, 0, 0, 12]
+/** Quinta tanda: la víctima del Agarre y Ejecución de Nacho «convertida en código» (cian y líneas de escaneo). */
+export const TINTE_CODIGO = 8
+/** Quinta tanda: el contorno de puntos de Nehuen mientras Desaparece (sin ningún cuadro sólido). */
+export const TINTE_PUNTOS = 9
+/** Quinta tanda: el aura eléctrica azul del Gigante de Lautaro mientras crece. */
+export const TINTE_AURA_AZUL = 10
+/** Quinta tanda: los clones fantasma azulados de los Lentes Hipnóticos de Fran. */
+export const TINTE_FANTASMA = 11
+/** Quinta tanda: la silueta del color SECUNDARIO de la ficha (la estela violeta del All In, la dorada del Despido). */
+export const TINTE_SILUETA_2 = 12
+const PAD_TINTE = [0, 0, 0, 12, 0, 0, 0, 12, 0, 3, 12, 0, 0]
+const N_TINTES = PAD_TINTE.length
 
 /** Si a un atlas le falta una animación, se usa la primera de estas que tenga. */
 const RESPALDOS: Record<ClaveAnimacion, readonly ClaveAnimacion[]> = {
@@ -151,7 +164,7 @@ export function prepararAtlas(ficha: FichaPersonaje, datos: AtlasPersonaje, imag
     escala: ficha.alturaMundo / ref,
     cuadros,
     anims,
-    tintes: [[], [], [], [], [], [], [], []],
+    tintes: Array.from({ length: N_TINTES }, () => []),
     efectos,
     reflejoMitad: Math.ceil(mitad + 2),
     reflejoAlto: Math.ceil(ref * 0.62),
@@ -239,13 +252,45 @@ function crearTinte(at: AtlasPreparado, tinte: number, plano: number): HTMLCanva
   const pad = PAD_TINTE[tinte]
   const c = crearLienzo(f.w + pad * 2, f.h + pad * 2)
   const g = contexto(c)
-  if (tinte === TINTE_AURA || tinte === TINTE_AURA_VERDE) {
-    // silueta dorada (o verde) repetida alrededor: un halo suave sin filtros ni sombras
+  if (tinte === TINTE_PUNTOS) {
+    // El contorno de la silueta, de 2 px, punteado: la silueta corrida en 8 direcciones menos ella misma,
+    // con una trama de puntos encima (UNA vez por cuadro del atlas).
     const s = crearLienzo(f.w, f.h)
     const gs = contexto(s)
     gs.drawImage(at.imagen, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h)
     gs.globalCompositeOperation = 'source-in'
-    gs.fillStyle = tinte === TINTE_AURA ? '#FFC93A' : '#4ADE80'
+    gs.fillStyle = '#FFFFFF'
+    gs.fillRect(0, 0, f.w, f.h)
+    for (let k = 0; k < 8; k++) {
+      const ang = (k / 8) * TAU
+      g.drawImage(s, pad + Math.round(Math.cos(ang) * 2), pad + Math.round(Math.sin(ang) * 2))
+    }
+    g.globalCompositeOperation = 'destination-out'
+    g.drawImage(s, pad, pad)
+    const punto = crearLienzo(4, 4)
+    const gp = contexto(punto)
+    gp.fillStyle = '#FFFFFF'
+    gp.fillRect(0, 0, 2, 2)
+    const trama = g.createPattern(punto, 'repeat')
+    if (trama) {
+      g.globalCompositeOperation = 'destination-in'
+      g.fillStyle = trama
+      g.fillRect(0, 0, c.width, c.height)
+    }
+    g.globalCompositeOperation = 'source-in'
+    g.fillStyle = '#A5E1FF'
+    g.fillRect(0, 0, c.width, c.height)
+    liberarLienzo(s)
+    liberarLienzo(punto)
+    return c
+  }
+  if (tinte === TINTE_AURA || tinte === TINTE_AURA_VERDE || tinte === TINTE_AURA_AZUL) {
+    // silueta dorada (o verde, o azul) repetida alrededor: un halo suave sin filtros ni sombras
+    const s = crearLienzo(f.w, f.h)
+    const gs = contexto(s)
+    gs.drawImage(at.imagen, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h)
+    gs.globalCompositeOperation = 'source-in'
+    gs.fillStyle = tinte === TINTE_AURA ? '#FFC93A' : tinte === TINTE_AURA_VERDE ? '#4ADE80' : '#4FA3FF'
     gs.fillRect(0, 0, f.w, f.h)
     const anillos: [number, number][] = [
       [pad, 0.13],
@@ -264,10 +309,27 @@ function crearTinte(at: AtlasPreparado, tinte: number, plano: number): HTMLCanva
     return c
   }
   g.drawImage(at.imagen, f.x, f.y, f.w, f.h, pad, pad, f.w, f.h)
-  if (tinte === TINTE_BLANCO || tinte === TINTE_SILUETA) {
+  if (tinte === TINTE_BLANCO || tinte === TINTE_SILUETA || tinte === TINTE_FANTASMA || tinte === TINTE_SILUETA_2) {
     g.globalCompositeOperation = 'source-in'
-    g.fillStyle = tinte === TINTE_BLANCO ? '#FFFFFF' : at.ficha.color
+    g.fillStyle =
+      tinte === TINTE_BLANCO
+        ? '#FFFFFF'
+        : tinte === TINTE_FANTASMA
+          ? '#7DD3FC'
+          : tinte === TINTE_SILUETA_2
+            ? at.ficha.colorSecundario
+            : at.ficha.color
     g.fillRect(0, 0, c.width, c.height)
+  } else if (tinte === TINTE_CODIGO) {
+    // «Convertido en código»: el cuerpo en cian, líneas de escaneo cada 3 px y dos cortes claros.
+    g.globalCompositeOperation = 'source-atop'
+    g.fillStyle = 'rgba(0,194,255,0.62)'
+    g.fillRect(0, 0, c.width, c.height)
+    g.fillStyle = 'rgba(0,16,34,0.5)'
+    for (let y = 0; y < c.height; y += 3) g.fillRect(0, y, c.width, 1)
+    g.fillStyle = 'rgba(200,250,255,0.75)'
+    g.fillRect(0, Math.round(c.height * 0.31), c.width, 1)
+    g.fillRect(0, Math.round(c.height * 0.67), c.width, 2)
   } else if (tinte === TINTE_HIELO) {
     g.globalCompositeOperation = 'source-atop'
     g.fillStyle = 'rgba(165,228,255,0.55)'
@@ -430,6 +492,43 @@ export interface VisualLuchador {
   reflejo: HTMLCanvasElement | null
   reflejoCtx: CanvasRenderingContext2D | null
   reflejoDeg: CanvasGradient | null
+  // ─── Quinta tanda (14/nov): lo actualiza especiales-quinta.ts (actualizarQuinta) ───
+  /** El movimiento del cuadro anterior: uno nuevo limpia lo de la acción anterior. */
+  movPrev: string | null
+  /** ms que lleva armado el dominio del All In (−1 = no está): el giro y la entrada del anillo. */
+  dominioMs: number
+  /** La contra del All In de esta acción ya saltó (la embestida con todo). */
+  contraOk: boolean
+  /** Desaparecer: cuánto se ve el cuerpo (1 = sólido) y si va sólo con el contorno de puntos. */
+  alfaCuerpo: number
+  invisible: boolean
+  /** ms desde que reapareció (−1 = no): la línea de luz y el remolino. */
+  reaparecioMs: number
+  /** Despido: ms arrodillado (−1 = no). */
+  arrodilladoMs: number
+  /** Quién lo agarró: 0 nadie, 1 el agarre de siempre (Brian), 2 Lautaro (lo revolea), 3 Nacho (código). */
+  agarreDe: number
+  /** Revoleado por el Lanzamiento Aéreo: vuela hasta aterrizar. */
+  revoleado: boolean
+  /** ms desde el Corte de Precisión con la punta sobre este luchador (−1 = no). */
+  precisionMs: number
+  /** ms del glitch del «ERROR» (−1 = no). */
+  glitchMs: number
+  /** El hipnotizado y el cegado del cuadro anterior (el «pop» al despertar). */
+  hipnoPrev: number
+  cegadoPrev: number
+  /** ms de los clones fantasma de los Lentes (−1 = no). */
+  clonesMs: number
+  /** El cuadro que dibuja el render en lugar del del motor (el arrodillado del Despido); −1 = el del motor. */
+  planoForzado: number
+  /** Los arcos eléctricos van azules (el Gigante) en vez de amarillos. */
+  arcosAzules: boolean
+  /** La Presencia de jefe (Tony): cuánto se ve el aura (0..1, suavizado). */
+  presencia: number
+  /** El brazo de código de Nacho: hasta dónde llega (mundo-pantalla) y cuánto se ve (0 = no). */
+  brazoX: number
+  brazoY: number
+  brazo: number
 }
 
 export function crearVisual(lado: Lado): VisualLuchador {
@@ -476,7 +575,61 @@ export function crearVisual(lado: Lado): VisualLuchador {
     reflejo: null,
     reflejoCtx: null,
     reflejoDeg: null,
+    movPrev: null,
+    dominioMs: -1,
+    contraOk: false,
+    alfaCuerpo: 1,
+    invisible: false,
+    reaparecioMs: -1,
+    arrodilladoMs: -1,
+    agarreDe: 0,
+    revoleado: false,
+    precisionMs: -1,
+    glitchMs: -1,
+    hipnoPrev: 0,
+    cegadoPrev: 0,
+    clonesMs: -1,
+    planoForzado: -1,
+    arcosAzules: false,
+    presencia: 0,
+    brazoX: 0,
+    brazoY: 0,
+    brazo: 0,
   }
+}
+
+/** Limpia lo de la quinta tanda (partida nueva). */
+function reiniciarQuinta(v: VisualLuchador): void {
+  v.movPrev = null
+  v.dominioMs = -1
+  v.contraOk = false
+  v.alfaCuerpo = 1
+  v.invisible = false
+  v.reaparecioMs = -1
+  v.arrodilladoMs = -1
+  v.agarreDe = 0
+  v.revoleado = false
+  v.precisionMs = -1
+  v.glitchMs = -1
+  v.hipnoPrev = 0
+  v.cegadoPrev = 0
+  v.clonesMs = -1
+  v.planoForzado = -1
+  v.arcosAzules = false
+  v.presencia = 0
+  v.brazo = 0
+}
+
+/**
+ * El render dibuja este cuadro del atlas en lugar del que eligió el motor (el arrodillado del Despido) y
+ * rehace la caja con él. −1 vuelve al del motor (lo vuelve a poner actualizarVisual en el cuadro siguiente).
+ */
+export function forzarPlano(v: VisualLuchador, l: LuchadorEstado, plano: number, E: Escena): void {
+  const at = v.at
+  v.planoForzado = plano
+  if (!at || plano < 0 || plano >= at.cuadros.length) return
+  v.plano = plano
+  cajaDe(at, plano, l.x, E.sueloY - l.y, l.mira, v)
 }
 
 /** Arranca de cero (partida nueva) con el atlas de ese lado. */
@@ -501,6 +654,7 @@ export function reiniciarVisual(v: VisualLuchador, at: AtlasPreparado | null, al
   v.agarradoMs = -1
   v.animPrev = ''
   v.cuadroPrev = -1
+  reiniciarQuinta(v)
   if (cambiaAtlas || (conReflejo && !v.reflejo)) {
     liberarLienzo(v.reflejo)
     v.reflejo = null
@@ -639,18 +793,21 @@ export function actualizarVisual(E: Escena, l: LuchadorEstado, v: VisualLuchador
     v.cajaY = yPie - 200
     return 0
   }
+  // El cuadro del motor; el arrodillado del Despido lo cambia después (especiales-quinta.ts, forzarPlano).
+  v.planoForzado = -1
   const plano = planoDe(at, l)
   v.plano = plano
   cajaDe(at, plano, l.x, yPie, l.mira, v)
   const icono = iconoEnCurso(at, l)
   const velX = Math.abs(l.vx)
 
-  // post-imágenes: dash, Corte Relámpago, la moto, el break, el dragón… o cualquier desplazamiento muy rápido
+  // post-imágenes: dash, Corte Relámpago, la moto, el break, el dragón… o cualquier desplazamiento muy
+  // rápido. Nehuen desapareciendo no deja ninguna: sólo el contorno de puntos y su estela fina.
   const relampago = icono === 'rayo'
   const enDash = l.estado === 'dash' || l.anim === 'dash'
   const conEstela = icono !== null && ICONOS_ESTELA.has(icono)
   const umbral = icono === 'break' || icono === 'baile' ? 0.6 : 2.5
-  if (velX > 10 || ((enDash || conEstela) && velX > umbral)) {
+  if (!v.invisible && (velX > 10 || ((enDash || conEstela) && velX > umbral))) {
     v.estAcum += dtMs
     if (v.estAcum >= 30) {
       v.estAcum = 0
@@ -685,17 +842,20 @@ export function actualizarVisual(E: Escena, l: LuchadorEstado, v: VisualLuchador
     }
   }
 
-  // electricidad: electrocutado, o Simón cruzando la pantalla con el Corte Relámpago
+  // electricidad: electrocutado, Simón cruzando la pantalla con el Corte Relámpago, o el Gigante de
+  // Lautaro mientras crece (en azul: `arcosAzules`, lo pone especiales-quinta.ts)
   const electro = l.efectos.electrocutado > 0 || l.estado === 'electrocutado'
-  if (electro || (relampago && velX > 2)) {
+  if (electro || (relampago && velX > 2) || v.arcosAzules) {
     v.arcosMs -= dtMs
     if (v.arcosMs <= 0) {
       generarArcos(v, l.x, yPie, electro ? (E.calidad === 'baja' ? 2 : 3) : 2)
       v.arcosMs = 45
     }
-    const n = cuantasPorTasa((electro ? 12 : 26) * E.densidad, dtS)
-    for (let i = 0; i < n; i++) {
-      emitirElectricas(E, v.cajaX + Math.random() * v.cajaW, v.cajaY + Math.random() * v.cajaH * 0.85, 1, 4)
+    if (!v.arcosAzules || electro) {
+      const n = cuantasPorTasa((electro ? 12 : 26) * E.densidad, dtS)
+      for (let i = 0; i < n; i++) {
+        emitirElectricas(E, v.cajaX + Math.random() * v.cajaW, v.cajaY + Math.random() * v.cajaH * 0.85, 1, 4)
+      }
     }
   } else {
     v.nArcos = 0
@@ -753,7 +913,9 @@ export function tieneImpactos(v: VisualLuchador, l: LuchadorEstado): boolean {
 export function dibujarSombra(E: Escena, l: LuchadorEstado, v: VisualLuchador): void {
   const k = acotar(1 - l.y / 320, 0.3, 1)
   const ancho = acotar(v.cajaW * 0.85 + 28, 96, 230) * k
-  spriteMundo(E, E.spr.sombra, l.x, E.sueloY + 2, ancho, ancho * 0.2, 0, 0.55 * k)
+  // Nehuen desapareciendo: apenas una sombra (se adivina por dónde cruza)
+  const fantasma = v.alfaCuerpo < 0.999 ? 0.35 : 1
+  spriteMundo(E, E.spr.sombra, l.x, E.sueloY + 2, ancho, ancho * 0.2, 0, 0.55 * k * fantasma)
 }
 
 /** El piso de los locales brilla: el luchador se refleja invertido y se apaga con un degradé. */
@@ -761,7 +923,7 @@ export function dibujarReflejo(E: Escena, l: LuchadorEstado, v: VisualLuchador):
   const at = v.at
   const r = v.reflejo
   const g = v.reflejoCtx
-  if (!at || !r || !g || !v.reflejoDeg) return
+  if (!at || !r || !g || !v.reflejoDeg || v.alfaCuerpo < 0.999) return
   const alfa = 0.17 * acotar(1 - l.y / 240, 0, 1)
   if (alfa < 0.01) return
   fuente(at, v.plano, v.congelado ? TINTE_HIELO : v.alterno ? TINTE_ALTERNO : -1)
@@ -783,22 +945,63 @@ export function dibujarReflejo(E: Escena, l: LuchadorEstado, v: VisualLuchador):
   ctx.globalAlpha = 1
 }
 
-function dibujarEstela(E: Escena, at: AtlasPreparado, v: VisualLuchador): void {
+function dibujarEstela(E: Escena, at: AtlasPreparado, v: VisualLuchador, l: LuchadorEstado): void {
   if (v.estN === 0) return
   const ctx = E.ctx
+  // El All In (violeta) y el Despido (dorado) dejan la post-imagen del color secundario; la embestida
+  // floja del All In (nadie le pegó) deja una estela más corta.
+  const icono = iconoEnCurso(at, l)
+  const tinte = icono !== null && ICONOS_ESTELA_SECUNDARIA.has(icono) ? TINTE_SILUETA_2 : TINTE_SILUETA
+  const vida = icono === 'dominio' && !v.contraOk ? VIDA_ESTELA * 0.45 : VIDA_ESTELA
   let alguna = false
   for (let j = 0; j < v.estN; j++) {
     const i = (v.estCab - v.estN + j + MAX_ESTELA) % MAX_ESTELA
     const edad = E.ms - v.estT[i]
-    if (edad > VIDA_ESTELA || edad < 0) continue
+    if (edad > vida || edad < 0) continue
     if (!alguna) {
       alguna = true
       ctx.globalCompositeOperation = 'lighter'
     }
-    const t = 1 - edad / VIDA_ESTELA
-    pintar(E, at, v.estPlano[i], TINTE_SILUETA, v.estX[i], v.estY[i], v.estMira[i], 1, 1, 0, 0.42 * t * t)
+    const t = 1 - edad / vida
+    pintar(E, at, v.estPlano[i], tinte, v.estX[i], v.estY[i], v.estMira[i], 1, 1, 0, 0.42 * t * t)
   }
   if (alguna) ctx.globalCompositeOperation = 'source-over'
+}
+
+/**
+ * La víctima del Agarre y Ejecución «convertida en código»: el cuadro teñido de cian (TINTE_CODIGO,
+ * precalculado) dibujado en tiras horizontales que se corren de a saltos (el glitch). `fuerte` = el
+ * glitch del «ERROR» (más tiras y más corridas).
+ */
+function pintarCodigo(
+  E: Escena,
+  at: AtlasPreparado,
+  plano: number,
+  x: number,
+  yPie: number,
+  mira: number,
+  sx: number,
+  sy: number,
+  fuerte: boolean,
+): void {
+  fuente(at, plano, TINTE_CODIGO)
+  if (!F.img) return
+  const ctx = E.ctx
+  const k = E.cam.esc
+  const kx = k * at.escala * sx * (mira < 0 ? -1 : 1)
+  const ky = k * at.escala * sy
+  ctx.setTransform(kx, 0, 0, ky, Math.round(E.cam.tx + k * x), Math.round(E.cam.ty + k * yPie))
+  ctx.globalAlpha = 1
+  const tiras = fuerte ? 7 : 5
+  const paso = Math.floor(E.ms / (fuerte ? 45 : 85))
+  for (let s = 0; s < tiras; s++) {
+    const y0 = Math.floor((F.sh * s) / tiras)
+    const y1 = Math.floor((F.sh * (s + 1)) / tiras)
+    if (y1 <= y0) continue
+    const r = ruido(paso * 31 + s * 7 + plano)
+    const corre = r > (fuerte ? 0.45 : 0.72) ? (ruido(paso * 13 + s) - 0.5) * (fuerte ? 22 : 10) : 0
+    ctx.drawImage(F.img, F.sx, F.sy + y0, F.sw, y1 - y0, -F.ax + corre, -F.ay + y0, F.sw, y1 - y0)
+  }
 }
 
 function dibujarHielo(E: Escena, l: LuchadorEstado, v: VisualLuchador, x: number, yPie: number): void {
@@ -895,6 +1098,7 @@ function dibujarArcos(E: Escena, v: VisualLuchador, x: number, yPie: number): vo
   enMundo(E)
   ctx.globalCompositeOperation = 'lighter'
   ctx.lineJoin = 'round'
+  const halo = v.arcosAzules ? 'rgba(80,160,255,0.55)' : 'rgba(255,205,70,0.5)'
   for (let a = 0; a < v.nArcos; a++) {
     ctx.beginPath()
     for (let s = 0; s < PUNTOS_ARCO; s++) {
@@ -903,7 +1107,7 @@ function dibujarArcos(E: Escena, v: VisualLuchador, x: number, yPie: number): vo
       else ctx.lineTo(x + v.arcos[o], yPie + v.arcos[o + 1])
     }
     ctx.globalAlpha = 0.9
-    ctx.strokeStyle = 'rgba(255,205,70,0.5)'
+    ctx.strokeStyle = halo
     ctx.lineWidth = 5
     ctx.stroke()
     ctx.strokeStyle = '#FFFFFF'
@@ -996,10 +1200,57 @@ function dibujarSilueta(E: Escena, l: LuchadorEstado, color: string): void {
 }
 
 /**
- * Dibuja el luchador con todos sus estados. `encendido` (0..1) es el destello del que tira un
- * especial cuando se lo vuelve a dibujar sobre el oscurecido del super flash.
+ * Lo de la quinta tanda que va detrás del cuerpo y necesita los tintes de este atlas: los clones
+ * fantasma de los Lentes Hipnóticos, el aura eléctrica del Gigante mientras crece y el aura dorada del
+ * Despido Final hasta que aparece el papel.
  */
-export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador, encendido = 0): void {
+function detrasQuinta(
+  E: Escena,
+  l: LuchadorEstado,
+  v: VisualLuchador,
+  at: AtlasPreparado,
+  x: number,
+  yPie: number,
+  sx: number,
+  sy: number,
+  rot: number,
+): void {
+  const ctx = E.ctx
+  if (v.clonesMs >= 0) {
+    const f = v.clonesMs / MS_CLONES
+    const abre = salidaCubica(Math.min(1, f * 2.2))
+    ctx.imageSmoothingEnabled = true
+    ctx.globalCompositeOperation = 'lighter'
+    for (let k = 1; k <= 2; k++) {
+      pintar(E, at, v.plano, TINTE_FANTASMA, x - l.mira * (14 + 26 * k) * abre, yPie, l.mira, sx, sy, rot, (0.46 / k) * (1 - f))
+    }
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  if (v.arcosAzules) {
+    ctx.imageSmoothingEnabled = true
+    ctx.globalCompositeOperation = 'lighter'
+    pintar(E, at, v.plano, TINTE_AURA_AZUL, x, yPie, l.mira, sx, sy, rot, 0.62 + 0.25 * Math.sin(E.s * 21))
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  const e = especialEnCurso(l)
+  if (e?.siPega) {
+    const papel = e.ventanas[e.siPega.ventana]
+    if (papel && l.animTick < papel.desde) {
+      ctx.imageSmoothingEnabled = true
+      ctx.globalCompositeOperation = 'lighter'
+      const sube = Math.min(1, (l.animTick + 1) / 8)
+      pintar(E, at, v.plano, TINTE_AURA, x, yPie, l.mira, sx, sy, rot, sube * (0.6 + 0.25 * Math.sin(E.s * 16)))
+      ctx.globalCompositeOperation = 'source-over'
+    }
+  }
+}
+
+/**
+ * Dibuja el luchador con todos sus estados. `encendido` (0..1) es el destello del que tira un
+ * especial cuando se lo vuelve a dibujar sobre el oscurecido del super flash. `rival` es el atlas del
+ * otro (la tijera del fade del Corte de Precisión es la de su hoja).
+ */
+export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador, encendido = 0, rival: AtlasPreparado | null = null): void {
   const at = v.at
   if (!at) {
     dibujarSilueta(E, l, '#8a8f98')
@@ -1043,6 +1294,11 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   }
   const nitido = at.escala * E.cam.esc >= 2
 
+  // quinta tanda: lo del piso (el aura del dominio y la mitad de atrás de su anillo, la Presencia de
+  // jefe, el Overclock, el código del Terremoto) y lo de atrás del cuerpo (clones, auras)
+  pisoQuinta(E, l, v, x, yPie)
+  detrasQuinta(E, l, v, at, x, yPie, sx, sy, rot)
+
   // aura dorada detrás después de un crítico
   if (l.efectos.critico > 0) {
     ctx.imageSmoothingEnabled = true
@@ -1060,18 +1316,28 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
     ctx.globalCompositeOperation = 'source-over'
   }
   ctx.imageSmoothingEnabled = !nitido
-  dibujarEstela(E, at, v)
+  dibujarEstela(E, at, v, l)
 
   let alfa = 1
   if (l.invulnerable && l.estado === 'levantandose') alfa = Math.floor(E.ms / 60) % 2 ? 0.55 : 1
   const base = congelado ? TINTE_HIELO : v.alterno ? TINTE_ALTERNO : -1
-  pintar(E, at, plano, base, x, yPie, l.mira, sx, sy, rot, alfa)
+  // Quinta tanda: el agarrado por Nacho se dibuja «convertido en código» (y un instante más, con el
+  // glitch del «ERROR», cuando lo suelta); Nehuen desapareciendo, transparente con el contorno de puntos.
+  const codigo = (agarrado && v.agarreDe === 3) || v.glitchMs >= 0
+  const fantasma = v.alfaCuerpo < 0.999
+  if (codigo) pintarCodigo(E, at, plano, x, yPie, l.mira, sx, sy, v.glitchMs >= 0)
+  else if (fantasma) {
+    if (v.alfaCuerpo > 0.01) pintar(E, at, plano, base, x, yPie, l.mira, sx, sy, rot, alfa * v.alfaCuerpo)
+    ctx.globalCompositeOperation = 'lighter'
+    pintar(E, at, plano, TINTE_PUNTOS, x, yPie, l.mira, sx, sy, rot, 0.75 + 0.25 * Math.sin(E.s * 24))
+    ctx.globalCompositeOperation = 'source-over'
+  } else pintar(E, at, plano, base, x, yPie, l.mira, sx, sy, rot, alfa)
   // quemado y lento: el color encima del sprite (latiendo un poco)
-  if (!congelado && l.efectos.quemado > 0) {
+  if (!congelado && !codigo && !fantasma && l.efectos.quemado > 0) {
     const q = l.efectos.quemado
     pintar(E, at, plano, TINTE_QUEMADO, x, yPie, l.mira, sx, sy, rot, alfa * Math.min(1, q / 10) * (0.42 + 0.2 * Math.sin(E.s * 14)))
   }
-  if (!congelado && l.efectos.lento > 0) {
+  if (!congelado && !codigo && !fantasma && l.efectos.lento > 0) {
     pintar(E, at, plano, TINTE_LENTO, x, yPie, l.mira, sx, sy, rot, alfa * Math.min(1, l.efectos.lento / 10) * 0.42)
   }
 
@@ -1080,6 +1346,8 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   if (electro && Math.floor(E.ms / 70) % 2 === 0) blanco = Math.max(blanco, 0.42)
   if (encendido > 0) blanco = Math.max(blanco, encendido)
   if (v.superBlanco > 0.02) blanco = Math.max(blanco, v.superBlanco)
+  // transparente, el encendido del super flash tampoco lo vuelve sólido
+  if (fantasma) blanco *= Math.max(0.2, v.alfaCuerpo)
   if (blanco > 0.01) pintar(E, at, plano, TINTE_BLANCO, x, yPie, l.mira, sx, sy, rot, Math.min(1, blanco))
   ctx.globalAlpha = 1
   ctx.imageSmoothingEnabled = true
@@ -1099,4 +1367,5 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   dibujarEstadosEncima(E, l, v, x)
   const icono = iconoEnCurso(at, l)
   if (icono !== null) dibujarEspecialVisual(E, l, v, icono)
+  dibujarEncimaQuinta(E, l, v, x, rival)
 }

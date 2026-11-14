@@ -36,6 +36,28 @@ export type NombreUtileria =
   | 'llama'
   | 'espiral'
   | 'burbuja'
+  // Quinta tanda (14/nov). Respaldos de los sprites de las hojas (si el atlas no los trae)…
+  | 'naipe'
+  | 'secador'
+  | 'pelotita'
+  | 'pua'
+  | 'monopatin'
+  | 'despido'
+  | 'laptop'
+  // …y adornos que no salen de ninguna hoja.
+  | 'naipe_violeta'
+  | 'digito0'
+  | 'digito1'
+  | 'digito0_rojo'
+  | 'digito1_rojo'
+  | 'roca_cian0'
+  | 'roca_cian1'
+  | 'roca_cian2'
+  | 'lagrima'
+  | 'exclamacion'
+  | 'nube_spray0'
+  | 'nube_spray1'
+  | 'hipnosis'
 
 /** Lado del lienzo de cada objeto, en unidades de mundo. */
 export const TAM_UTILERIA: Readonly<Record<NombreUtileria, number>> = {
@@ -59,11 +81,37 @@ export const TAM_UTILERIA: Readonly<Record<NombreUtileria, number>> = {
   llama: 48,
   espiral: 40,
   burbuja: 16,
+  naipe: 36,
+  secador: 48,
+  pelotita: 24,
+  pua: 40,
+  monopatin: 112,
+  despido: 60,
+  laptop: 40,
+  naipe_violeta: 36,
+  digito0: 16,
+  digito1: 16,
+  digito0_rojo: 16,
+  digito1_rojo: 16,
+  roca_cian0: 28,
+  roca_cian1: 28,
+  roca_cian2: 28,
+  lagrima: 12,
+  exclamacion: 40,
+  nube_spray0: 120,
+  nube_spray1: 120,
+  hipnosis: 56,
 }
 
 export interface Utileria {
   /** El lienzo del objeto (se dibuja la primera vez que se pide). */
   de(nombre: NombreUtileria): HTMLCanvasElement
+  /**
+   * Un lienzo propio que no es cuadrado (la franja de código del Terremoto, el código del piso):
+   * `ancho` × `alto` px, pintado una vez por `pintor` (que recibe el contexto ya limpio) y guardado
+   * por `clave`. Se libera con el resto.
+   */
+  propio(clave: string, ancho: number, alto: number, pintor: (g: CanvasRenderingContext2D) => void): HTMLCanvasElement
   liberar(): void
 }
 
@@ -907,6 +955,357 @@ const burbuja: Pintor = (g, T) => {
   g.fill()
 }
 
+// ─── Quinta tanda (14/nov) ───────────────────────────────────────────────────
+
+/** Un naipe de espaldas: el rojo de las Cartas Malditas o el violeta del dominio (Chino). */
+function naipe(color: string, rombo: string): Pintor {
+  return (g, T) => {
+    const w = T * 0.6
+    const h = T * 0.88
+    rectRedondo(g, -w / 2, -h / 2, w, h, T * 0.08)
+    g.fillStyle = '#FBF7F0'
+    g.fill()
+    g.lineWidth = T * 0.045
+    g.strokeStyle = '#1A0A10'
+    g.stroke()
+    rectRedondo(g, -w / 2 + T * 0.07, -h / 2 + T * 0.07, w - T * 0.14, h - T * 0.14, T * 0.05)
+    g.fillStyle = color
+    g.fill()
+    g.beginPath()
+    g.moveTo(0, -h * 0.28)
+    g.lineTo(w * 0.24, 0)
+    g.lineTo(0, h * 0.28)
+    g.lineTo(-w * 0.24, 0)
+    g.closePath()
+    g.fillStyle = rombo
+    g.fill()
+    g.lineWidth = T * 0.025
+    g.strokeStyle = '#FBF7F0'
+    g.stroke()
+  }
+}
+
+/** Secador de pelo de costado, mirando a la derecha (respaldo del de Leo). */
+const secador: Pintor = (g, T) => {
+  const u = T / 48
+  g.lineWidth = 1.4 * u
+  g.strokeStyle = '#15171B'
+  // el mango
+  g.beginPath()
+  g.moveTo(-9 * u, 4 * u)
+  g.lineTo(-12 * u, 20 * u)
+  g.lineTo(-5 * u, 20 * u)
+  g.lineTo(-2 * u, 4 * u)
+  g.closePath()
+  g.fillStyle = '#2B2F36'
+  g.fill()
+  g.stroke()
+  // el cuerpo y la boca
+  rectRedondo(g, -18 * u, -12 * u, 34 * u, 16 * u, 7 * u)
+  const d = g.createLinearGradient(0, -12 * u, 0, 4 * u)
+  d.addColorStop(0, '#E6EBF0')
+  d.addColorStop(0.5, '#9AA4AF')
+  d.addColorStop(1, '#5E6670')
+  g.fillStyle = d
+  g.fill()
+  g.stroke()
+  g.fillStyle = '#1D2026'
+  g.fillRect(14 * u, -10 * u, 6 * u, 12 * u)
+  g.strokeRect(14 * u, -10 * u, 6 * u, 12 * u)
+  g.beginPath()
+  g.arc(-10 * u, -4 * u, 4.5 * u, 0, TAU)
+  g.fillStyle = '#3A4049'
+  g.fill()
+  g.stroke()
+}
+
+/** Pelota de pádel amarillo verdosa con su costura (respaldo de la de Nehuen). */
+const pelotita: Pintor = (g, T) => {
+  const r = T * 0.44
+  const d = g.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r)
+  d.addColorStop(0, '#F4FFC2')
+  d.addColorStop(0.6, '#C8F542')
+  d.addColorStop(1, '#7FA61C')
+  g.beginPath()
+  g.arc(0, 0, r, 0, TAU)
+  g.fillStyle = d
+  g.fill()
+  g.lineWidth = T * 0.06
+  g.strokeStyle = '#3D5208'
+  g.stroke()
+  g.lineWidth = T * 0.07
+  g.strokeStyle = '#FFFFFF'
+  g.beginPath()
+  g.arc(-r * 0.95, 0, r * 0.75, -0.9, 0.9)
+  g.stroke()
+  g.beginPath()
+  g.arc(r * 0.95, 0, r * 0.75, Math.PI - 0.9, Math.PI + 0.9)
+  g.stroke()
+}
+
+/** Una púa dorada con la punta a la derecha (respaldo de la `pua` de Nico M.; también la que vuela al pisarla). */
+const pua: Pintor = (g, T) => {
+  const u = T / 40
+  g.beginPath()
+  g.moveTo(18 * u, 0)
+  g.lineTo(-12 * u, -5 * u)
+  g.quadraticCurveTo(-17 * u, 0, -12 * u, 5 * u)
+  g.closePath()
+  const d = g.createLinearGradient(0, -5 * u, 0, 5 * u)
+  d.addColorStop(0, '#FFF3B0')
+  d.addColorStop(0.45, '#FFC93C')
+  d.addColorStop(1, '#9A6200')
+  g.fillStyle = d
+  g.fill()
+  g.lineWidth = 1.2 * u
+  g.strokeStyle = '#3A2400'
+  g.stroke()
+  g.strokeStyle = 'rgba(255,255,255,0.8)'
+  g.lineWidth = 0.9 * u
+  g.beginPath()
+  g.moveTo(-9 * u, -2 * u)
+  g.lineTo(14 * u, -0.5 * u)
+  g.stroke()
+}
+
+/** Monopatín eléctrico de costado, con el manubrio plegado (respaldo del de Tony). */
+const monopatin: Pintor = (g, T) => {
+  const u = T / 112
+  g.lineJoin = 'round'
+  g.strokeStyle = '#0B0D12'
+  g.lineWidth = 2 * u
+  // el manubrio plegado sobre la tabla
+  g.beginPath()
+  g.moveTo(38 * u, 6 * u)
+  g.lineTo(-30 * u, -8 * u)
+  g.lineWidth = 5 * u
+  g.strokeStyle = '#1F232B'
+  g.stroke()
+  g.lineWidth = 2 * u
+  g.strokeStyle = '#0B0D12'
+  // la tabla
+  rectRedondo(g, -44 * u, 2 * u, 80 * u, 9 * u, 4 * u)
+  g.fillStyle = '#2A2F38'
+  g.fill()
+  g.stroke()
+  // el LED azul
+  g.fillStyle = '#2B79DB'
+  g.fillRect(-30 * u, 5 * u, 40 * u, 2.4 * u)
+  // las ruedas
+  for (const cx of [-40, 38]) {
+    g.beginPath()
+    g.arc(cx * u, 14 * u, 9 * u, 0, TAU)
+    g.fillStyle = '#121418'
+    g.fill()
+    g.stroke()
+    g.beginPath()
+    g.arc(cx * u, 14 * u, 3.5 * u, 0, TAU)
+    g.fillStyle = '#8D97A3'
+    g.fill()
+  }
+}
+
+/** El papel del despido: hoja blanca con «DESPIDO» en rojo y renglones (respaldo del de Tony). */
+const despido: Pintor = (g, T) => {
+  const w = T * 0.62
+  const h = T * 0.86
+  g.save()
+  g.rotate(-0.06)
+  rectRedondo(g, -w / 2, -h / 2, w, h, T * 0.03)
+  g.fillStyle = '#FFFDF6'
+  g.fill()
+  g.lineWidth = T * 0.025
+  g.strokeStyle = '#4A3B30'
+  g.stroke()
+  g.fillStyle = '#C81E1E'
+  g.font = `900 ${T * 0.13}px Impact, "Arial Black", sans-serif`
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillText('DESPIDO', 0, -h * 0.3)
+  g.strokeStyle = 'rgba(70,60,50,0.55)'
+  g.lineWidth = T * 0.018
+  for (let k = 0; k < 5; k++) {
+    const y = -h * 0.1 + k * h * 0.11
+    g.beginPath()
+    g.moveTo(-w * 0.36, y)
+    g.lineTo(w * (k === 4 ? 0.05 : 0.36), y)
+    g.stroke()
+  }
+  // la firma
+  g.strokeStyle = '#1E3A8A'
+  g.beginPath()
+  g.moveTo(w * 0.05, h * 0.38)
+  g.bezierCurveTo(w * 0.15, h * 0.28, w * 0.2, h * 0.46, w * 0.34, h * 0.34)
+  g.stroke()
+  g.restore()
+}
+
+/** La laptop cerrada y plateada (respaldo de la del Laptopazo de Nacho). */
+const laptop: Pintor = (g, T) => {
+  const u = T / 40
+  rectRedondo(g, -15 * u, -11 * u, 30 * u, 22 * u, 3 * u)
+  const d = g.createLinearGradient(-15 * u, -11 * u, 15 * u, 11 * u)
+  d.addColorStop(0, '#F4F7FA')
+  d.addColorStop(0.55, '#B9C2CC')
+  d.addColorStop(1, '#6E7884')
+  g.fillStyle = d
+  g.fill()
+  g.lineWidth = 1.3 * u
+  g.strokeStyle = '#2B3138'
+  g.stroke()
+  g.beginPath()
+  g.arc(0, 0, 3 * u, 0, TAU)
+  g.fillStyle = 'rgba(0,194,255,0.85)'
+  g.fill()
+}
+
+/** Un dígito («0» o «1») de código: cian (el código de Nacho) o rojo (el error del apretón). */
+function digito(texto: string, color: string): Pintor {
+  return (g, T) => {
+    g.font = `800 ${T * 0.92}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.lineWidth = T * 0.16
+    g.strokeStyle = 'rgba(2,8,16,0.85)'
+    g.strokeText(texto, 0, T * 0.04)
+    g.fillStyle = color
+    g.fillText(texto, 0, T * 0.04)
+  }
+}
+
+/** Piedras oscuras con el borde cian (el piso que revienta en el Terremoto de Código). */
+function rocaCian(semilla: number): Pintor {
+  return (g, T) => {
+    const n = 6
+    const pts: [number, number][] = []
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU + ruido(semilla * 29 + k) * 0.6
+      const r = T * (0.28 + 0.15 * ruido(semilla * 13 + k * 5))
+      pts.push([Math.cos(a) * r, Math.sin(a) * r * 0.85])
+    }
+    g.beginPath()
+    pts.forEach(([x, y], k) => (k === 0 ? g.moveTo(x, y) : g.lineTo(x, y)))
+    g.closePath()
+    g.fillStyle = '#20252E'
+    g.fill()
+    g.lineWidth = T * 0.09
+    g.strokeStyle = '#22D3EE'
+    g.stroke()
+    g.lineWidth = T * 0.035
+    g.strokeStyle = '#E0FBFF'
+    g.stroke()
+  }
+}
+
+/** Una lágrima celeste (el que llora arrodillado en el Despido). */
+const lagrima: Pintor = (g, T) => {
+  const r = T * 0.3
+  g.beginPath()
+  g.moveTo(0, -T * 0.45)
+  g.quadraticCurveTo(r * 1.1, -r * 0.1, r, r * 0.5)
+  g.arc(0, r * 0.5, r, 0, Math.PI)
+  g.quadraticCurveTo(-r * 1.1, -r * 0.1, 0, -T * 0.45)
+  g.closePath()
+  g.fillStyle = '#8FD8FF'
+  g.fill()
+  g.lineWidth = T * 0.08
+  g.strokeStyle = '#1D6FA5'
+  g.stroke()
+  g.fillStyle = 'rgba(255,255,255,0.9)'
+  g.beginPath()
+  g.arc(-r * 0.3, r * 0.2, r * 0.25, 0, TAU)
+  g.fill()
+}
+
+/** «!!» de historieta: rojo con borde blanco y negro. */
+const exclamacion: Pintor = (g, T) => {
+  const signo = (x: number) => {
+    g.beginPath()
+    g.moveTo(x - T * 0.09, -T * 0.4)
+    g.lineTo(x + T * 0.09, -T * 0.4)
+    g.lineTo(x + T * 0.04, T * 0.14)
+    g.lineTo(x - T * 0.04, T * 0.14)
+    g.closePath()
+    g.moveTo(x + T * 0.075, T * 0.3)
+    g.arc(x, T * 0.3, T * 0.075, 0, TAU)
+  }
+  for (const [ancho, color] of [
+    [T * 0.14, '#0B0B0E'],
+    [T * 0.07, '#FFFFFF'],
+  ] as const) {
+    g.lineWidth = ancho
+    g.strokeStyle = color
+    signo(-T * 0.14)
+    g.stroke()
+    signo(T * 0.14)
+    g.stroke()
+  }
+  g.fillStyle = '#F0443A'
+  signo(-T * 0.14)
+  g.fill()
+  signo(T * 0.14)
+  g.fill()
+}
+
+/**
+ * La nube del Spray Cegador de Leo: bollos blancos y grises, opacos (tiene que verse sobre pisos
+ * claros). Se pinta UNA vez y en cada cuadro sólo se estira a la caja del chorro (dos variantes que
+ * se alternan para que respire).
+ */
+function nubeSpray(semilla: number): Pintor {
+  return (g, T) => {
+    const bollos = 13
+    for (let k = 0; k < bollos; k++) {
+      const a = ruido(semilla * 41 + k * 7) * TAU
+      const d = Math.sqrt(ruido(semilla * 17 + k * 3)) * T * 0.3
+      const x = Math.cos(a) * d
+      const y = Math.sin(a) * d * 0.7
+      const r = T * (0.13 + 0.09 * ruido(semilla * 5 + k))
+      const gris = 205 + Math.round(45 * ruido(semilla * 3 + k * 11))
+      const deg = g.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.1, x, y, r)
+      deg.addColorStop(0, `rgba(255,255,255,0.97)`)
+      deg.addColorStop(0.55, `rgba(${gris},${gris},${gris + 4 > 255 ? 255 : gris + 4},0.92)`)
+      deg.addColorStop(1, `rgba(${gris - 40},${gris - 38},${gris - 30},0)`)
+      g.fillStyle = deg
+      g.beginPath()
+      g.arc(x, y, r, 0, TAU)
+      g.fill()
+    }
+  }
+}
+
+/** El disco hipnótico (el hipnotizado de los Lentes de Fran): bandas violeta y blanco en espiral. */
+const hipnosis: Pintor = (g, T) => {
+  const R = T * 0.46
+  g.beginPath()
+  g.arc(0, 0, R, 0, TAU)
+  g.fillStyle = '#2E1065'
+  g.fill()
+  for (const [ancho, color] of [
+    [T * 0.11, '#C084FC'],
+    [T * 0.045, '#FFFFFF'],
+  ] as const) {
+    g.beginPath()
+    const pasos = 90
+    for (let k = 0; k <= pasos; k++) {
+      const a = (k / pasos) * 3.2 * TAU
+      const r = (k / pasos) * R * 0.92
+      const px = Math.cos(a) * r
+      const py = Math.sin(a) * r
+      if (k === 0) g.moveTo(px, py)
+      else g.lineTo(px, py)
+    }
+    g.lineWidth = ancho
+    g.strokeStyle = color
+    g.stroke()
+  }
+  g.beginPath()
+  g.arc(0, 0, R, 0, TAU)
+  g.lineWidth = T * 0.05
+  g.strokeStyle = '#E9D5FF'
+  g.stroke()
+}
+
 const PINTORES: Readonly<Record<NombreUtileria, Pintor>> = {
   bombo,
   bala,
@@ -928,10 +1327,31 @@ const PINTORES: Readonly<Record<NombreUtileria, Pintor>> = {
   llama,
   espiral,
   burbuja,
+  naipe: naipe('#BE123C', '#7F0A26'),
+  secador,
+  pelotita,
+  pua,
+  monopatin,
+  despido,
+  laptop,
+  naipe_violeta: naipe('#7C3AED', '#3B1782'),
+  digito0: digito('0', '#22D3EE'),
+  digito1: digito('1', '#22D3EE'),
+  digito0_rojo: digito('0', '#FF3B5C'),
+  digito1_rojo: digito('1', '#FF3B5C'),
+  roca_cian0: rocaCian(1),
+  roca_cian1: rocaCian(2),
+  roca_cian2: rocaCian(3),
+  lagrima,
+  exclamacion,
+  nube_spray0: nubeSpray(1),
+  nube_spray1: nubeSpray(2),
+  hipnosis,
 }
 
 export function crearUtileria(): Utileria {
   const cache = new Map<NombreUtileria, HTMLCanvasElement>()
+  const propios = new Map<string, HTMLCanvasElement>()
   return {
     de(nombre: NombreUtileria): HTMLCanvasElement {
       let c = cache.get(nombre)
@@ -941,9 +1361,20 @@ export function crearUtileria(): Utileria {
       }
       return c
     },
+    propio(clave: string, ancho: number, alto: number, pintor: (g: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+      let c = propios.get(clave)
+      if (!c) {
+        c = crearLienzo(ancho, alto)
+        pintor(contexto(c))
+        propios.set(clave, c)
+      }
+      return c
+    },
     liberar(): void {
       for (const c of cache.values()) liberarLienzo(c)
       cache.clear()
+      for (const c of propios.values()) liberarLienzo(c)
+      propios.clear()
     },
   }
 }

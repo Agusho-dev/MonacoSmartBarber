@@ -5,9 +5,9 @@
  */
 import type { ClaveAnimacion, Herramienta, Lado, LuchadorEstado, Partida } from '../tipos'
 import { PERSONAJES } from '../personajes'
-import { contarAcierto, progresarAgarre } from './combate'
+import { contarAcierto, progresarAgarre, sumarCarga } from './combate'
 import { SUPER_FLASH } from './constantes'
-import { finVentanas, mirarA } from './cuerpo'
+import { contraArmada, finVentanas, mirarA } from './cuerpo'
 import type { Accion, EstadoInterno } from './interno'
 import { emitir } from './interno'
 import type { DefEspecial, DefMovimiento } from './movimientos'
@@ -58,6 +58,14 @@ export function iniciarMovimiento(
     lanzados: 0,
     enAire: false,
     agarre: null,
+    contraOk: false,
+    llego: false,
+    critSeguro: false,
+  }
+  // Pulso fino (Fran): el primer golpe normal que arranca después de cubrir uno es crítico seguro.
+  if (especial === 0 && !remate && li.critListo > 0) {
+    a.critSeguro = true
+    li.critListo = 0
   }
   li.accion = a
   l.movimiento = mov.id
@@ -109,6 +117,10 @@ export function intentarEspecial(p: Partida, I: EstadoInterno, lado: Lado): bool
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, SUPER_FLASH)
     p.estadisticas[lado].especialesUsados++
     emitir(p, { tipo: 'especial', quien: lado, numero: n, nombre: ficha.nombre })
+    // La casa siempre gana (Chino): cada especial del rival le suma carga.
+    const rival = (1 - lado) as Lado
+    const porRival = I.kits[rival].pasiva?.cargaPorEspecialRival
+    if (porRival) sumarCarga(p, rival, porRival)
     return true
   }
   return false
@@ -146,9 +158,19 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
       li.tSuelo = 0
       a.enAire = true
     }
-    const corre = !a.detenido && a.t >= e.desde && a.t < e.desde + e.ticks
+    const corre = !a.detenido && !a.llego && a.t >= e.desde && a.t < e.desde + e.ticks
     if (corre && (l.enSuelo || a.enAire)) {
-      li.vMov = l.mira * (e.distancia / e.ticks)
+      let vel = e.distancia / e.ticks
+      if (e.hastaRival !== undefined) {
+        // Desaparecer (Nehuen): frena sola delante del rival, a `hastaRival` px (medidos hacia donde
+        // mira: con el rival detrás o más cerca, no se mueve) y desde ahí ya no corre más.
+        const falta = (p.luchadores[(1 - lado) as Lado].x - l.x) * l.mira - e.hastaRival
+        if (falta <= vel) {
+          vel = Math.max(0, falta)
+          a.llego = true
+        }
+      }
+      li.vMov = l.mira * vel
       li.invulnProyectil = e.atraviesa ?? true
       if (a.t === e.desde) {
         emitir(p, { tipo: 'swing', quien: lado, fuerza: 'especial', herramienta: mov.herramienta })
@@ -163,6 +185,10 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
     else if (mov.avance && a.t >= mov.avance.desde && a.t < mov.avance.hasta) li.vMov = l.mira * mov.avance.vel
     else li.vMov = 0
   }
+
+  // El dominio del All In (efectos.dominio): los ticks que le quedan a la contra armada. Lo lee el render
+  // (el anillo de cartas) y la CPU; vuelve a 0 cuando la contra salta (combate.ts) o se termina.
+  if (esp.contra) l.efectos.dominio = enPelea && contraArmada(a) ? esp.contra.hasta - a.t : 0
 
   // Proyectiles: uno, o una ráfaga (uno cada `cada` ticks).
   if (esp.proyectil && esp.lanzamiento) {

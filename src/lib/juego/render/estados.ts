@@ -65,11 +65,22 @@ export function emitirEstados(E: Escena, l: LuchadorEstado, v: VisualLuchador, d
     if (Math.random() < dtS * 7 * E.densidad) emitirBrillos(E, cx + azar(-20, 20), v.cajaY + v.cajaH * azar(0.25, 0.6), 1, 0, 6, 10)
   } else if (v.agarradoMs >= 0) {
     v.agarradoMs = -1
+    const de = v.agarreDe
+    v.agarreDe = 0
+    if (de === 2) {
+      // el Lanzamiento Aéreo de Lautaro lo revolea para arriba: el golpe contra el piso es al aterrizar
+      // (eventos.ts, con el `aterrizaje` fuerte); mientras vuela, la estela de viento (especiales-quinta.ts)
+      v.revoleado = true
+      return
+    }
+    // el Agarre y Ejecución de Nacho: el glitch del «ERROR» un instante más
+    if (de === 3) v.glitchMs = 0
     const piso = E.sueloY
-    emitirPolvo(E, l.x, piso, 16, 70, 1.6)
-    emitirEstallido(E, l.x, piso - 20, 150, 0, 0.22)
+    const fuerza = de === 3 ? 0.75 : 1
+    emitirPolvo(E, l.x, piso, Math.round(16 * fuerza), 70, 1.6 * fuerza)
+    emitirEstallido(E, l.x, piso - 20, 150 * fuerza, 0, 0.22)
     emitirMechones(E, l.x, v.cajaY + 30, 10, 0, 1)
-    temblar(E.cam, 9)
+    temblar(E.cam, 9 * fuerza)
   }
 }
 

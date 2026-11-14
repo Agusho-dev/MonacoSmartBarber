@@ -30,9 +30,19 @@ export function vistaParaHud(p: Partida, lado: Lado): Partida {
   return v
 }
 
+/**
+ * El evento con los lados dados vuelta: todo campo que nombra a un luchador (`quien`, `atacante`,
+ * `victima`, `ganador`, `perdedor`). Las posiciones (`x`, `y`) NO se tocan: son del mundo, que no se
+ * espeja (la vista del HUD da vuelta los luchadores, pero cada uno conserva su `x`). Un evento nuevo con
+ * `atacante`/`victima` va en el primer grupo; uno con `quien` ya lo cubre el `default`.
+ */
 function espejarEvento(e: EventoJuego): EventoJuego {
   switch (e.tipo) {
     case 'golpe':
+    case 'agarre':
+    // Quinta tanda (14/nov): el robo de carga de Nacho y el Despido de Tony.
+    case 'carga_robada':
+    case 'despido':
       return { ...e, atacante: otro(e.atacante), victima: otro(e.victima) }
     case 'ko':
       return { ...e, ganador: otro(e.ganador), perdedor: otro(e.perdedor) }

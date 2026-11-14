@@ -57,6 +57,10 @@ function limpiarEfectos(l: LuchadorEstado, li: InternoLuchador): void {
   l.efectos.quemado = 0
   l.efectos.lento = 0
   l.efectos.curando = 0
+  l.efectos.hipnotizado = 0
+  l.efectos.cegado = 0
+  l.efectos.dominio = 0
+  li.hipnotizadoPor = null
   li.quema = null
   // Si lo tenían agarrado, lo suelta (cae); el que agarraba lo nota y termina su agarre.
   li.agarradoPor = null
@@ -329,7 +333,9 @@ function pasoPelea(p: Partida, I: EstadoInterno, e: readonly [EntradaJugador, En
     return
   }
   for (const lado of LADOS) I.luchadores[lado].vidaAntes = p.luchadores[lado].vida
-  for (const lado of LADOS) decidir(p, I, lado, e[lado])
+  // El cegado (el Spray de Leo) decide como el ganador en la fase final: se mueve, salta, se agacha y se
+  // cubre, pero no pega, no tira especiales ni esquiva.
+  for (const lado of LADOS) decidir(p, I, lado, e[lado], p.luchadores[lado].efectos.cegado > 0)
   for (const lado of LADOS) avanzarAccion(p, I, lado, true)
   soltarAgarresHuerfanos(p, I)
   for (const lado of LADOS) fisica(p, I, lado)

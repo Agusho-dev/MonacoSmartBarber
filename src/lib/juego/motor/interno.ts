@@ -64,6 +64,15 @@ export interface Accion {
   enAire: boolean
   /** Agarre en curso: a quién tiene y hace cuánto. */
   agarre: { victima: Lado; t: number } | null
+  /**
+   * La contra (DefEspecial.contra, el All In de Chino) ya saltó: la embestida sale con el bono y no
+   * vuelve a saltar. Entra en el hash online.
+   */
+  contraOk: boolean
+  /** La embestida con `hastaRival` (Desaparecer de Nehuen) ya llegó delante del rival: no corre más. */
+  llego: boolean
+  /** Un golpe normal que arrancó con `critListo` (la pasiva de Fran): sus ventanas son crítico seguro. */
+  critSeguro: boolean
 }
 
 export interface ProyectilInterno {
@@ -89,6 +98,8 @@ export interface ProyectilInterno {
   estallo: boolean
   /** Es una nube en el piso (la deja el pañal). */
   nube: DefNube | null
+  /** Clavada en el piso (DefProyectil.trampa, pub.plantado): la edad a la que se apaga. */
+  finTrampa: number
 }
 
 export interface DashEnCurso {
@@ -101,8 +112,12 @@ export interface DashEnCurso {
   invul: number
 }
 
-/** Estados de control con inmunidad a sí mismos al terminar (no se encadenan infinito). */
-export type EstadoControl = 'aturdido' | 'mareado' | 'quemado' | 'congelado' | 'electrocutado'
+/**
+ * Estados de control con inmunidad a sí mismos al terminar (no se encadenan infinito). De la quinta
+ * tanda: 'hipnotizado' (saca el control: cuenta para el encierro) y 'cegado' (no lo saca: pasa por
+ * ponerEstado por la inmunidad y para no renovarse, pero no es encierro).
+ */
+export type EstadoControl = 'aturdido' | 'mareado' | 'quemado' | 'congelado' | 'electrocutado' | 'hipnotizado' | 'cegado'
 
 export interface InternoLuchador {
   /** Entrada del tick anterior (para detectar flancos). */
@@ -156,6 +171,13 @@ export interface InternoLuchador {
   quema: { cada: number; danio: number; de: Lado; t: number } | null
   /** Lo tiene agarrado ese lado (el Agarre de Brian). */
   agarradoPor: Lado | null
+  /** Hacia quién camina mientras está hipnotizado (efectos.hipnotizado; null = no lo está). Entra en el hash. */
+  hipnotizadoPor: Lado | null
+  /**
+   * La pasiva de Fran (PasivaKit.criticoTrasBloqueo): ticks en los que el próximo golpe normal que
+   * arranque es crítico seguro (lo deja cada golpe que bloquea). Entra en el hash.
+   */
+  critListo: number
   /**
    * El encierro en curso (TOPE_ENCIERRO), de punta a punta y en ticks de PANTALLA (con el hitstop y
    * los super flash): desde el primer tick encerrado (`encerrado` en cuerpo.ts) cuenta todos los

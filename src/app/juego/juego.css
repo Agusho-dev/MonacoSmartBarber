@@ -1736,6 +1736,46 @@ html.cf-html body {
   margin-top: -3px;
 }
 
+/* Los dueños (personajes `soloDuenos`): sólo con el pase de dueños, en su grupo, debajo de los
+   barberos y fuera del filtro por sucursal. Las caras son las de la grilla (`.cf-plantel`). */
+.cf-duenos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(245, 179, 1, 0.22);
+}
+
+.cf-duenos__rotulo {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-duenos__rotulo svg {
+  width: 14px;
+  height: 14px;
+  align-self: center;
+  margin-top: -3px;
+}
+
+.cf-duenos__rotulo small {
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--cf-texto-3);
+}
+
 .cf-aviso-barbero {
   display: flex;
   align-items: center;
@@ -3110,6 +3150,22 @@ html.cf-html body {
   animation: cf-girar 1.6s linear infinite;
 }
 
+/* Quinta tanda: hipnotizado (los Lentes de Fran: la espiral gira rápido, al revés del mareo) y
+   cegado (el Spray de Leo). */
+.cf-estado[data-estado='hipnotizado'] {
+  color: #e9d5ff;
+  box-shadow: 0 0 0 1.5px #a855f7;
+}
+
+.cf-estado[data-estado='hipnotizado'][data-on] svg {
+  animation: cf-girar 0.9s linear infinite reverse;
+}
+
+.cf-estado[data-estado='cegado'] {
+  color: #f1f5f9;
+  box-shadow: 0 0 0 1.5px #cbd5e1;
+}
+
 .cf-estado[data-estado='quemado'] {
   color: #ffb27a;
   box-shadow: 0 0 0 1.5px #ff6a00;
@@ -3835,6 +3891,12 @@ html.cf-html body {
 .cf-carta[data-lista][data-activo] {
   animation: none;
   transform: scale(0.93);
+}
+
+/* Con la carga que pide pero sin salir (la Curación de Fabri con la vida en 90 % o más: hud.ts,
+   `data-bloqueada`): el llenado lleno, gris, para que no parezca una carta lista. */
+.cf-carta[data-bloqueada] .cf-carta__llenado {
+  background: linear-gradient(0deg, rgba(150, 153, 166, 0.3), transparent 85%);
 }
 
 .cf-pelea[data-final] .cf-carta {
@@ -5060,6 +5122,17 @@ html.cf-html body {
 
 .cf-apodo__listo[data-estado='pendiente'] svg {
   color: #ffc400;
+}
+
+/* Pelea con un dueño: no se manda al ranking (dorado y neutro, ni el verde de «Guardado» ni el ámbar
+   de la cola). */
+.cf-apodo__listo[data-estado='duenos'] {
+  background: rgba(255, 255, 255, 0.05);
+  border-left-color: var(--cf-oro);
+}
+
+.cf-apodo__listo[data-estado='duenos'] svg {
+  color: var(--cf-oro);
 }
 
 .cf-apodo__error {

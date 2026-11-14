@@ -11,6 +11,8 @@ import { empujarZoom, temblar } from './camara'
 import { fx, FX_ARCO, FX_BLOQUEO, FX_CHISPA, FX_CHISPA_CRITICA, FX_ONDA, FX_RAYO } from './efectos'
 import type { Escena } from './escena'
 import { impactoEspecial, rasgoEspecial } from './especiales'
+import { bloqueoQuinta, capaHerramientaQuinta, cartasDespedidas, temblorQuinta } from './especiales-quinta'
+import { especialDe } from './kit'
 import { tieneImpactos, type VisualLuchador } from './luchadores'
 import { destellar, iniciarSuperFlash, type Destello, type SuperFlash } from './pantalla'
 import {
@@ -29,6 +31,7 @@ import {
   emitirNotas,
   emitirPolvo,
   emitirSalpicadura,
+  emitirObjetos,
   emitirTrozos,
   G_CALIENTE,
   G_LECHE,
@@ -44,8 +47,10 @@ import {
   PAL_HIELO,
   PAL_MAGENTA,
   PAL_ORO,
+  PAL_ROJO,
   PAL_TIERRA,
   PAL_VIOLETA,
+  TROZO_DIGITO_ROJO,
 } from './particulas'
 import type { Textos } from './textos'
 import { azar } from './util'
@@ -226,6 +231,7 @@ function alGolpe(M: Mundo, e: Extract<EventoJuego, { tipo: 'golpe' }>): void {
   const vV = M.vis[e.victima]
   if (e.bloqueado) {
     vV.escudoGolpe = 1
+    bloqueoQuinta(E, e.herramienta, x, y, dir)
     emitirChispas(E, x, y, 10 + nivel * 3, dir, 1.0, 180, 520, PAL_AZUL, 2.2)
     estallido(E, x, y, 46 + nivel * 10, 1, 0.14)
     if (nivel >= 2) onda(E, x, y, 8, 46, 0.22, PAL_AZUL, 4)
@@ -259,11 +265,16 @@ function alGolpe(M: Mundo, e: Extract<EventoJuego, { tipo: 'golpe' }>): void {
       emitirBrillos(E, x, y, 3, 0, 14, 40)
       break
     default:
-      capaHerramienta(M, e.herramienta, x, y, dir)
+      if (!capaHerramientaQuinta(E, e.herramienta, x, y, dir, e.fuerza, M.vis[e.atacante].contraOk)) capaHerramienta(M, e.herramienta, x, y, dir)
       break
   }
+  // el tirón del Agarre y Ejecución de Nacho: «ERROR — Rival.exe no responde…» sobre la víctima
+  if (e.herramienta === 'ejecucion' && e.fuerza === 'especial') {
+    M.textos.impacto('error', vic.x, vV.cajaY - 50)
+    vV.glitchMs = 0
+  }
   if (nivel >= 2) emitirPolvo(E, vic.x, E.sueloY, 4, 30, 1, dir)
-  temblar(E.cam, TEMBLOR_EXTRA[e.herramienta] ?? (TEMBLOR[nivel] + (crit ? 3 : 0)))
+  temblar(E.cam, TEMBLOR_EXTRA[e.herramienta] ?? temblorQuinta(e.herramienta, e.fuerza) ?? (TEMBLOR[nivel] + (crit ? 3 : 0)))
   empujarZoom(E.cam, ZOOM[nivel] + (crit ? 0.02 : 0))
   vV.sacudida = Math.max(vV.sacudida, (4 + nivel * 2 + (crit ? 4 : 0)) * 16.7)
   vV.destelloMs = 0
@@ -378,6 +389,30 @@ function alProyectil(M: Mundo, e: Extract<EventoJuego, { tipo: 'proyectil' }>): 
       emitirEstallido(E, manoX, manoY, 90, 0, 0.18)
       emitirChispas(E, manoX, manoY, 8, l.mira, 0.6, 200, 480, PAL_FUEGO)
       break
+    // Quinta tanda: el destello de la mano cuando sale cada tiro (lo demás, en arsenal-quinta.ts).
+    case 'carta':
+      emitirChispas(E, manoX, manoY, 3, l.mira, 0.5, 120, 300, PAL_ROJO, 1.4)
+      break
+    case 'hipnosis':
+      emitirAnillo(E, l.x + l.mira * 30, v.cajaY + v.cajaH * 0.11, 6, 44, 0.22, PAL_VIOLETA, 3)
+      break
+    case 'secador':
+      emitirBrillos(E, manoX, manoY, 2, 0, 10, 20)
+      break
+    case 'aerosol':
+      for (let k = 0; k < 3; k++) emitirNiebla(E, manoX, manoY, l.mira * azar(40, 110), azar(-20, 10), 16, 0.4, 1)
+      break
+    case 'pelotita':
+      emitirAnillo(E, manoX, manoY - 10, 6, 44, 0.2, PAL_AZUL, 3)
+      emitirBrillos(E, manoX, manoY - 10, 3, 4, 14, 30)
+      break
+    case 'espina':
+      emitirBrillos(E, l.x, v.cajaY + 10, 2, 1, 14, 30)
+      break
+    case 'monopatin':
+      emitirChispas(E, manoX, manoY + 30, 8, l.mira, 0.7, 160, 420, PAL_AZUL, 1.8)
+      emitirAnillo(E, manoX, manoY + 30, 8, 60, 0.24, PAL_AZUL, 4)
+      break
     default:
       // nube y sismo: los anuncian sus propios eventos (con la x de dónde aparecen)
       break
@@ -457,12 +492,23 @@ export function alImpactoAnimacion(M: Mundo, lado: Lado, k: number): void {
   }
 }
 
+/**
+ * Las partículas de los eventos de la quinta tanda que pueden caer con el super flash de su propio
+ * especial (la contra del All In, el Corte de Precisión, la devuelta del Smash…) van encima del
+ * oscurecido, como el rasgo del especial. procesarEventos la vuelve a 1 en el evento siguiente.
+ */
+function encimaDelFlash(M: Mundo): void {
+  if (M.sf.activo) M.E.parts.capaNueva = 2
+}
+
 export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void {
   const E = M.E
   // El remate trae su `ko` en el mismo tick: ese K.O. no pisa el cartel de «¡AL CERO!».
   const conRemate = eventos.some((e) => e.tipo === 'final_al_cero')
   for (let i = 0; i < eventos.length; i++) {
     const e = eventos[i]
+    // los de la quinta tanda la suben a 2 con super flash (ver encimaDelFlash): cada evento arranca en 1
+    E.parts.capaNueva = 1
     switch (e.tipo) {
       case 'golpe':
         alGolpe(M, e)
@@ -549,6 +595,9 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
         const atk = M.p.luchadores[e.atacante]
         const vV = M.vis[e.victima]
         if (!vic || !atk) break
+        // quién lo agarró (quinta tanda): Lautaro lo revolea por el aire, Nacho lo vuelve código
+        const ag = especialDe(atk.id, atk.movimiento)?.agarre
+        vV.agarreDe = ag?.roba ? 3 : ag?.aire ? 2 : 1
         const x = (vic.x + atk.x) / 2
         const y = centroY(vV)
         estallido(E, x, y, 110, 0, 0.18)
@@ -626,6 +675,108 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
         if (l) M.vis[e.quien].sacudida = Math.max(M.vis[e.quien].sacudida, 50)
         break
       }
+      // ─── Quinta tanda (14/nov) ───
+      case 'contra': {
+        // saltó la contra del All In: «¡ALL IN!», el destello violeta y las cartas del anillo despedidas
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        encimaDelFlash(M)
+        v.contraOk = true
+        const cintura = E.sueloY - l.y - alto(v) * 0.46
+        M.textos.impacto('allin', l.x, v.cajaY - 34)
+        cartasDespedidas(E, l, v)
+        emitirAnillo(E, l.x, cintura, 14, 130, 0.36, PAL_VIOLETA, 8)
+        emitirBrillos(E, l.x, cintura, 10, 3, 60, 80)
+        destellar(M.destello, '#C4B5FD', 0.34, 190)
+        temblar(E.cam, 8)
+        empujarZoom(E.cam, 0.04)
+        M.focoMs = Math.max(M.focoMs, 600)
+        M.focoLado = e.quien
+        break
+      }
+      case 'hipnotizado': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        encimaDelFlash(M)
+        M.textos.impacto('hipnotizado', l.x, v.cajaY - 40)
+        emitirAnillo(E, l.x, v.cajaY + 10, 10, 80, 0.3, PAL_VIOLETA, 5)
+        emitirBrillos(E, l.x, v.cajaY + 10, 8, 3, 40, 40)
+        destellar(M.destello, '#E9D5FF', 0.14, 160)
+        break
+      }
+      case 'cegado': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        encimaDelFlash(M)
+        const cara = v.cajaY + v.cajaH * 0.12
+        M.textos.impacto('cegado', l.x, v.cajaY - 40)
+        for (let k = 0; k < 8; k++) emitirNiebla(E, l.x + azar(-26, 26), cara + azar(-14, 14), azar(-50, 50), -azar(10, 50), 24, 0.7, 1)
+        destellar(M.destello, '#FFFFFF', 0.16, 160)
+        break
+      }
+      case 'precision': {
+        // el Corte de Precisión con la punta: «¡PRECISIÓN!» y las líneas del fade en la cabeza del rival
+        const victima = otro(e.quien)
+        const vV = M.vis[victima]
+        const vic = M.p.luchadores[victima]
+        if (!vic) break
+        encimaDelFlash(M)
+        vV.precisionMs = 0
+        M.textos.impacto('precision', vic.x, vV.cajaY - 48)
+        emitirChispas(E, e.x, E.sueloY - e.y, 12, vic.x >= e.x ? 1 : -1, 0.6, 220, 560, PAL_AZUL, 1.6)
+        destellar(M.destello, '#BAE6FD', 0.2, 150)
+        break
+      }
+      case 'carga_robada': {
+        // los dígitos rojos se le escapan a la víctima hacia Nacho
+        const vic = M.p.luchadores[e.victima]
+        const atk = M.p.luchadores[e.atacante]
+        const vV = M.vis[e.victima]
+        if (!vic || !atk) break
+        const n = Math.max(4, Math.min(14, Math.round(e.cantidad * 5)))
+        emitirObjetos(E, vic.x, vV.cajaY + vV.cajaH * 0.4, n, TROZO_DIGITO_ROJO, (atk.x - vic.x) * 1.4, -220, 80, 380, 15, 0.9)
+        break
+      }
+      case 'devuelto': {
+        // el Smash de Pádel devolvió un tiro: destello blanco y «¡DEVUELTA!» chico
+        encimaDelFlash(M)
+        const y = E.sueloY - e.y
+        emitirEstallido(E, e.x, y, 90, 4, 0.16)
+        emitirAnillo(E, e.x, y, 8, 70, 0.24, PAL_BLANCO, 4)
+        emitirBrillos(E, e.x, y, 6, 4, 24, 40)
+        M.textos.impacto('devuelta', e.x, y - 44)
+        temblar(E.cam, 3)
+        break
+      }
+      case 'despido': {
+        // el papel entró: «DESPIDO» grande y la víctima se arrodilla llorando
+        const vic = M.p.luchadores[e.victima]
+        const vV = M.vis[e.victima]
+        const atk = M.p.luchadores[e.atacante]
+        if (!vic) break
+        encimaDelFlash(M)
+        vV.arrodilladoMs = 0
+        M.textos.impacto('despido', vic.x, vV.cajaY - 46)
+        destellar(M.destello, '#FFF1C2', 0.2, 170)
+        temblar(E.cam, 5)
+        if (atk) emitirBrillos(E, atk.x + atk.mira * 36, E.sueloY - atk.y - alto(M.vis[e.atacante]) * 0.86, 6, 0, 24, 40)
+        break
+      }
+      case 'pinchazo': {
+        // Pelo de punta (Nico M.): unas chispitas doradas donde se pinchó, sin número grande
+        const y = E.sueloY - e.y
+        emitirChispas(E, e.x, y, 5, 0, Math.PI, 90, 240, PAL_ORO, 1.3)
+        emitirBrillos(E, e.x, y, 2, 1, 10, 30)
+        break
+      }
+      case 'plantada':
+        // una púa se clavó en el piso
+        emitirPolvo(E, e.x, E.sueloY, 3, 14, 0.7)
+        emitirBrillos(E, e.x, E.sueloY - 14, 3, 1, 10, 40)
+        break
       case 'turbo':
         M.textos.anuncio('turbo', 'TURBO')
         destellar(M.destello, '#FFD34D', 0.16, 220)
@@ -644,6 +795,16 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
         if (!l) break
         emitirPolvo(E, l.x, E.sueloY, e.fuerte ? 10 : 5, 30, e.fuerte ? 1.3 : 0.8)
         const v = M.vis[e.quien]
+        if (v.revoleado) {
+          // cae del Lanzamiento Aéreo de Lautaro: el golpe fuerte contra el piso, con polvo y piedras
+          v.revoleado = false
+          emitirPolvo(E, l.x, E.sueloY, 18, 80, 1.7)
+          emitirTrozos(E, l.x, E.sueloY - 6, 8, 0, 1)
+          emitirAnillo(E, l.x, E.sueloY - 4, 12, 130, 0.36, PAL_TIERRA, 7)
+          emitirEstallido(E, l.x, E.sueloY - 24, 150, 0, 0.22)
+          temblar(E.cam, 11)
+          empujarZoom(E.cam, 0.03)
+        }
         v.aplastar = e.fuerte ? 0.16 : 0.1
         v.aplastarVel = 0
         if (e.fuerte) temblar(E.cam, 3)
@@ -727,4 +888,5 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
         break
     }
   }
+  E.parts.capaNueva = 1
 }

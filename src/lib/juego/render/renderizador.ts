@@ -2,10 +2,11 @@
  * El renderizador: arma la escena, procesa los eventos drenados del motor, avanza los efectos en
  * tiempo real (dtMs, aunque el motor esté en hitstop o cámara lenta) y dibuja el cuadro.
  *
- * Orden del cuadro: arena → luces → sombras y reflejos → grieta del sismo y polvo de atrás →
- * luchadores (el que pega adelante; el agarrado, delante de Brian) → proyectiles (los de Simón y
- * Chipi y los del elenco nuevo, arsenal.ts) → partículas → tajos → números y textos de impacto →
- * super flash → viñeta → banda del especial → destello → anuncios y combos. El HUD es DOM.
+ * Orden del cuadro: arena → luces → sombras y reflejos → grieta del sismo, púas clavadas y polvo de
+ * atrás → luchadores (el que pega adelante; el agarrado, delante de Brian) → estelas de los tiros
+ * devueltos → proyectiles (los de Simón y Chipi, los del elenco, arsenal.ts, y los de la quinta tanda,
+ * arsenal-quinta.ts) → partículas → tajos → números y textos de impacto → super flash → viñeta →
+ * banda del especial → destello → anuncios y combos. El HUD es DOM.
  */
 import { PERSONAJES } from '../personajes'
 import { VISTA_ANCHO } from '../tipos'
@@ -21,9 +22,17 @@ import type {
   Renderizador,
 } from '../tipos'
 import { actualizarArsenal, dibujarArsenal, dibujarArsenalFondo, Rastros } from './arsenal'
+import {
+  actualizarQuintaProyectiles,
+  dibujarDevueltos,
+  dibujarQuinta,
+  dibujarQuintaFondo,
+  SeguimientoQuinta,
+} from './arsenal-quinta'
 import { actualizarCamara, ajustarCamara, crearCamara } from './camara'
 import type { Calidad, Escena } from './escena'
 import { prepararEfectos } from './efectos'
+import { actualizarQuinta } from './especiales-quinta'
 import { alImpactoAnimacion, procesarEventos, type Mundo } from './eventos'
 import { liberarLienzo, pilaDeFuentes } from './lienzo'
 import {
@@ -33,6 +42,7 @@ import {
   dibujarLuchador,
   dibujarReflejo,
   dibujarSombra,
+  forzarPlano,
   liberarAtlas,
   liberarVisual,
   planoDe,
@@ -48,6 +58,7 @@ import {
   crearDestello,
   crearEscenario,
   crearSuperFlash,
+  debajoDeLaBanda,
   dibujarDestello,
   dibujarFondo,
   dibujarLuces,
@@ -177,8 +188,12 @@ export function crearRenderizadorImpl(
   }
   const destello = crearDestello()
   const sf = crearSuperFlash()
+  /** El borde de la banda del super flash en una x de mundo (los textos de la quinta van debajo). */
+  const debajoDeBanda = (x: number): number => debajoDeLaBanda(E, sf, cam.altoVista, x)
   /** Seguimiento de los proyectiles del elenco nuevo (estallidos al desaparecer, grieta, nube). */
   const rastros = new Rastros()
+  /** Y el de la quinta tanda (púas clavadas, columnas de código, tiros devueltos por el Smash). */
+  const seguimiento = new SeguimientoQuinta()
   let mundo: Mundo | null = null
   let listo = false
   let destruido = false
@@ -331,7 +346,10 @@ export function crearRenderizadorImpl(
     E.parts.vaciar()
     E.tajos.vaciar()
     rastros.vaciar()
+    seguimiento.vaciar()
     textos.vaciar()
+    // los textos de la quinta tanda que puede mostrar esta pelea se suman a lo que se precalienta
+    textos.paraPelea([p.luchadores[0].id, p.luchadores[1].id])
     apagarSuperFlash(sf)
     destello.edad = destello.dur
     cam.zoom = 1.12
@@ -423,8 +441,15 @@ export function crearRenderizadorImpl(
         for (let k = 0; k < 30; k++) if (mascara & (1 << k)) alImpactoAnimacion(M, ladoT, k)
       }
     }
+    // la quinta tanda: relojes de cada efecto, partículas y el cuadro forzado (el arrodillado del Despido)
+    actualizarQuinta(E, p, vis, dtMs)
+    for (let lado = 0; lado < 2; lado++) {
+      const v = vis[lado]
+      if (v.planoForzado >= 0) forzarPlano(v, p.luchadores[lado], v.planoForzado, E)
+    }
     actualizarProyectiles(E, p, dtS)
     actualizarArsenal(E, p, rastros, dtMs)
+    actualizarQuintaProyectiles(E, p, seguimiento, dtMs)
     moverGorra(dtS)
     E.parts.actualizar(dtS, E.sueloY, E.s)
     E.tajos.actualizar(dtMs)
@@ -456,21 +481,27 @@ export function crearRenderizadorImpl(
       dibujarReflejo(E, b, vis[1])
     }
     dibujarArsenalFondo(E, rastros)
+    dibujarQuintaFondo(E, seguimiento, atlasLados)
     dibujarParticulas(E, 0)
     const frente = ladoAdelante(p)
     const atras = frente === 0 ? 1 : 0
-    dibujarLuchador(E, p.luchadores[atras], vis[atras])
-    dibujarLuchador(E, p.luchadores[frente], vis[frente])
+    dibujarLuchador(E, p.luchadores[atras], vis[atras], 0, atlasLados[frente])
+    dibujarLuchador(E, p.luchadores[frente], vis[frente], 0, atlasLados[atras])
     dibujarGorra()
+    dibujarDevueltos(E, seguimiento)
     dibujarProyectiles(E, p, atlasLados)
     dibujarArsenal(E, p, rastros, atlasLados)
+    dibujarQuinta(E, p, atlasLados)
     dibujarParticulas(E, 1)
     E.tajos.dibujar(E)
-    textos.dibujarMundo()
+    // con super flash, los textos de la quinta tanda quedan para después de la banda (si no, la banda y
+    // el oscurecido tapaban «¡PRECISIÓN!» o «¡ALL IN!», que salen en el golpe del mismo especial)
+    textos.dibujarMundo(sf.activo ? 1 : 0)
     if (sf.activo) dibujarSuperFlashMundo(E, sf, p.luchadores, vis)
     dibujarParticulas(E, 2)
     dibujarVineta(E, escenario, p.turbo)
     dibujarSuperFlashBanda(E, sf, cam.altoVista)
+    if (sf.activo) textos.dibujarMundo(2, debajoDeBanda)
     dibujarDestello(E, destello)
     textos.dibujarPantalla(cam.altoVista)
     ctx.globalAlpha = 1
@@ -547,6 +578,7 @@ export function crearRenderizadorImpl(
     liberarSuperFlash(sf)
     E.parts.vaciar()
     rastros.vaciar()
+    seguimiento.vaciar()
     mundo = null
   }
 

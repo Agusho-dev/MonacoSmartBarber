@@ -10,11 +10,12 @@ import type {
   MetaAnimaciones,
   Partida,
 } from '../../../src/lib/juego/tipos.ts'
-import { CLAVES_ANIMACION, ENTRADA_VACIA } from '../../../src/lib/juego/tipos.ts'
+import { CLAVES_ANIMACION, ENTRADA_VACIA, TIEMPOS_PROYECTIL } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
 import { cuadroDeAtaque, cuadrosDeImpacto } from '../../../src/lib/juego/motor/animacion.ts'
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
-import { EFECTO } from '../../../src/lib/juego/motor/constantes.ts'
+import { EFECTO, HIPNOSIS, INMUNIDAD } from '../../../src/lib/juego/motor/constantes.ts'
+import { cajaCuerpo } from '../../../src/lib/juego/motor/cuerpo.ts'
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
 import { PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 
@@ -694,6 +695,549 @@ function pelea(pj: [IdPersonaje, IdPersonaje], x0: number, x1: number, semilla =
   const b = q.estadisticas[0]
   ok(g.golpesAcertados >= 5 && g.golpesAcertados <= g.golpesIntentados, 'precisión: el molino no pasa de 100 %', `${g.golpesAcertados}/${g.golpesIntentados}`)
   ok(b.golpesAcertados === 1 && b.golpesIntentados === 1, 'precisión: el agarre cuenta un intento y un acierto', `${b.golpesAcertados}/${b.golpesIntentados}`)
+}
+
+// ─── Quinta tanda (14/nov): una prueba guionada por cada pieza nueva ───
+// Los números salen de los kits (con su factor de DANIO_KIT): se mide la mecánica.
+const K5 = MOVIMIENTOS
+/** Corre registrando cada tick: lo que pasó y cómo estaba cada luchador justo antes. */
+function correrConEstado(p: Partida, n: number, gen: Gen) {
+  const ticks: { t: number; evs: EventoJuego[]; antes: { enSuelo: boolean; x: number }[] }[] = []
+  for (let t = 0; t < n; t++) {
+    const antes = p.luchadores.map((l) => ({ enSuelo: l.enSuelo, x: l.x }))
+    const [a, b] = gen(t, p)
+    avanzar(p, [{ ...ENTRADA_VACIA, ...a }, { ...ENTRADA_VACIA, ...b }])
+    ticks.push({ t, evs: p.eventos.splice(0), antes })
+  }
+  return ticks
+}
+
+// Contra (DefEspecial.contra, el All In de Chino).
+{
+  const ct = K5.chino.especiales[1].contra
+  // Un golpe dentro del dominio: no hace nada, no le abre la cadena al que pega y la embestida sale con el bono.
+  const p = pelea(['chino', 'simon'], 400, 490)
+  const v0 = p.luchadores[0].vida
+  let dominioVisto = 0
+  const evs = correr(p, 160, (t, q) => {
+    dominioVisto = Math.max(dominioVisto, q.luchadores[0].efectos.dominio)
+    return [{ especial2: t < 2 }, { golpe: pulso(t, 6, 30) && t < 44 }]
+  })
+  const contra = de(evs, 'contra')
+  const bono = de(evs, 'golpe').find((g) => g.atacante === 0 && g.herramienta === 'dominio')
+  ok(contra.length === 1 && contra[0].quien === 0 && p.luchadores[0].vida === v0, 'contra: el golpe en el dominio no le hace nada (evento «contra»)', `${contra.length} contras, vida ${v0} → ${p.luchadores[0].vida}`)
+  ok(!!bono && !!ct && bono.danio === ct.bono.danio && de(evs, 'derribo').some((d) => d.quien === 1), 'contra: la embestida pega con el bono y derriba', `${bono?.danio} (bono ${ct?.bono.danio})`)
+  ok(!de(evs, 'swing').some((s) => s.quien === 1 && s.herramienta === 'patada'), 'contra: el golpe contrarrestado no abre la cadena del que pegó')
+  ok(dominioVisto > 0 && p.luchadores[0].efectos.dominio === 0, 'contra: efectos.dominio mientras está armada y 0 después', `máx ${dominioVisto}`)
+  // Si nadie le pega, sale la embestida floja (sin bono, no derriba).
+  const p2 = pelea(['chino', 'simon'], 300, 500)
+  const evs2 = correr(p2, 140, (t) => [{ especial2: t < 2 }, {}])
+  const base = de(evs2, 'golpe').find((g) => g.atacante === 0 && g.herramienta === 'dominio')
+  ok(de(evs2, 'contra').length === 0 && !!base && base.danio === K5.chino.especiales[1].ventanas[0].danio && de(evs2, 'derribo').length === 0, 'contra: sin golpe, la embestida floja del final (empuja, no derriba)', `${base?.danio}`)
+  // Un tiro en el dominio: se deshace y salta la contra.
+  let conContra = 0
+  let pelotaPego = 0
+  for (let t0 = 30; t0 <= 54; t0 += 4) {
+    const q = pelea(['chino', 'nahuel'], 300, 700)
+    const e = correr(q, 200, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, { especial1: t < 2 }])
+    if (de(e, 'contra').length) {
+      conContra++
+      if (de(e, 'golpe').some((g) => g.victima === 0 && g.herramienta === 'pelota')) pelotaPego++
+    }
+  }
+  ok(conContra > 0 && pelotaPego === 0, 'contra: el pelotazo en el dominio se deshace y salta la contra', `${conContra} contras, ${pelotaPego} pelotas que pegaron`)
+  // El agarre le gana a la contra.
+  const p4 = pelea(['chino', 'brian'], 400, 470)
+  const evs4 = correr(p4, 200, (t) => [{ especial2: t < 2 }, { especial1: t >= 10 && t < 12 }])
+  ok(de(evs4, 'agarre').length === 1 && de(evs4, 'contra').length === 0, 'contra: el agarre de Brian le gana')
+}
+
+// Hipnotiza (efecto 'hipnotiza', los Lentes de Fran).
+{
+  const tLente = K5.fran.especiales[0].proyectil?.ticksEfecto ?? EFECTO.hipnotizado
+  // De lejos: camina hacia Fran a HIPNOSIS.paso px por tick, sin control.
+  const p = pelea(['fran', 'simon'], 300, 520)
+  let maxPaso = 0
+  let hipno = 0
+  let xAntes = p.luchadores[1].x
+  const evs = correr(p, 160, (t, q) => {
+    const s = q.luchadores[1]
+    if (s.efectos.hipnotizado > 0) hipno++
+    if (s.efectos.hipnotizado > 0 && q.congelamientoGolpe === 0) maxPaso = Math.max(maxPaso, Math.abs(s.x - xAntes))
+    xAntes = s.x
+    return [{ especial1: t < 2 }, {}]
+  })
+  ok(de(evs, 'hipnotizado').length === 1 && de(evs, 'hipnotizado')[0].quien === 1, 'lentes: hipnotiza (evento «hipnotizado»)')
+  ok(p.luchadores[1].x < 520 - 50 && maxPaso <= HIPNOSIS.paso + 1e-9, `hipnotizado: camina hacia Fran a ${HIPNOSIS.paso} px por tick`, `x ${p.luchadores[1].x.toFixed(0)}, paso máx ${maxPaso.toFixed(2)}`)
+  ok(hipno > 0 && hipno <= tLente + 30 && internoDe(p).luchadores[1].inmune.hipnotizado > 0, 'hipnotizado: no pasa de su tope y deja inmunidad', `${hipno} ticks (tope ${tLente} + hitstop)`)
+  // Cerca: llega a HIPNOSIS.llega px y se despierta enseguida.
+  const p2 = pelea(['fran', 'simon'], 300, 430)
+  let dMin = 999
+  correr(p2, 160, (t, q) => {
+    if (q.luchadores[1].efectos.hipnotizado > 0) dMin = Math.min(dMin, Math.abs(q.luchadores[1].x - q.luchadores[0].x))
+    return [{ especial1: t < 2 }, {}]
+  })
+  ok(Math.abs(dMin - HIPNOSIS.llega) < 1, `hipnotizado: se para a ${HIPNOSIS.llega} px`, dMin.toFixed(1))
+  // El primer golpe limpio lo despierta.
+  const p3 = pelea(['fran', 'simon'], 300, 430)
+  let pegoHipnotizado = false
+  let despierto = false
+  for (let t = 0; t < 200 && !pegoHipnotizado; t++) {
+    const s = p3.luchadores[1]
+    const estaba = s.efectos.hipnotizado > 0
+    const cerca = estaba && Math.abs(s.x - p3.luchadores[0].x) < 110
+    avanzar(p3, [{ ...ENTRADA_VACIA, especial1: t < 2, golpe: cerca && t % 4 < 2 }, ENTRADA_VACIA])
+    const e = p3.eventos.splice(0)
+    if (estaba && e.some((x) => x.tipo === 'golpe' && x.atacante === 0 && x.herramienta === 'puno' && !x.bloqueado)) {
+      pegoHipnotizado = true
+      // (relojes ya descontó un tick de la inmunidad en el mismo tick del golpe)
+      despierto = s.efectos.hipnotizado === 0 && internoDe(p3).luchadores[1].inmune.hipnotizado === INMUNIDAD.hipnotizado - 1
+    }
+  }
+  ok(pegoHipnotizado && despierto, 'hipnotizado: el primer golpe limpio lo despierta (y deja inmunidad)')
+  // Agachado o cubierto no lo hipnotiza.
+  const p4 = pelea(['fran', 'simon'], 300, 520)
+  const evs4 = correr(p4, 160, (t) => [{ especial1: t < 2 }, { abajo: true }])
+  ok(de(evs4, 'hipnotizado').length === 0 && !de(evs4, 'golpe').some((g) => g.herramienta === 'hipnosis'), 'lentes: agachado le pasa por arriba')
+  const p5 = pelea(['fran', 'simon'], 300, 520)
+  const evs5 = correr(p5, 160, (t) => [{ especial1: t < 2 }, { guardia: true }])
+  ok(de(evs5, 'hipnotizado').length === 0 && de(evs5, 'golpe').some((g) => g.herramienta === 'hipnosis' && g.bloqueado), 'lentes: cubierto no hipnotiza')
+  // En el aire pega pero no hipnotiza.
+  let enAire = 0
+  let hipnoEnAire = 0
+  for (let s = 20; s <= 44; s += 2) {
+    const q = pelea(['fran', 'simon'], 300, 520)
+    const tk = correrConEstado(q, 180, (t) => [{ especial1: t < 2 }, { arriba: t >= s && t < s + 2 }])
+    for (const x of tk) {
+      if (x.evs.some((e) => e.tipo === 'golpe' && e.herramienta === 'hipnosis') && !x.antes[1].enSuelo) {
+        enAire++
+        if (x.evs.some((e) => e.tipo === 'hipnotizado')) hipnoEnAire++
+      }
+    }
+  }
+  ok(enAire > 0 && hipnoEnAire === 0, 'lentes: al que salta le pega, pero no lo hipnotiza', `${enAire} en el aire`)
+}
+
+// Punta (VentanaGolpe.punta, el Corte de Precisión de Fran).
+{
+  const w = K5.fran.especiales[1].ventanas[0]
+  const p = pelea(['fran', 'simon'], 300, 470)
+  const evs = correr(p, 100, (t) => [{ especial2: t < 2 }, {}])
+  const g = de(evs, 'golpe').find((x) => x.atacante === 0 && x.herramienta === 'tijera')
+  ok(!!g && g.critico && g.danio === Math.round(w.danio * 1.6) && de(evs, 'precision').length === 1, 'punta: a 170 px es crítico seguro (evento «precision»)', `${g?.danio} crítico ${g?.critico}`)
+  const p2 = pelea(['fran', 'simon'], 380, 470)
+  const evs2 = correr(p2, 100, (t) => [{ especial2: t < 2 }, {}])
+  const g2 = de(evs2, 'golpe').find((x) => x.atacante === 0 && x.herramienta === 'tijera')
+  ok(!!g2 && !g2.critico && g2.danio === w.danio && de(evs2, 'precision').length === 0, 'punta: a 90 px pega el base, sin crítico', `${g2?.danio}`)
+}
+
+// Pulso fino (PasivaKit.criticoTrasBloqueo, Fran): el golpe que sale después de cubrir uno es crítico.
+{
+  let criticos = 0
+  let golpes = 0
+  for (let s = 0; s < 10; s++) {
+    const p = nueva(['fran', 'simon'], 300 + s)
+    p.luchadores[0].x = 400
+    p.luchadores[1].x = 480
+    const evs = correr(p, 40, (t) => [{ guardia: t < 12, golpe: t === 16 || t === 17 }, { golpe: t < 2 }])
+    const g = de(evs, 'golpe').find((x) => x.atacante === 0 && x.herramienta === 'puno' && !x.bloqueado)
+    if (g) {
+      golpes++
+      if (g.critico) criticos++
+    }
+  }
+  ok(golpes === 10 && criticos === 10, 'Pulso fino: después de cubrir, el puño es crítico', `${criticos}/${golpes}`)
+}
+
+// Cuerpo (DefMovimiento.cuerpo, el Gigante de Lautaro) y su armadura contra leves y medios.
+{
+  const cu = K5.lautaro.especiales[0].cuerpo
+  const p = pelea(['lautaro', 'simon'], 300, 700)
+  let caja = { ancho: 0, alto: 0 }
+  correr(p, 100, (t, q) => {
+    const I = internoDe(q)
+    const a = I.luchadores[0].accion
+    if (a && a.especial === 1 && a.t === 30) {
+      const c = cajaCuerpo(q.luchadores[0], I.luchadores[0])
+      if (c) caja = { ancho: c.x1 - c.x0, alto: c.y1 - c.y0 }
+    }
+    return [{ especial1: t < 2 }, {}]
+  })
+  const altoEsperado = (PERSONAJES.lautaro.alturaMundo - 10) * (cu?.altoMult ?? 1)
+  ok(!!cu && Math.abs(caja.ancho - cu.ancho) < 1e-6 && Math.abs(caja.alto - altoEsperado) < 1e-6, 'gigante: la caja de daño crece mientras dura', `${caja.ancho}×${caja.alto.toFixed(1)}`)
+  // Puños sueltos (la cadena de GOLPE termina en un golpe fuerte, que sí lo corta).
+  const p2 = pelea(['lautaro', 'simon'], 400, 500)
+  const evs2 = correr(p2, 140, (t) => [{ especial1: t < 2 }, { golpe: t === 26 || t === 27 || t === 50 || t === 51 }])
+  const leves = de(evs2, 'golpe').filter((g) => g.victima === 0 && g.fuerza === 'leve').length
+  ok(leves > 0 && de(evs2, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'gigante') && de(evs2, 'derribo').some((d) => d.quien === 1), 'gigante: los leves pegan pero no lo frenan, y el aplastón derriba', `${leves} leves`)
+  const p3 = pelea(['lautaro', 'simon'], 400, 500)
+  const evs3 = correr(p3, 140, (t) => [{ especial1: t < 2 }, { herramienta: t >= 26 && t < 28 }])
+  ok(!de(evs3, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'gigante'), 'gigante: un golpe fuerte (la MÁQUINA) lo corta')
+}
+
+// Agarre en el aire y revoleo (DefAgarre.aire, tiron.vy: el Lanzamiento Aéreo de Lautaro).
+{
+  let aereos = 0
+  let lejos = 0
+  for (let s = 18; s <= 40; s += 2) {
+    const p = pelea(['lautaro', 'simon'], 400, 520)
+    const tk = correrConEstado(p, 220, (t) => [{ especial2: t < 2 }, { arriba: t >= s && t < s + 2 }])
+    const iAg = tk.findIndex((x) => x.evs.some((e) => e.tipo === 'agarre'))
+    if (iAg >= 0 && !tk[iAg].antes[1].enSuelo) {
+      aereos++
+      if (Math.abs(p.luchadores[1].x - p.luchadores[0].x) > 150 && tk.some((x) => x.evs.some((e) => e.tipo === 'derribo' && e.quien === 1))) lejos++
+    }
+  }
+  ok(aereos > 0 && lejos === aereos, 'lanzamiento aéreo: agarra al que salta y lo revolea lejos, derribado', `${aereos} en el aire, ${lejos} lejos`)
+  const p2 = pelea(['lautaro', 'simon'], 400, 500)
+  const evs2 = correr(p2, 120, (t) => [{ especial2: t < 2 }, { abajo: true }])
+  ok(de(evs2, 'agarre').length === 0, 'lanzamiento aéreo: al agachado no lo agarra (la mano va al cuello)')
+  const p3 = pelea(['lautaro', 'simon'], 400, 500)
+  const evs3 = correr(p3, 120, (t) => [{ especial2: t < 2 }, { guardia: true }])
+  ok(de(evs3, 'agarre').length === 1, 'lanzamiento aéreo: imbloqueable (agarra al que se cubre)')
+}
+
+// Apunta (DefProyectil.apunta, las herramientas de Leo).
+{
+  let enAire = 0
+  const p = pelea(['leo', 'simon'], 300, 560)
+  const tk = correrConEstado(p, 160, (t) => [{ especial1: t < 2 }, { arriba: t >= 20 }])
+  for (const x of tk) if (x.evs.some((e) => e.tipo === 'golpe' && e.herramienta === 'secador') && !x.antes[1].enSuelo) enAire++
+  ok(enAire > 0, 'herramientas: apuntan al que salta y le pegan en el aire', `${enAire} en el aire`)
+  const p2 = pelea(['leo', 'simon'], 300, 560)
+  const evs2 = correr(p2, 160, (t) => [{ especial1: t < 2 }, { abajo: true }])
+  ok(de(evs2, 'golpe').filter((g) => g.herramienta === 'secador').length >= 2, 'herramientas: agachado también le pegan (apuntan abajo)')
+  const p3 = pelea(['leo', 'simon'], 300, 560)
+  const evs3 = correr(p3, 160, (t) => [{ especial1: t < 2 }, { guardia: true }])
+  const b = de(evs3, 'golpe').filter((g) => g.herramienta === 'secador')
+  ok(b.length === 3 && b.every((g) => g.bloqueado), 'herramientas: cubierto, las tres bloqueadas')
+}
+
+// Ciega (efecto 'ciega', el Spray de Leo): sin pegar, con control; lo corta el primer golpe limpio.
+{
+  const p = pelea(['leo', 'simon'], 300, 480)
+  let cegados = 0
+  let libre = false
+  const x0: number[] = []
+  let pego = false
+  for (let t = 0; t < 150; t++) {
+    const s = p.luchadores[1]
+    // Cegado y ya sin el aturdimiento del golpe: aprieta todo (el buffer se vacía antes de que se le pase).
+    const ciego = s.efectos.cegado > 12 && internoDe(p).luchadores[1].stun === 0
+    if (ciego) {
+      libre = true
+      x0.push(s.x)
+    }
+    avanzar(p, [{ ...ENTRADA_VACIA, especial2: t < 2 }, { ...ENTRADA_VACIA, golpe: ciego && t % 4 < 2, especial1: ciego && t % 6 < 2, dash: ciego && t % 8 < 2, derecha: ciego }])
+    const e = p.eventos.splice(0)
+    cegados += de(e, 'cegado').length
+    if (ciego && e.some((x) => (x.tipo === 'swing' || x.tipo === 'especial' || x.tipo === 'dash') && x.quien === 1)) pego = true
+  }
+  const seMovio = x0.length > 2 && x0[x0.length - 1] > x0[0] + 5
+  ok(cegados === 1 && libre, 'spray: ciega (evento «cegado»)')
+  ok(seMovio && !pego, 'cegado: camina pero no pega, no tira especiales ni esquiva', `se movió ${seMovio}, pegó ${pego}`)
+  const p2 = pelea(['leo', 'simon'], 300, 480)
+  let pegoCiego = false
+  let cortado = false
+  for (let t = 0; t < 200 && !pegoCiego; t++) {
+    const s = p2.luchadores[1]
+    const estaba = s.efectos.cegado > 0
+    const ciego = estaba && internoDe(p2).luchadores[1].stun === 0
+    const cerca = Math.abs(s.x - p2.luchadores[0].x) < 130
+    avanzar(p2, [{ ...ENTRADA_VACIA, especial2: t < 2, golpe: ciego && cerca && t % 4 < 2, derecha: ciego && !cerca }, ENTRADA_VACIA])
+    const e = p2.eventos.splice(0)
+    if (estaba && e.some((x) => x.tipo === 'golpe' && x.atacante === 0 && x.herramienta === 'tijera' && !x.bloqueado)) {
+      pegoCiego = true
+      cortado = s.efectos.cegado === 0 && internoDe(p2).luchadores[1].inmune.cegado === INMUNIDAD.cegado - 1
+    }
+  }
+  ok(pegoCiego && cortado, 'cegado: el primer golpe limpio lo corta (y deja inmunidad)')
+  const p3 = pelea(['leo', 'simon'], 300, 480)
+  const evs3 = correr(p3, 120, (t) => [{ especial2: t < 2 }, { guardia: true }])
+  ok(de(evs3, 'cegado').length === 0 && de(evs3, 'golpe').some((g) => g.herramienta === 'aerosol' && g.bloqueado), 'spray: cubierto no ciega')
+}
+
+// Pibe de goma (PasivaKit.multDerribo, Leo): tirado queda menos.
+{
+  const tirado = (victima: IdPersonaje) => {
+    const p = pelea(['luciano', victima], 200, 700)
+    let max = 0
+    correr(p, 160, (t, q) => {
+      max = Math.max(max, internoDe(q).luchadores[1].derribo)
+      return [{ especial1: t < 2 }, {}]
+    })
+    return max
+  }
+  // (el máximo que se ve es uno menos: relojes ya lo descontó en el tick en que cayó)
+  const leo = tirado('leo') + 1
+  const simon = tirado('simon') + 1
+  const md = K5.leo.pasiva?.multDerribo ?? 1
+  ok(simon === EFECTO.derribo && leo === Math.round(EFECTO.derribo * md), 'Pibe de goma: Leo queda tirado menos', `${leo} contra ${simon}`)
+}
+
+// La casa siempre gana (PasivaKit.cargaPorEspecialRival, Chino).
+{
+  const p = pelea(['chino', 'simon'], 300, 700)
+  p.luchadores[0].carga = 3
+  correr(p, 1, () => [{}, { especial1: true }])
+  const c = K5.chino.pasiva?.cargaPorEspecialRival ?? 0
+  ok(c > 0 && Math.abs(p.luchadores[0].carga - (3 + c + 1 / 132)) < 1e-6, 'La casa siempre gana: cada especial del rival le da carga', p.luchadores[0].carga.toFixed(3))
+}
+
+// Roba (DefAgarre.roba, el Agarre y Ejecución de Nacho) y su caja de media distancia.
+{
+  const roba = K5.nacho.especiales[0].agarre?.roba
+  const p = pelea(['nacho', 'simon'], 300, 480)
+  p.luchadores[1].carga = 5
+  const evs = correr(p, 200, (t) => [{ especial1: t < 2 }, {}])
+  const r = de(evs, 'carga_robada')[0]
+  ok(de(evs, 'agarre').length === 1 && !!roba && !!r && r.cantidad === roba.carga && r.atacante === 0 && r.victima === 1, 'ejecución: agarra de media distancia y el tirón roba carga', `robó ${r?.cantidad}`)
+  ok(de(evs, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'ejecucion').length === 3 && de(evs, 'derribo').some((d) => d.quien === 1), 'ejecución: dos apretones y el tirón (con su herramienta), derriba')
+  const p2 = pelea(['nacho', 'simon'], 400, 470)
+  const evs2 = correr(p2, 120, (t) => [{ especial1: t < 2 }, {}])
+  ok(de(evs2, 'agarre').length === 0, 'ejecución: pegado (70 px) no alcanza')
+  const p3 = pelea(['nacho', 'simon'], 300, 480)
+  const evs3 = correr(p3, 120, (t) => [{ especial1: t < 2 }, { arriba: t >= 24 && t < 30 }])
+  ok(de(evs3, 'agarre').length === 0, 'ejecución: en el aire no agarra')
+}
+
+// Distancia por tiro (TiroRafaga.distancia, el Terremoto de Código de Nacho).
+{
+  const p = pelea(['nacho', 'simon'], 200, 860)
+  const xs: number[] = []
+  let ancho0 = 0
+  let ancho1 = 0
+  correr(p, 120, (t, q) => {
+    for (const pr of q.proyectiles) {
+      if (pr.tipo !== 'codigo') continue
+      if (pr.edad === 1) xs.push(Math.round(pr.x - q.luchadores[0].x))
+      if (pr.edad === TIEMPOS_PROYECTIL.codigoEstalla - 2) ancho0 = pr.ancho
+      if (pr.edad === TIEMPOS_PROYECTIL.codigoEstalla + 1) ancho1 = pr.ancho
+    }
+    return [{ especial2: t < 2 }, {}]
+  })
+  ok(xs.join(',') === '105,195,285,375', 'terremoto: cuatro columnas, cada una más lejos', xs.join(','))
+  ok(ancho1 > ancho0, `terremoto: cada columna estalla a los ${TIEMPOS_PROYECTIL.codigoEstalla} ticks`, `${ancho0} → ${ancho1}`)
+  const p2 = pelea(['nacho', 'simon'], 300, 500)
+  const evs2 = correr(p2, 140, (t) => [{ especial2: t < 2 }, {}])
+  const g2 = de(evs2, 'golpe').filter((g) => g.herramienta === 'codigo')
+  ok(g2.length === 1 && !g2[0].bloqueado && de(evs2, 'derribo').length === 1, 'terremoto: la que agarra lo tira y las otras ya no lo tocan', `${g2.length} golpes`)
+  const p3 = pelea(['nacho', 'simon'], 300, 500)
+  const evs3 = correr(p3, 140, (t) => [{ especial2: t < 2 }, { guardia: true }])
+  const g3 = de(evs3, 'golpe').filter((g) => g.herramienta === 'codigo')
+  ok(g3.length >= 1 && g3.every((g) => g.bloqueado), 'terremoto: se cubre (cada columna aparte)', `${g3.length} bloqueadas`)
+}
+
+// Overclock (PasivaKit.velocidadConCarga, Nacho).
+{
+  const camina = (carga: number) => {
+    const p = pelea(['nacho', 'simon'], 300, 800)
+    const x0 = p.luchadores[0].x
+    correr(p, 10, (_t, q) => {
+      q.luchadores[0].carga = carga
+      return [{ derecha: true }, {}]
+    })
+    return p.luchadores[0].x - x0
+  }
+  const oc = K5.nacho.pasiva?.velocidadConCarga
+  const lleno = camina(9)
+  const vacio = camina(2)
+  ok(!!oc && Math.abs(vacio - 10 * K5.nacho.caminar) < 0.01 && Math.abs(lleno - 10 * K5.nacho.caminar * oc.mult) < 0.01, 'Overclock: con la carga alta camina más rápido', `${vacio.toFixed(2)} → ${lleno.toFixed(2)}`)
+}
+
+// Hasta el rival (DefEmbestida.hastaRival, Desaparecer de Nehuen).
+{
+  const emb = K5.nehuen.especiales[0].embestida
+  const p = pelea(['nehuen', 'simon'], 200, 700)
+  let intocable = 0
+  let tocable = 0
+  const evs = correr(p, 120, (t, q) => {
+    const a = internoDe(q).luchadores[0].accion
+    if (a && a.especial === 1 && a.t > 0 && a.t < (emb?.invulnerableHasta ?? 0) && q.congelamientoGolpe === 0) {
+      if (q.luchadores[0].invulnerable) intocable++
+      else tocable++
+    }
+    return [{ especial1: t < 2 }, {}]
+  })
+  const g = de(evs, 'golpe').find((x) => x.atacante === 0 && x.herramienta === 'fantasma')
+  const dFinal = Math.abs(p.luchadores[1].x - p.luchadores[0].x)
+  ok(!!g && !!emb && intocable > 10 && tocable === 0, 'desaparecer: intocable mientras cruza y reaparece pegando', `${intocable} ticks intocable`)
+  const p2 = pelea(['nehuen', 'simon'], 200, 700)
+  let xLlego = 0
+  correr(p2, 60, (t, q) => {
+    const a = internoDe(q).luchadores[0].accion
+    if (a && a.especial === 1 && a.t === 20) xLlego = q.luchadores[0].x
+    return [{ especial1: t < 2 }, {}]
+  })
+  ok(Math.abs(700 - xLlego - (emb?.hastaRival ?? 0)) < 1, `desaparecer: frena a ${emb?.hastaRival} px del rival (no lo atraviesa)`, `${(700 - xLlego).toFixed(1)} px; después del golpe ${dFinal.toFixed(0)}`)
+  const p3 = pelea(['nehuen', 'simon'], 400, 480)
+  let xMax = 400
+  correr(p3, 50, (t, q) => {
+    xMax = Math.max(xMax, q.luchadores[0].x)
+    return [{ especial1: t < 2 }, {}]
+  })
+  ok(xMax < 401, 'desaparecer: si ya está cerca, no se mueve', xMax.toFixed(1))
+}
+
+// Devuelve (DefEspecial.devuelve, el Smash de Pádel de Nehuen).
+{
+  let devueltos = 0
+  let bien = 0
+  for (let t0 = 20; t0 <= 70; t0 += 2) {
+    const p = pelea(['nehuen', 'nahuel'], 300, 700)
+    const evs = correr(p, 220, (t) => [{ especial2: t >= t0 && t < t0 + 2 }, { especial1: t < 2 }])
+    const d = de(evs, 'devuelto')
+    if (!d.length) continue
+    devueltos++
+    const contraNahuel = de(evs, 'golpe').some((g) => g.atacante === 0 && g.victima === 1 && g.herramienta === 'pelota')
+    const aNehuen = de(evs, 'golpe').some((g) => g.victima === 0 && g.herramienta === 'pelota')
+    if (d[0].quien === 0 && d[0].proyectil === 'pelota' && contraNahuel && !aNehuen && p.estadisticas[0].especialesAcertados >= 1) bien++
+  }
+  ok(devueltos > 0 && bien === devueltos, 'smash: devuelve el pelotazo, que le pega al que lo tiró (y cuenta para Nehuen)', `${bien}/${devueltos}`)
+  const p2 = pelea(['nehuen', 'simon'], 300, 390)
+  const evs2 = correr(p2, 100, (t) => [{ especial2: t < 2 }, {}])
+  ok(de(evs2, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'paleta').length === 2, 'smash: de cerca entran el paletazo y la pelota')
+}
+
+// Volea (PasivaKit.multAereo, Nehuen): sus golpes aéreos pegan más.
+{
+  const base = K5.nehuen.movimientos.voladora.ventanas[0].danio
+  const ma = K5.nehuen.pasiva?.multAereo ?? 1
+  let visto = 0
+  let bien = 0
+  for (let s = 0; s < 6; s++) {
+    const p = nueva(['nehuen', 'simon'], 500 + s)
+    p.luchadores[0].x = 300
+    p.luchadores[1].x = 420
+    const evs = correr(p, 60, (t) => [{ arriba: t < 2, derecha: t < 2, golpe: t === 8 || t === 9 }, {}])
+    const g = de(evs, 'golpe').find((x) => x.atacante === 0 && !x.bloqueado)
+    if (!g) continue
+    visto++
+    if (g.danio === Math.round(base * ma * (g.critico ? 1.6 : 1))) bien++
+  }
+  ok(visto > 0 && bien === visto, 'Volea: la patada voladora pega 25 % más', `${bien}/${visto}`)
+}
+
+// Trampa (DefProyectil.trampa, las Espinas de Nico M.): lo que no pega se clava y tira al que lo pisa.
+{
+  const tr = K5.nico_m.especiales[1].proyectil?.trampa
+  // Lejos: las tres se clavan, quietas, más o menos a 220, 325 y 430 px.
+  const p = pelea(['nico_m', 'simon'], 300, 880)
+  const evs = correr(p, 110, (t) => [{ especial2: t < 2 }, {}])
+  const clavadas = p.proyectiles.filter((q) => q.tipo === 'espina' && q.plantado)
+  const xs = de(evs, 'plantada').map((e) => Math.round(e.x - 300))
+  ok(de(evs, 'plantada').length === 3 && clavadas.length === 3 && clavadas.every((q) => q.vx === 0 && q.vy === 0), 'espinas: las tres que no pegan se clavan, quietas (plantado)', xs.join(','))
+  ok(xs.length === 3 && Math.abs(xs[0] - 220) < 40 && Math.abs(xs[2] - 430) < 40, 'espinas: se clavan escalonadas, cada una más lejos', xs.join(','))
+  // Pisar una tira (imbloqueable, aunque se cubra después) y se deshacen las de la tirada.
+  const p2 = pelea(['nico_m', 'simon'], 200, 880)
+  correr(p2, 110, (t) => [{ especial2: t < 2 }, {}])
+  const evs2 = correr(p2, 120, () => [{}, { izquierda: true }])
+  const pisada = de(evs2, 'golpe').find((g) => g.herramienta === 'espinas' && g.victima === 1)
+  correr(p2, 2)
+  ok(!!pisada && !pisada.bloqueado && !!tr && pisada.danio === tr.danio && de(evs2, 'derribo').some((d) => d.quien === 1), 'espinas: pisar una clavada tira al piso (imbloqueable)', `${pisada?.danio}`)
+  ok(!p2.proyectiles.some((q) => q.plantado), 'espinas: una trampa por tirada (las otras se deshacen)')
+  // Saltándolas no pasa nada; si nadie las pisa, se apagan.
+  // En el aire no hacen nada: con una sola clavada, saltarla de largo no pega; caminarla, sí.
+  const conUna = () => {
+    const q = pelea(['nico_m', 'simon'], 200, 880)
+    correr(q, 110, (t) => [{ especial2: t < 2 }, {}])
+    const I = internoDe(q)
+    const clav = I.proyectiles.filter((x) => x.pub.plantado).sort((x, y) => x.pub.x - y.pub.x)
+    for (const x of clav.slice(1)) {
+      I.proyectiles.splice(I.proyectiles.indexOf(x), 1)
+      q.proyectiles.splice(q.proyectiles.indexOf(x.pub), 1)
+    }
+    q.luchadores[1].x = (clav[0]?.pub.x ?? 424) + 96
+    return q
+  }
+  const p3 = conUna()
+  const evs3 = correr(p3, 70, (t) => [{}, { arriba: t < 2, izquierda: t < 2 }])
+  const p3b = conUna()
+  const evs3b = correr(p3b, 70, () => [{}, { izquierda: true }])
+  ok(!de(evs3, 'golpe').some((g) => g.herramienta === 'espinas') && de(evs3b, 'golpe').some((g) => g.herramienta === 'espinas'), 'espinas: saltada de largo no pega; caminándola, sí')
+  const p4 = pelea(['nico_m', 'simon'], 300, 880)
+  correr(p4, 110, (t) => [{ especial2: t < 2 }, {}])
+  const quedan = p4.proyectiles.filter((q) => q.plantado).length
+  correr(p4, (tr?.vida ?? 150) + 10)
+  ok(quedan === 3 && !p4.proyectiles.some((q) => q.plantado), `espinas: si nadie las pisa, se apagan a los ${tr?.vida} ticks`)
+  // De pie en el camino le pegan directo (golpe medio común, se cubre).
+  const p5 = pelea(['nico_m', 'simon'], 300, 520)
+  const evs5 = correr(p5, 110, (t) => [{ especial2: t < 2 }, { guardia: true }])
+  const directas = de(evs5, 'golpe').filter((g) => g.herramienta === 'espinas')
+  ok(directas.length >= 1 && directas.every((g) => g.bloqueado), 'espinas: en vuelo son un golpe común (se cubren)', `${directas.length}`)
+}
+
+// Aceleración (DefProyectil.aceleracion, el monopatín de Tony).
+{
+  const ac = K5.tony.especiales[0].proyectil?.aceleracion
+  const p = pelea(['tony', 'simon'], 200, 880)
+  const vs: number[] = []
+  correr(p, 120, (t, q) => {
+    const m = q.proyectiles.find((x) => x.tipo === 'monopatin')
+    if (m) vs.push(Math.abs(m.vx))
+    return [{ especial1: t < 2 }, {}]
+  })
+  const crece = vs.length > 5 && vs.every((v, i) => i === 0 || v >= vs[i - 1] - 1e-9)
+  ok(!!ac && crece && vs[0] < 6 && Math.abs(Math.max(...vs) - ac.max) < 1e-9, 'monopatín: sale lento y acelera hasta su tope', `${vs[0]?.toFixed(1)} → ${Math.max(...vs).toFixed(1)}`)
+  const p2 = pelea(['tony', 'simon'], 400, 500)
+  const evs2 = correr(p2, 120, (t) => [{ especial1: t < 2 }, {}])
+  ok(de(evs2, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'monopatin').length === 2 && de(evs2, 'derribo').some((d) => d.quien === 1), 'monopatín: de cerca entran el revoleo y el monopatín, y tira')
+}
+
+// Si pega (DefEspecial.siPega, el Despido Final de Tony) y frenarEmbestida sólo con la embestida en marcha.
+{
+  const sp = K5.tony.especiales[1].siPega
+  const p = pelea(['tony', 'simon'], 400, 520)
+  let arrodillado = 0
+  const evs = correr(p, 160, (t, q) => {
+    if (internoDe(q).luchadores[1].stun > 0 && q.congelamientoGolpe === 0) arrodillado++
+    return [{ especial2: t < 2 }, {}]
+  })
+  const golpes = de(evs, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'despido')
+  ok(de(evs, 'despido').length === 1 && golpes.length === 2 && !golpes[1].bloqueado && de(evs, 'derribo').some((d) => d.quien === 1), 'despido: el papel limpio arrodilla y sale la patada voladora, que tira', `${golpes.length} golpes`)
+  // Del papel (22) a la patada (≈ 52) sin poder hacer nada: la patada lo agarra arrodillado.
+  const papel = K5.tony.especiales[1].ventanas[0].desde
+  const patada = K5.tony.especiales[1].ventanas[1].desde
+  ok(!!sp && arrodillado >= patada - papel - 2 && sp.aturde > patada - papel, 'despido: arrodillado (aturdido) hasta que llega la patada', `${arrodillado} ticks`)
+  const p2 = pelea(['tony', 'simon'], 400, 520)
+  let dura = 0
+  const evs2 = correr(p2, 160, (t, q) => {
+    const a = internoDe(q).luchadores[0].accion
+    if (a && a.especial === 2) dura = Math.max(dura, a.t)
+    return [{ especial2: t < 2 }, { guardia: true }]
+  })
+  const g2 = de(evs2, 'golpe').filter((g) => g.atacante === 0 && g.herramienta === 'despido')
+  ok(de(evs2, 'despido').length === 0 && g2.length === 1 && g2[0].bloqueado && dura < (sp?.total ?? 92) - 30, 'despido: cubierto no hay patada y Tony queda regalado', `la acción llegó al tick ${dura}`)
+}
+
+// Pelo de punta (PasivaKit.pincha, Nico M.): el que le pega de cerca se pincha.
+{
+  const pc = K5.nico_m.pasiva?.pincha
+  const p = pelea(['simon', 'nico_m'], 400, 480)
+  const v0 = p.luchadores[0].vida
+  const evs = correr(p, 12, (t) => [{ golpe: t < 2 }, {}])
+  const pin = de(evs, 'pinchazo')
+  ok(!!pc && pin.length === 1 && pin[0].quien === 0 && v0 - p.luchadores[0].vida === pc.danio, 'Pelo de punta: el que le pega se pincha', `${pin.length} pinchazos, −${v0 - p.luchadores[0].vida}`)
+  const p2 = pelea(['simon', 'nico_m'], 400, 480)
+  const evs2 = correr(p2, 12, (t) => [{ golpe: t < 2 }, { guardia: true }])
+  ok(de(evs2, 'pinchazo').length === 1 && de(evs2, 'golpe').some((g) => g.bloqueado), 'Pelo de punta: también si lo cubre')
+  const p3 = pelea(['nahuel', 'nico_m'], 300, 700)
+  const evs3 = correr(p3, 120, (t) => [{ especial1: t < 2 }, {}])
+  ok(de(evs3, 'golpe').some((g) => g.herramienta === 'pelota') && de(evs3, 'pinchazo').length === 0, 'Pelo de punta: un tiro no se pincha')
+}
+
+// Presencia de jefe (PasivaKit.presencia, Tony): cerca de él, el rival camina más lento.
+{
+  const pr = K5.tony.pasiva?.presencia
+  const camina = (x1: number) => {
+    const p = pelea(['tony', 'simon'], 300, x1)
+    const x0 = p.luchadores[1].x
+    correr(p, 5, () => [{}, { izquierda: true }])
+    return x0 - p.luchadores[1].x
+  }
+  const cerca = camina(450)
+  const lejos = camina(800)
+  ok(!!pr && Math.abs(lejos - 5 * K5.simon.caminar) < 0.01 && Math.abs(cerca - 5 * K5.simon.caminar * pr.mult) < 0.01, 'Presencia de jefe: cerca de Tony el rival camina más lento', `${lejos.toFixed(2)} → ${cerca.toFixed(2)}`)
 }
 
 console.log(`\n${pruebas - fallas}/${pruebas} pruebas ok`)

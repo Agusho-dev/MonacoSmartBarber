@@ -4,6 +4,7 @@ import {
   Check,
   Clock,
   Crosshair,
+  Crown,
   Flame,
   LoaderCircle,
   RotateCcw,
@@ -39,7 +40,7 @@ import {
   type RespuestaGuardado,
 } from '@/lib/juego/guardado'
 import { encolarSiCorresponde, quitarPendiente, reintentarPendientes } from '@/lib/juego/pendientes'
-import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, PERSONAJES, peleaConDuenos } from '@/lib/juego/personajes'
 import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { prefiereMenosMovimiento } from '@/lib/juego/ui/media'
@@ -196,14 +197,20 @@ export function PantallaResultado({
   const { desglose, estadisticas: est, gano } = resultado
   const total = Math.max(0, Math.round(desglose.total))
   const rango = (desglose.rango || 'D').toUpperCase()
-  const record = total > 0 && total > resultado.mejorAnterior
   const id = resultado.id
+  /**
+   * Una pelea con un personaje de los dueños (`soloDuenos`) no se manda nunca: ni el guardado
+   * automático, ni «Guardar», ni el «Anónimo» al irse (no entra al ranking ni a las estadísticas de
+   * los barberos; `guardarPartidaJuego` igual la frena). En lugar del apodo, un texto corto.
+   */
+  const sinRanking = peleaConDuenos(resultado.eleccion.jugador, resultado.eleccion.rival)
+  const record = !sinRanking && total > 0 && total > resultado.mejorAnterior
 
   // Con un apodo ya guardado de antes, la partida va sola al ranking.
   const [apodoAuto] = useState(() => (prefs.apodo.trim().length >= 2 ? prefs.apodo.trim() : null))
   const [apodo, setApodo] = useState(() => prefs.apodo || datos.cliente?.nombre || '')
   const [envioInicial] = useState<Envio>(() =>
-    apodoAuto && !enviadas.has(resultado.id) ? { tipo: 'guardando' } : { tipo: 'nada' },
+    apodoAuto && !sinRanking && !enviadas.has(resultado.id) ? { tipo: 'guardando' } : { tipo: 'nada' },
   )
   const envioAnotado = useSyncExternalStore(
     suscribirEnvios,
@@ -258,7 +265,7 @@ export function PantallaResultado({
   // vuelve a montar, la respuesta igual tiene que llegar al estado.
   const alTerminarEnvio = useEffectEvent(terminarEnvio)
   useEffect(() => {
-    if (!apodoAuto || enviadas.has(resultado.id)) return
+    if (sinRanking || !apodoAuto || enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
     // Anotado (no sólo el estado inicial): si va al ranking y vuelve antes de la respuesta, ve esto.
     anotarEnvio(resultado.id, { tipo: 'guardando' })
@@ -266,7 +273,7 @@ export function PantallaResultado({
     guardarPartidaJuego(partida)
       .then((r) => alTerminarEnvio(apodoAuto, partida, r))
       .catch(() => alTerminarEnvio(apodoAuto, partida, null))
-  }, [resultado, datos, apodoAuto])
+  }, [resultado, datos, apodoAuto, sinRanking])
 
   // El puntaje cuenta hasta el total; después aparece el rango.
   useEffect(() => {
@@ -316,6 +323,7 @@ export function PantallaResultado({
    * sale de nuevo: el servidor le pone el apodo a esa misma fila.
    */
   const enviarManual = (nombre: string) => {
+    if (sinRanking) return
     if (enviadas.has(resultado.id) && !anonimas.has(resultado.id)) return
     anonimas.delete(resultado.id)
     enviadas.add(resultado.id)
@@ -358,7 +366,7 @@ export function PantallaResultado({
    * base, sólo con clave), queda en la cola (pendientes.ts); si se guardó, van las de la cola.
    */
   const guardarAlSalir = () => {
-    if (enviadas.has(resultado.id)) return
+    if (sinRanking || enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
     const partida = armarPartida(resultado, datos, APODO_ANONIMO)
     // Con clave, si vuelve del ranking todavía puede ponerle su apodo; sin clave, no sale nada más.
@@ -471,7 +479,12 @@ export function PantallaResultado({
             </div>
 
             <div className="cf-apodo">
-              {envio.tipo === 'listo' ? (
+              {sinRanking ? (
+                <p className="cf-apodo__listo" data-estado="duenos">
+                  <Crown aria-hidden="true" />
+                  <span>Pelea de dueños: no cuenta para el ranking</span>
+                </p>
+              ) : envio.tipo === 'listo' ? (
                 <p className="cf-apodo__listo">
                   <Check aria-hidden="true" />
                   <span>

@@ -33,13 +33,20 @@ const VIBRACION_GOLPE: Record<FuerzaGolpe, number> = { leve: 14, medio: 22, fuer
 
 const q = (v: number) => Math.round(v * 1000) / 1000
 
-/** Los íconos de estado del HUD (estados-hud.tsx los dibuja con `data-hud="estado-<lado>-<estado>"`). */
+/**
+ * Los íconos de estado del HUD (estados-hud.tsx los dibuja con `data-hud="estado-<lado>-<estado>"`).
+ * Quinta tanda (14/nov): hipnotizado (los Lentes de Fran) y cegado (el Spray de Leo). El dominio del
+ * All In de Chino NO va acá: dura menos de medio segundo y lo que importa es verlo en el luchador (el
+ * anillo de cartas y el aura del piso, render/especiales-quinta.ts), no arriba en el HUD.
+ */
 export const ESTADOS_HUD = [
   'congelado',
   'electrocutado',
   'guardia-rota',
   'aturdido',
   'mareado',
+  'hipnotizado',
+  'cegado',
   'quemado',
   'lento',
   'curando',
@@ -60,6 +67,10 @@ function estadoActivo(L: LuchadorEstado, e: EstadoHud): boolean {
       return (ef.aturdido ?? 0) > 0
     case 'mareado':
       return (ef.mareado ?? 0) > 0
+    case 'hipnotizado':
+      return (ef.hipnotizado ?? 0) > 0
+    case 'cegado':
+      return (ef.cegado ?? 0) > 0
     case 'quemado':
       return (ef.quemado ?? 0) > 0
     case 'lento':
@@ -115,6 +126,7 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     cargaRivalNum: -1,
     llenado: [-1, -1],
     lista: [false, false],
+    bloqueada: [false, false],
   }
   const chip = [1, 1]
   const esperaChip = [0, 0]
@@ -175,6 +187,25 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     animar(cargaNum, [{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], 380)
   }
 
+  /** «Rival.exe no responde…»: la carga del que perdió la carga titila mientras baja. */
+  const titilarCargaRobada = (lado: 0 | 1) => {
+    const titileo: Keyframe[] = [
+      { opacity: 1, transform: 'translateX(0)' },
+      { opacity: 0.2, transform: 'translateX(-3px)' },
+      { opacity: 1, transform: 'translateX(3px)' },
+      { opacity: 0.2, transform: 'translateX(-2px)' },
+      { opacity: 1, transform: 'translateX(0)' },
+    ]
+    if (lado === 0) {
+      animar(segmentos[0]?.relleno?.parentElement?.parentElement, titileo, 640)
+      animar(cargaNum, [{ transform: 'scale(1)', color: '#ff3b5c' }, { transform: 'scale(1.3)', color: '#ff3b5c' }, { transform: 'scale(1)' }], 640)
+      vibrar([20, 40, 20])
+    } else {
+      animar(cargaRival?.parentElement, titileo, 640)
+      animar(cargaRivalNum, [{ color: '#ff3b5c' }, { color: '#ff3b5c' }, {}], 640)
+    }
+  }
+
   const procesarEventos = (eventos: readonly EventoJuego[], p: Partida) => {
     for (const e of eventos) {
       switch (e.tipo) {
@@ -224,6 +255,12 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
         }
         case 'fin_partida':
           ganadorFinal = null
+          break
+        case 'carga_robada':
+          // El robo de carga del Agarre y Ejecución de Nacho (quinta tanda): titila la barra del que
+          // la PERDIÓ. Online, en el celular del lado 1, el evento llega espejado como la partida
+          // (online/vistas.ts da vuelta `atacante` y `victima`): `victima` es el lado de esta vista.
+          titilarCargaRobada(e.victima)
           break
         default:
           break
@@ -370,6 +407,13 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
           ult.lista[i] = lista
           atributo(cartas[i], 'data-lista', lista)
           if (lista) animar(cartas[i], [{ transform: 'scale(1.18)' }, { transform: 'scale(1)' }], 360)
+        }
+        // Con la carga que pide pero sin salir (hoy, sólo la Curación de Fabri con la vida en 90 % o
+        // más): el llenado lleno parecía una carta lista, y apretarla no hacía nada. Se apaga (juego.css).
+        const bloqueada = !lista && carga + 1e-9 >= costo
+        if (bloqueada !== ult.bloqueada[i]) {
+          ult.bloqueada[i] = bloqueada
+          atributo(cartas[i], 'data-bloqueada', bloqueada)
         }
       }
 

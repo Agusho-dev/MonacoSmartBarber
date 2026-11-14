@@ -3,7 +3,7 @@
 import { ChevronLeft, SignalHigh, SignalLow, SignalMedium, Swords } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
-import { espejarRetrato, IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
+import { espejarRetrato, IDS_PARA_CLIENTES, PERSONAJES } from '@/lib/juego/personajes'
 import type {
   DatosEntradaJuego,
   Dificultad,
@@ -22,6 +22,7 @@ import {
   EspecialesLuchador,
   FiltroSucursal,
   GrillaPlantel,
+  GrupoDuenos,
   HeroeLuchador,
   ProximamentePlantel,
   VictoriasLuchador,
@@ -35,7 +36,7 @@ function IconoDificultad({ dificultad }: { dificultad: Dificultad }) {
   return <SignalHigh aria-hidden="true" />
 }
 
-/** Las sucursales del filtro se calculan una vez: salen del catálogo. */
+/** Las sucursales del filtro se calculan una vez: salen del catálogo (sólo los barberos). */
 const SUCURSALES = sucursalesDelPlantel()
 
 interface Props {
@@ -43,6 +44,11 @@ interface Props {
   datos: DatosEntradaJuego
   /** El personaje del barbero que lo atiende (si vino por QR y es personaje). */
   barbero: IdPersonaje | null
+  /**
+   * Los personajes de los dueños que este celular ve (con el pase de dueños; si no, vacío): van en
+   * su grupo, fuera del filtro por sucursal.
+   */
+  duenos: readonly IdPersonaje[]
   stats: EstadisticaPersonaje[] | null
   prefs: PreferenciasJuego
   turno: EstadoTurnoJuego | null
@@ -69,6 +75,7 @@ export function PantallaSeleccion({
   eleccion,
   datos,
   barbero,
+  duenos,
   stats,
   prefs,
   turno,
@@ -157,13 +164,21 @@ export function PantallaSeleccion({
           <FiltroSucursal
             sucursales={SUCURSALES}
             filtro={filtro}
-            total={IDS_PERSONAJES.length}
+            total={IDS_PARA_CLIENTES.length}
             propia={sucursalCliente}
             onFiltro={cambiarFiltro}
           />
           <GrillaPlantel
             ref={grillaRef}
             ids={ids}
+            jugador={eleccion.jugador}
+            rival={eleccion.rival}
+            modo={modo}
+            barbero={barbero}
+            onElegir={modo === 'rival' ? onElegirRival : onElegirPersonaje}
+          />
+          <GrupoDuenos
+            ids={duenos}
             jugador={eleccion.jugador}
             rival={eleccion.rival}
             modo={modo}

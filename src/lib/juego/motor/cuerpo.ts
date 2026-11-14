@@ -41,6 +41,13 @@ export function cajaCuerpo(l: LuchadorEstado, li: InternoLuchador): Caja | null 
     const m = CUERPO_AGACHADO.ancho / 2
     return { x0: l.x - m, x1: l.x + m, y0: 0, y1: CUERPO_AGACHADO.alto }
   }
+  // El Gigante de Lautaro (DefMovimiento.cuerpo): mientras crece, la caja sigue al sprite.
+  const a = li.accion
+  const cu = a?.mov.cuerpo
+  if (a && cu && a.t >= cu.desde && a.t < cu.hasta) {
+    const mg = cu.ancho / 2
+    return { x0: l.x - mg, x1: l.x + mg, y0: 0, y1: altoParado(l) * cu.altoMult }
+  }
   const m = CUERPO_ANCHO / 2
   return { x0: l.x - m, x1: l.x + m, y0: 0, y1: altoParado(l) }
 }
@@ -87,6 +94,7 @@ export function puedeActuar(l: LuchadorEstado, li: InternoLuchador): boolean {
     l.efectos.electrocutado === 0 &&
     l.efectos.guardiaRota === 0 &&
     l.efectos.aturdido === 0 &&
+    l.efectos.hipnotizado === 0 &&
     li.agarradoPor === null
   )
 }
@@ -102,6 +110,7 @@ export function puedeActuarEnAire(l: LuchadorEstado, li: InternoLuchador): boole
     l.efectos.congelado === 0 &&
     l.efectos.electrocutado === 0 &&
     l.efectos.aturdido === 0 &&
+    l.efectos.hipnotizado === 0 &&
     li.agarradoPor === null
   )
 }
@@ -130,6 +139,7 @@ export function bloqueoPuro(l: LuchadorEstado, li: InternoLuchador): boolean {
     ef.congelado === 0 &&
     ef.electrocutado === 0 &&
     ef.aturdido === 0 &&
+    ef.hipnotizado === 0 &&
     li.derribo === 0 &&
     li.levantar === 0 &&
     li.caidaDerribo === 0 &&
@@ -178,7 +188,11 @@ export function invulnerableAhora(li: InternoLuchador): boolean {
   )
 }
 
-/** El rival lo tiene a merced: le está pegando o no puede moverse. */
+/**
+ * El rival lo tiene a merced: le está pegando o no puede moverse. El hipnotizado también (quinta
+ * tanda): si no, el golpe que lo despierta arrancaba un combo nuevo, sin el escalado del daño ni del
+ * aturdimiento.
+ */
 export function enCombo(l: LuchadorEstado, li: InternoLuchador): boolean {
   return (
     (li.stun > 0 && !li.stunBloqueo) ||
@@ -186,6 +200,7 @@ export function enCombo(l: LuchadorEstado, li: InternoLuchador): boolean {
     l.efectos.electrocutado > 0 ||
     l.efectos.guardiaRota > 0 ||
     l.efectos.aturdido > 0 ||
+    l.efectos.hipnotizado > 0 ||
     li.caidaDerribo > 0 ||
     li.agarradoPor !== null
   )
@@ -202,8 +217,8 @@ export function golpeable(_l: LuchadorEstado, li: InternoLuchador, esProyectil: 
 export function bloquea(l: LuchadorEstado, li: InternoLuchador, origenX: number): boolean {
   if (!l.enSuelo || li.pose !== null) return false
   if (l.efectos.congelado > 0 || l.efectos.electrocutado > 0 || l.efectos.guardiaRota > 0) return false
-  // Mareado no se puede cubrir; aturdido y agarrado, tampoco.
-  if (l.efectos.mareado > 0 || l.efectos.aturdido > 0 || li.agarradoPor !== null) return false
+  // Mareado no se puede cubrir; aturdido, hipnotizado y agarrado, tampoco (el cegado sí).
+  if (l.efectos.mareado > 0 || l.efectos.aturdido > 0 || l.efectos.hipnotizado > 0 || li.agarradoPor !== null) return false
   if (li.derribo > 0 || li.levantar > 0 || li.caidaDerribo > 0 || li.accion !== null || li.dash !== null) return false
   const enGuardia = li.stun > 0 ? li.stunBloqueo : li.guardia
   if (!enGuardia) return false
@@ -225,6 +240,7 @@ export function interrumpir(l: LuchadorEstado, li: InternoLuchador): void {
   li.atras = false
   li.invulnProyectil = false
   l.efectos.curando = 0
+  l.efectos.dominio = 0
 }
 
 export function contraPared(l: LuchadorEstado, dir: number): boolean {
@@ -254,22 +270,40 @@ export function primeraVentana(mov: DefMovimiento): number {
   return ini === Number.MAX_SAFE_INTEGER ? 0 : ini
 }
 
-/** Alcance de un movimiento medido de centro a centro (caja + medio cuerpo del rival). */
+/**
+ * Alcance de un movimiento medido de centro a centro (caja + medio cuerpo del rival). En los
+ * especiales suma también lo que avanzan (`avance`: el paso del Gigante, el estirón del agarre de
+ * Brian, el Navajazo; quinta tanda): sin eso la CPU veía venir el agarre de Brian 36 px tarde. Los
+ * golpes normales no: su avance lo cuenta aparte alcanceAtaque (cpu.ts).
+ */
 export function alcanceDe(mov: DefMovimiento): number {
   const esp = mov as DefEspecial
   let x = 0
   for (const v of mov.ventanas) x = Math.max(x, v.caja.x1)
   if (esp.embestida) x += esp.embestida.distancia
+  if (esp.numero && mov.avance) x += mov.avance.vel * (mov.avance.hasta - mov.avance.desde)
   if (esp.proyectil) x = Math.max(x, 700)
   return x + CUERPO_ANCHO / 2
 }
 
-/** Invulnerable por el movimiento en curso (el arranque del molino). */
+/**
+ * Invulnerable por el movimiento en curso: el arranque del molino o de Desaparecer y, desde que saltó
+ * la contra del All In, sus `bono.intocable` ticks (así no se cambia golpes con lo que venía detrás).
+ */
 export function invulnerablePorAccion(li: InternoLuchador): boolean {
   const a = li.accion
   if (!a) return false
-  const h = (a.mov as DefEspecial).embestida?.invulnerableHasta
-  return h !== undefined && a.t < h
+  const esp = a.mov as DefEspecial
+  const h = esp.embestida?.invulnerableHasta
+  if (h !== undefined && a.t < h) return true
+  const ct = esp.contra
+  return !!ct && a.contraOk && a.t < ct.salto + ct.bono.intocable
+}
+
+/** ¿La contra de esta acción (DefEspecial.contra) está armada en este tick y todavía no saltó? */
+export function contraArmada(a: Accion | null): boolean {
+  const ct = (a?.mov as DefEspecial | undefined)?.contra
+  return !!a && !!ct && !a.contraOk && a.t >= ct.desde && a.t < ct.hasta
 }
 
 export function enRecuperacion(a: Accion): boolean {

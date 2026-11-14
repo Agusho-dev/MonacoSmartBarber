@@ -46,13 +46,23 @@
  * CONTRA_PERSONA. La reacción con decimales se sortea por round (sortearReaccion: antes se redondeaba
  * y la pericia saltaba de a escalones de 10–20 puntos). Además castiga con la herramienta lo que aguanta
  * los golpes leves (la Curación) y cruza el Sillonazo con la esquiva en el tick justo.
+ *
+ * Quinta tanda (14/nov): los especiales nuevos. Usa la contra del All In (Chino) de revés contra el
+ * que le tira un golpe o un tiro encima y no le pega a uno que la tiene armada (se cubre o se va); el
+ * Gigante de Lautaro contra el que machaca leves (Uso 'aplasta') y la MÁQUINA para cortárselo; el
+ * Lanzamiento Aéreo contra el que salta y, contra él, se agacha en vez de saltar; las herramientas de
+ * Leo contra el que salta de lejos; el agarre de lejos de Nacho sólo a su distancia y, pegado a él, se
+ * queda; cruza las columnas de código hacia Nacho o se cubre; contra Desaparecer de Nehuen se cubre
+ * (reaparece delante) y la CPU de Nehuen la usa de castigo de lejos; el Smash devuelve lo que viene
+ * volando; se agacha contra los Lentes de Fran; cegada se cubre o se aleja.
  */
 import type { Dificultad, EntradaJugador, Lado, LuchadorEstado, Partida, ProyectilEstado } from '../tipos'
+import { TIEMPOS_PROYECTIL } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import type { Azar } from './azar'
 import { azar, chance, crearAzar, entero } from './azar'
-import { ATERRIZAJE_TICKS, DASH, GRAVEDAD, X_MAX, X_MIN } from './constantes'
-import { alcanceDe, finVentanas, primeraVentana, puedeActuar } from './cuerpo'
+import { ATERRIZAJE_TICKS, CUERPO_ANCHO, DASH, GRAVEDAD, X_MAX, X_MIN } from './constantes'
+import { alcanceDe, contraArmada, finVentanas, primeraVentana, puedeActuar } from './cuerpo'
 import type { EstadoInterno } from './interno'
 import type { DefEspecial, DefMovimiento, KitPersonaje } from './movimientos'
 
@@ -134,7 +144,8 @@ type BotonCpu = 'golpe' | 'herramienta' | 'especial1' | 'especial2' | 'arriba' |
 const BOTONES_CPU: readonly BotonCpu[] = ['golpe', 'herramienta', 'especial1', 'especial2', 'arriba', 'dash']
 type Ataque = 'golpe' | 'herramienta'
 type Plan = 'neutral' | 'acercarse' | 'alejarse' | 'tantear' | 'esperar' | 'guardia' | 'presionar' | 'mantener' | 'rango'
-type ModoEsquiva = 'saltar' | 'dash' | 'guardia' | 'salir'
+/** 'agacharse' (los Lentes de Fran), 'cruzar' (esquiva HACIA el rival: las columnas de código de Nacho). */
+type ModoEsquiva = 'saltar' | 'dash' | 'guardia' | 'salir' | 'agacharse' | 'cruzar'
 
 interface Observacion {
   x: number
@@ -171,6 +182,14 @@ interface Observacion {
    * MÁQUINA de Chipi): castigarlo con el puño no lo frena, hay que ir con la herramienta.
    */
   aguantaLeves: boolean
+  /** La contra del All In armada (DefEspecial.contra): si le pega o le tira algo, se la come. */
+  contra: boolean
+  /** Su acción es el All In (con la contra armada o ya en la embestida). */
+  allIn: boolean
+  /** El agarre en curso también agarra en el aire (el Lanzamiento Aéreo de Lautaro): saltar no sirve. */
+  agarreAire: boolean
+  /** Desde qué distancia (centro a centro) alcanza su agarre (el de Nacho no llega pegado; 0 = desde cerca). */
+  agarreDesde: number
   /** Tick de la esquiva en curso (-1 = no está esquivando), su dirección y su sello. */
   dashT: number
   dashDir: -1 | 0 | 1
@@ -256,6 +275,18 @@ export interface Cerebro {
    * el super flash (0 = nada programado). Ver la reacción 2'' en pensarPelea.
    */
   cruzarEn: number
+  /** El All In del rival que ya vio (sello), si lo respeta (no le pega) y si se cubre o se aleja. */
+  selloContra: number
+  respetaContra: boolean
+  contraCubre: boolean
+  /** La embestida del All In que ya decidió cómo pasar (sello). */
+  selloAllIn: number
+  /** El cegado propio que ya decidió cómo esperar (se cubre o se aleja mientras dura). */
+  cegadoVisto: boolean
+  /** El último tiro del rival que intentó devolver con el Smash (id). */
+  devolvioVisto: number
+  /** La última púa clavada del rival que ya decidió cómo pasar (id). */
+  puaVista: number
 }
 
 function observacionVacia(): Observacion {
@@ -285,6 +316,10 @@ function observacionVacia(): Observacion {
     mareado: false,
     pesado: false,
     aguantaLeves: false,
+    contra: false,
+    allIn: false,
+    agarreAire: false,
+    agarreDesde: 0,
     dashT: -1,
     dashDir: 0,
     dashAdelante: false,
@@ -438,6 +473,13 @@ export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number
     pesadosRival: 0,
     tiradoVisto: false,
     cruzarEn: 0,
+    selloContra: 0,
+    respetaContra: false,
+    contraCubre: false,
+    selloAllIn: 0,
+    cegadoVisto: false,
+    devolvioVisto: 0,
+    puaVista: 0,
   }
 }
 
@@ -473,6 +515,7 @@ export function reiniciarCerebro(c: Cerebro): void {
   c.enfriaEspecial = 0
   c.rango = 0
   c.cruzarEn = 0
+  c.cegadoVisto = false
   for (const b of BOTONES_CPU) c.btn[b] = 0
 }
 
@@ -521,9 +564,18 @@ function observar(c: Cerebro, p: Partida, I: EstadoInterno, otro: Lado): void {
     o.pesado = a.especial === 0 && a.mov.boton === 'herramienta'
     const ar = a.mov.armadura
     o.aguantaLeves = !!ar && ar.contra.includes('leve') && a.t < ar.hasta
+    const esp = a.mov as DefEspecial
+    o.contra = contraArmada(a)
+    o.allIn = !!esp.contra
+    o.agarreAire = !!esp.agarre?.aire
+    o.agarreDesde = esp.agarre ? Math.max(0, (a.mov.ventanas[0]?.caja.x0 ?? 0) - CUERPO_ANCHO / 2) : 0
   } else {
     o.pesado = false
     o.aguantaLeves = false
+    o.contra = false
+    o.allIn = false
+    o.agarreAire = false
+    o.agarreDesde = 0
     o.especial = 0
     o.agarre = false
     o.rompe = false
@@ -541,7 +593,12 @@ function observar(c: Cerebro, p: Partida, I: EstadoInterno, otro: Lado): void {
   o.dashAdelante = !!d && d.adelante
   o.selloDash = li.selloDash
   o.vulnerable =
-    l.efectos.congelado > 12 || l.efectos.electrocutado > 12 || l.efectos.guardiaRota > 12 || l.efectos.aturdido > 12 || li.agarradoPor !== null
+    l.efectos.congelado > 12 ||
+    l.efectos.electrocutado > 12 ||
+    l.efectos.guardiaRota > 12 ||
+    l.efectos.aturdido > 12 ||
+    l.efectos.hipnotizado > 12 ||
+    li.agarradoPor !== null
   o.mareado = l.efectos.mareado > 0
   o.invulnerable = l.invulnerable
   o.saltando = !l.enSuelo && li.caidaDerribo === 0 && li.pose === null
@@ -699,6 +756,8 @@ function elegirAtaque(c: Cerebro, k: KitPersonaje, ob: Observacion, rival?: KitP
  * Curación de Fabri, sin nada que los cubra, salían y se comían el golpe (medido el 30/oct).
  */
 function aguantaAlArrancar(esp: DefEspecial): boolean {
+  // La contra del All In (quinta tanda): lo que le pegue mientras arranca la dispara.
+  if (esp.contra) return true
   const pega = Math.min(primeraVentana(esp), esp.embestida?.desde ?? Number.MAX_SAFE_INTEGER)
   if (esp.embestida?.invulnerableHasta !== undefined && esp.embestida.invulnerableHasta >= pega) return true
   const ar = esp.armadura
@@ -762,23 +821,33 @@ function distanciaCura(esp: DefEspecial): number {
 /** ¿La embestida llega antes de que el rival termine su movimiento (o mientras está a merced)? */
 function embestidaLlega(k: KitPersonaje, n: 1 | 2, dist: number, ob: Observacion, reaccion: number): boolean {
   if (ob.vulnerable) return true
-  const emb = k.especiales[n - 1].embestida
+  const esp = k.especiales[n - 1]
+  const emb = esp.embestida
   if (!emb || !ob.atacando || ob.fase !== 3) return false
-  const llega = emb.desde + Math.max(0, dist - 90) / (emb.distancia / emb.ticks)
+  // La que frena delante del rival (Desaparecer) pega siempre en el mismo tick, llegue de donde llegue.
+  const llega = emb.hastaRival !== undefined ? primeraVentana(esp) : emb.desde + Math.max(0, dist - 90) / (emb.distancia / emb.ticks)
   return ob.restante - reaccion > llega + 2
 }
 
-/** El especial con el que castiga de lejos (una embestida larga), o 0. */
+/**
+ * El especial con el que castiga de lejos (una embestida larga), o 0. Las intocables al arrancar no
+ * (el molino: es un revés), salvo la que frena delante del rival (Desaparecer de Nehuen, quinta tanda):
+ * cruza intocable y pega parado, justo lo que castiga un golpe fallado de lejos.
+ */
 function especialDeCastigo(k: KitPersonaje): 0 | 1 | 2 {
   for (const n of [1, 2] as const) {
     const e = k.especiales[n - 1].embestida
-    if (e && e.distancia >= 200 && !e.invulnerableHasta) return n
+    if (e && e.distancia >= 200 && (!e.invulnerableHasta || e.hastaRival !== undefined)) return n
   }
   return 0
 }
 
 /** Para qué sirve cada especial, según su mecánica. */
 type Uso =
+  /** La contra del All In (Chino): de revés, contra el que le tira algo encima. */
+  | 'contra'
+  /** El Gigante (Lautaro): armadura contra los leves y un golpe de mucho alcance. */
+  | 'aplasta'
   | 'embestida'
   | 'reves'
   | 'antiaereo'
@@ -794,8 +863,13 @@ type Uso =
   | 'bumeran'
 
 export function usoDe(esp: DefEspecial): Uso {
+  if (esp.contra) return 'contra'
+  // El Despido Final de Tony: un golpe de cerca (la patada sólo existe si el papel entró).
+  if (esp.siPega) return 'cerca'
   if (esp.cura) return 'cura'
   if (esp.agarre) return 'agarre'
+  const ar = esp.armadura
+  if (!esp.proyectil && !esp.embestida && ar && ar.contra.includes('leve') && !ar.contra.includes('fuerte') && esp.ventanas.some((v) => v.caja.x1 > 200)) return 'aplasta'
   const emb = esp.embestida
   if (emb?.salto && emb.distancia < 200) return 'antiaereo'
   if (emb?.invulnerableHasta) return 'reves'
@@ -808,7 +882,8 @@ export function usoDe(esp: DefEspecial): Uso {
   if (pr.rastrero) return 'rastrero'
   if (pr.bumeran) return 'bumeran'
   if (pr.gravedad > 0) return 'arco'
-  if (Math.abs(pr.vx) * pr.vida < 420) return 'cerca'
+  // El monopatín de Tony acelera: su alcance es el de la velocidad tope.
+  if (Math.abs(pr.aceleracion ? pr.aceleracion.max : pr.vx) * pr.vida < 420) return 'cerca'
   return 'recto'
 }
 
@@ -833,6 +908,21 @@ function conveniencia(
   const libre = ob.enSuelo && !ob.tirado && !ob.invulnerable
   const recupera = ob.atacando && ob.fase === 3
   switch (uso) {
+    case 'contra': {
+      // El All In: contra el que arranca un golpe a su alcance o le tira algo que ya está cerca. Al
+      // voleo casi nunca (la embestida floja del final se salta o se cubre).
+      if (ob.atacando && !ob.lanza && !ob.agarre && ob.fase <= 2 && dist <= ob.alcance + 20) return 0.7
+      const viene = p.proyectiles.some(
+        (q) => q.duenio !== lado && q.golpesRestantes > 0 && Math.abs(q.x - yo.x) < 160 && (q.vx === 0 || (q.vx > 0) === (q.x < yo.x)),
+      )
+      return viene ? 0.45 : 0.03
+    }
+    case 'aplasta':
+      // El Gigante: su armadura aguanta los leves y los medios, así que contra el que arranca la
+      // cadena de GOLPE de cerca sale igual; en su distancia, contra el que se recupera o está a merced.
+      if (ob.atacando && ob.especial === 0 && !ob.pesado && ob.fase <= 2 && dist < 200) return 0.45
+      if (!dentro || !ob.enSuelo || ob.tirado) return 0
+      return ob.bloqueando ? 0.3 : recupera || ob.vulnerable ? 0.6 : 0.18
     case 'cura': {
       const falta = yo.vidaMax - yo.vida
       if (falta < yo.vidaMax * 0.2) return 0
@@ -841,15 +931,22 @@ function conveniencia(
       const lejos = dist > distanciaCura(esp) || ob.tirado || (ob.vulnerable && dist > 160) || (leFalta && dist > 220 && !ob.atacando)
       return lejos ? (yo.vida < yo.vidaMax * 0.5 ? 0.85 : 0.45) : 0
     }
-    case 'agarre':
+    case 'agarre': {
+      // El que también agarra en el aire (el Lanzamiento Aéreo de Lautaro) es un antiaéreo.
+      if (esp.agarre?.aire && ob.saltando && !ob.invulnerable && dist <= 170) return 0.85
       if (!ob.enSuelo || ob.saltando || ob.invulnerable || ob.tirado || dist > (k.cpu.rangoEspecial[n - 1][1] || 118)) return 0
+      // El de media distancia (Nacho) pegado no llega: sólo en su rango.
+      if ((esp.ventanas[0]?.caja.x0 ?? 0) > 90 && !dentro) return 0
       return ob.bloqueando || ob.mareado ? 0.9 : recupera ? 0.8 : ob.atacando ? 0.15 : 0.35
+    }
     case 'antiaereo':
       if (ob.saltando && dist >= 50 && dist <= 260) return 0.85
       if (!dentro || !libre) return 0
       return ob.bloqueando ? 0.5 : recupera || ob.vulnerable ? 0.6 : 0.08
     case 'reves':
       if (ob.vulnerable && dentro) return 0.8
+      // Desaparecer (Nehuen): cruza intocable por encima de lo que le tiran y pega delante.
+      if (esp.embestida?.hastaRival !== undefined && ob.lanza && dist > 250 && dentro) return 0.6
       if (ob.atacando && !ob.lanza && ob.fase <= 2 && dist < 200) return 0.55
       if (!dentro || !libre) return 0
       return recupera ? 0.6 : ob.bloqueando ? 0.04 : 0.14
@@ -865,6 +962,8 @@ function conveniencia(
     }
     case 'recto':
     case 'bumeran':
+      // Las herramientas de Leo apuntan: de lejos, contra el que salta para acercarse.
+      if (esp.proyectil?.apunta && ob.saltando && dist <= 450) return 0.5
       if (!dentro || !libre) return 0
       if (ob.bloqueando) return 0.06
       return recupera ? 0.5 : dist > 230 ? 0.3 : 0.1
@@ -1094,6 +1193,44 @@ function decidirPlan(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, prm: 
   }
 }
 
+/** La guardia baja con lo que conoce del rival (como `guardiaBaja` de pensarPelea, antes de calcularla). */
+function guardiaBaja0(c: Cerebro, yo: LuchadorEstado, I: EstadoInterno, lado: Lado): boolean {
+  return c.efectivos.adapta > 0 && guardiaBajaDe(yo.guardia, I.kits[(1 - lado) as Lado], I.kits[lado])
+}
+
+/** Tipos de tiro que el Smash de Pádel no devuelve (no vuelan: ver `devolvible` en proyectiles.ts). */
+const NO_SE_DEVUELVE: ReadonlySet<string> = new Set(['onda', 'nube', 'graffiti', 'codigo', 'bombo', 'sismo', 'gorro', 'leche', 'agua', 'aerosol', 'rayo'])
+/** ¿Lo puede devolver el Smash? (la púa clavada, no). */
+const sePuedeDevolver = (q: ProyectilEstado) => !NO_SE_DEVUELVE.has(q.tipo) && !q.plantado
+
+/**
+ * El Smash de Pádel (DefEspecial.devuelve) contra un tiro que viene: lo tira si el tiro llega a la paleta
+ * mientras está en el aire (la cuenta, con la velocidad del tiro, desde que termina el super flash) y lo
+ * decide una vez por tiro, con más ganas cuanto más difícil (0,2 / 0,5 / 0,8).
+ */
+function quiereDevolver(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado, prm: ParamsCpu, q: ProyectilEstado, dq: number): boolean {
+  const k = I.kits[lado]
+  const yo = p.luchadores[lado]
+  if (c.devolvioVisto === q.id || !sePuedeDevolver(q)) return false
+  for (const n of [1, 2] as const) {
+    const dv = k.especiales[n - 1].devuelve
+    if (!dv || yo.carga + 1e-9 < PERSONAJES[yo.id].especiales[n - 1].costo) continue
+    const v = Math.max(1, Math.abs(q.vx))
+    const alCuerpo = (dq - CUERPO_ANCHO / 2 - q.ancho / 2) / v
+    const aLaPaleta = (dq - dv.caja.x1 - q.ancho / 2) / v
+    if (dq < 80 || dq > 300 || alCuerpo < dv.desde + 1 || aLaPaleta > dv.hasta - 2) continue
+    c.devolvioVisto = q.id
+    const nivel = prm.especiales === 'torpe' ? 0 : prm.especiales === 'alcance' ? 1 : 2
+    if (!chance(c.azar, [0.2, 0.5, 0.8][nivel])) return false
+    apretar(c, n === 1 ? 'especial1' : 'especial2')
+    tiroEspecial(c, n, prm)
+    c.motivo = 'devuelve el tiro'
+    ponerPlan(c, 'esperar', 6)
+    return true
+  }
+  return false
+}
+
 /** Cómo se defiende de cada proyectil (null = no reacciona). */
 function reaccionA(q: ProyectilEstado, prm: ParamsCpu, r: number): ModoEsquiva | null {
   const nivel = prm.especiales === 'torpe' ? 0 : prm.especiales === 'alcance' ? 1 : 2
@@ -1127,7 +1264,18 @@ function reaccionA(q: ProyectilEstado, prm: ParamsCpu, r: number): ModoEsquiva |
       // Rompe la guardia: mejor saltarlo o esquivarlo para atrás.
       return r < esquiva * 0.8 ? (r < esquiva * 0.4 ? 'saltar' : 'dash') : r < esquiva * 0.8 + prm.bloquear * 0.3 ? 'guardia' : null
     case 'pelota':
+    case 'pelotita':
       return r < esquiva * 0.45 ? 'saltar' : r < esquiva * 0.45 + prm.bloquear ? 'guardia' : null
+    case 'hipnosis':
+      // Los Lentes van a la altura de los ojos: agachado pasan por arriba (y cubierto no hipnotizan).
+      return r < esquiva * 0.6 ? 'agacharse' : r < esquiva * 0.6 + prm.bloquear ? 'guardia' : null
+    case 'codigo':
+      // Las columnas de Nacho no se saltan: de cerca de él se cruzan con la esquiva HACIA él (queda
+      // arrodillado); si no, a cubrirse.
+      return r < esquiva * 0.5 ? 'cruzar' : r < esquiva * 0.5 + prm.bloquear ? 'guardia' : null
+    case 'monopatin':
+      // El monopatín de Tony derriba: se cubre o, de lejos (ya rápido), se salta.
+      return r < esquiva * 0.4 ? 'saltar' : r < esquiva * 0.4 + prm.bloquear ? 'guardia' : null
     default:
       return r < prm.bloquear + (nivel === 2 ? 0.1 : 0) ? 'guardia' : null
   }
@@ -1239,6 +1387,51 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
     }
   }
 
+  // 0') El All In del rival (quinta tanda): con la contra armada, pegarle o tirarle algo es comerse la
+  //     embestida con todo. Se cubre o se aleja hasta que se apague (en fácil, a veces le pega igual), y
+  //     cuando sale la embestida del final (rasante) la salta o la cubre.
+  const acorraladoYa = (hacia === 1 && yo.x < X_MIN + 40) || (hacia === -1 && yo.x > X_MAX - 40)
+  if (ob.contra) {
+    if (c.selloContra !== ob.sello) {
+      c.selloContra = ob.sello
+      c.respetaContra = prm.especiales !== 'torpe' || chance(c.azar, 0.4)
+      c.contraCubre = acorraladoYa || chance(c.azar, Math.max(prm.bloquear, 0.6))
+    }
+    if (c.respetaContra) {
+      c.abajo = false
+      c.guardia = c.contraCubre
+      c.dir = c.contraCubre || acorraladoYa ? 0 : ((-hacia) as -1 | 1)
+      c.motivo = c.contraCubre ? 'espera el all in' : 'se aleja del all in'
+      ponerPlan(c, c.contraCubre ? 'guardia' : 'alejarse', 2)
+      return
+    }
+  } else if (ob.allIn && ob.atacando && ob.fase <= 2 && c.selloAllIn !== ob.sello && c.selloContra === ob.sello && dist < 420) {
+    c.selloAllIn = ob.sello
+    if (!guardiaBaja0(c, yo, I, lado) && chance(c.azar, 0.55)) {
+      ponerPlan(c, 'guardia', ob.restante + entero(c.azar, 4, 10))
+      c.abajo = false
+      c.motivo = 'cubre la embestida del all in'
+    } else if (dist < 260) {
+      c.dir = hacia
+      apretar(c, 'arriba')
+      c.pateaEnSalto = false
+      c.motivo = 'salta la embestida del all in'
+      ponerPlan(c, 'mantener', 4)
+      return
+    }
+  }
+
+  // Cegado propio (el Spray de Leo): no puede pegar; se cubre o se aleja mientras dura.
+  if (yo.efectos.cegado > 0) {
+    if (!c.cegadoVisto) {
+      c.cegadoVisto = true
+      const cubre = chance(c.azar, 0.4)
+      ponerPlan(c, cubre ? 'guardia' : 'alejarse', yo.efectos.cegado + 4)
+      c.abajo = false
+      c.motivo = cubre ? 'cegado: se cubre' : 'cegado: se aleja'
+    }
+  } else c.cegadoVisto = false
+
   // ─── Reacciones (una vez por estímulo) ───
 
   // 1) Castigar lo que bloqueó (fin de cadena, herramienta, especial): de cerca con el golpe, de lejos
@@ -1295,6 +1488,13 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
       // (al menos 3 de 4) y, sobre todo, hace lo que conviene (antes se cubría, aunque fuera lo peor).
       const reacciona = chance(c.azar, Math.max(prm.bloquear, 0.75))
       const noAguanta = yo.guardia <= guardiaDelEspecial(er, k) + 5
+      // Desaparecer (Nehuen) reaparece DELANTE: saltar o esquivar para atrás es lo peor; se cubre.
+      if (reacciona && emb.hastaRival !== undefined && !noAguanta) {
+        ponerPlan(c, 'guardia', ob.restante + entero(c.azar, 6, 12))
+        c.abajo = false
+        c.motivo = 'se cubre de desaparecer'
+        return
+      }
       if (reacciona && (emb.invulnerableHasta !== undefined || noAguanta)) {
         if (dist >= 260 && li.dashEspera === 0) {
           c.dir = (-hacia) as -1 | 1
@@ -1371,13 +1571,64 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
     }
   }
 
+  // 2'''') El Gigante de Lautaro visto en el super flash (quinta tanda): su armadura aguanta los leves y
+  //       los medios. Si le llega con la herramienta, la MÁQUINA (fuerte) se lo corta; si no, se va
+  //       (o esquiva para atrás) hasta salir del aplastón; contra la pared, se cubre.
+  if (ob.especial !== 0 && !ob.lanza && ob.fase === 1 && c.selloFlash !== ob.sello && prm.especiales !== 'torpe') {
+    const er = kRival.especiales[ob.especial - 1]
+    if (usoDe(er) === 'aplasta') {
+      c.selloFlash = ob.sello
+      c.selloDefensa = ob.sello
+      if (chance(c.azar, Math.max(prm.bloquear, 0.7))) {
+        if (dist <= alcanceAtaque(k, 'herramienta') + 10) {
+          apretar(c, 'herramienta')
+          c.motivo = 'corta el gigante'
+          ponerPlan(c, 'esperar', 6)
+          return
+        }
+        if (acorraladoYa || dist > ob.alcance + 40) {
+          ponerPlan(c, 'guardia', ob.restante + entero(c.azar, 4, 10))
+          c.abajo = false
+          c.motivo = 'se cubre del gigante'
+        } else {
+          c.dir = (-hacia) as -1 | 1
+          if (li.dashEspera === 0) apretar(c, 'dash')
+          c.motivo = 'se aleja del gigante'
+          ponerPlan(c, 'alejarse', 30)
+          return
+        }
+      }
+    }
+  }
+
   // 2) Un ataque cuerpo a cuerpo (o la embestida) que viene. Si ya se venía cubriendo, sigue.
   //    Contra un agarre o algo que rompe la guardia, cubrirse no sirve: salta o se va.
   if (ob.atacando && !ob.lanza && (ob.agarre || ob.rompe) && ob.fase <= 2 && c.selloDefensa !== ob.sello && dist <= ob.alcance + 40) {
     c.selloDefensa = ob.sello
-    // Pocas veces: un agarre de 8 ticks no se ve venir (el super flash avisa, pero no tanto).
-    const pEsquiva = prm.especiales === 'torpe' ? 0.1 : 0.33
-    if (chance(c.azar, pEsquiva)) {
+    // Pegado al agarre de media distancia (Nacho) no lo alcanza: se queda (saltando caía en su mano).
+    if (ob.agarre && ob.agarreDesde > 0 && dist < ob.agarreDesde - 3) {
+      c.motivo = 'se queda pegado al agarre'
+      ponerPlan(c, 'esperar', 8)
+      return
+    }
+    // Pocas veces: un agarre de 8 ticks no se ve venir (el super flash avisa, pero no tanto). El de media
+    // distancia (Nacho) sí: arranca de lejos y el flash da tiempo (como se cubre de lo que ve venir).
+    const pEsquiva = prm.especiales === 'torpe' ? 0.1 : ob.agarreDesde > 0 ? Math.max(0.33, prm.bloquear) : 0.33
+    // El que también agarra en el aire (Lautaro): agacharse (la mano va al cuello) o irse; no saltar.
+    if (ob.agarreAire && chance(c.azar, pEsquiva + 0.2)) {
+      if (chance(c.azar, 0.5) || li.dashEspera > 0) {
+        ponerPlan(c, 'guardia', 26)
+        c.abajo = true
+        c.motivo = 'se agacha del lanzamiento'
+      } else {
+        c.dir = (-hacia) as -1 | 1
+        apretar(c, 'dash')
+        c.motivo = 'esquiva el lanzamiento'
+        ponerPlan(c, 'mantener', 4)
+      }
+      return
+    }
+    if (!ob.agarreAire && chance(c.azar, pEsquiva)) {
       if (ob.agarre || li.dashEspera > 0) {
         c.dir = (-hacia) as -1 | 1
         apretar(c, 'arriba')
@@ -1561,14 +1812,19 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
 
   // 4) Proyectiles del rival (los nota después de su tiempo de reacción), cada uno a su manera.
   for (const q of p.proyectiles) {
-    if (q.duenio === lado || q.golpesRestantes <= 0 || q.id <= c.proyVisto || q.edad < prm.reaccion || q.tipo === 'nube') continue
+    if (q.duenio === lado || q.golpesRestantes <= 0 || q.id <= c.proyVisto || q.edad < prm.reaccion || q.tipo === 'nube' || q.plantado) continue
     const dq = Math.abs(q.x - yo.x)
-    const fijo = q.tipo === 'graffiti'
+    // Los fijos (el graffiti, las columnas de código) no vienen: están.
+    const fijo = q.tipo === 'graffiti' || q.tipo === 'codigo'
     const viene = fijo || (q.vx > 0 && q.x < yo.x) || (q.vx < 0 && q.x > yo.x) || dq < 90
     if (!viene || dq > 360) continue
     c.proyVisto = q.id
+    // El Smash de Nehuen: si lo que viene volando llega a la paleta mientras está en el aire, lo devuelve.
+    if (!fijo && quiereDevolver(c, p, I, lado, prm, q, dq)) return
     const modo = reaccionA(q, prm, azar(c.azar))
-    if (modo) c.esquivar = { id: q.id, modo }
+    // Las columnas: cruzar sólo tiene sentido cerca de Nacho (si no, las que siguen le caen encima).
+    if (modo === 'cruzar' && Math.abs(ob.x - yo.x) > 170) c.esquivar = { id: q.id, modo: 'guardia' }
+    else if (modo) c.esquivar = { id: q.id, modo }
   }
   if (c.esquivar) {
     const q = p.proyectiles.find((x) => x.id === c.esquivar?.id)
@@ -1603,7 +1859,42 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
         ponerPlan(c, 'mantener', 16)
         c.esquivar = null
         return
+      } else if (modo === 'agacharse' && dq < 260) {
+        // Los Lentes: agachado (y cubierto) la mirada pasa por arriba.
+        ponerPlan(c, 'guardia', 24)
+        c.abajo = true
+        c.motivo = 'se agacha de los lentes'
+        c.esquivar = null
+      } else if (modo === 'cruzar' && li.dashEspera === 0 && dq < 140 && q.edad >= TIEMPOS_PROYECTIL.codigoEstalla - 6) {
+        // Las columnas de código: la esquiva hacia Nacho (intocable al arrancar) las cruza.
+        c.dir = hacia
+        apretar(c, 'dash')
+        c.motivo = 'cruza el código'
+        ponerPlan(c, 'mantener', 6)
+        c.esquivar = null
+        return
       }
+    }
+  }
+  // Las púas clavadas de Nico M. (quinta tanda): si una le queda adelante, donde va a pisar, la salta o
+  // se queda (nunca la pisa a propósito); se decide una vez por púa.
+  if (c.dir !== 0 && prm.especiales !== 'torpe') {
+    const pua = p.proyectiles.find(
+      (q) => q.plantado && q.duenio !== lado && q.golpesRestantes > 0 && (q.x - yo.x) * c.dir > 0 && Math.abs(q.x - yo.x) < q.ancho / 2 + 80,
+    )
+    if (pua && c.puaVista !== pua.id) {
+      c.puaVista = pua.id
+      if (chance(c.azar, 0.7)) {
+        apretar(c, 'arriba')
+        c.pateaEnSalto = false
+        c.motivo = 'salta la púa'
+        ponerPlan(c, 'mantener', 4)
+      } else {
+        c.dir = 0
+        c.motivo = 'espera que se apague la púa'
+        ponerPlan(c, 'esperar', 20)
+      }
+      return
     }
   }
   // La nube del rival: no quedarse adentro (salvo en fácil, a veces).

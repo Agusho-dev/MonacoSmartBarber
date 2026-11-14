@@ -26,9 +26,19 @@
  *    el especial prendido sin apuntar 0,4–2,5 s después. Ve al rival 15 ticks tarde.
  *  - casual2 (de la verificación): camina, machaca GOLPE de cerca, nunca se cubre ni salta, y tira
  *    el especial prendido sólo a menos de 350 px. Ve al rival 15 ticks tarde.
+ *  - impaciente (quinta tanda, segunda parte; NO es de ninguna meta, se mide aparte): tira el especial
+ *    apenas se le enciende y ataca sin esperar: camina hacia el rival, machaca GOLPE y MÁQUINA de cerca
+ *    y nunca se cubre. Lo armó un verificador anterior (su código se perdió) y vio a Fabri en 15 % y a
+ *    Chipi, Lucas, Stefano y Nahuel en 66–68 %; éste es una reconstrucción, no el mismo.
+ *
+ * Desde la quinta tanda (14/nov) todos, menos el botonero y el impaciente, leen además lo mínimo de
+ * las piezas nuevas (no pegarle al anillo del All In, agacharse de los Lentes y del Lanzamiento Aéreo,
+ * saltar la púa clavada, salir del agarre de media distancia de Nacho, cubrirse cegados por el Spray y,
+ * «apunta» con Nehuen, el Smash cuando viene un tiro): ver `LECTURA`.
  */
 import type { EntradaJugador, IdPersonaje, Lado, Partida } from '../../../src/lib/juego/tipos.ts'
 import { ENTRADA_VACIA } from '../../../src/lib/juego/tipos.ts'
+import { GRAVEDAD, VEL_SALTO } from '../../../src/lib/juego/motor/constantes.ts'
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
 import { PERSONAJES } from '../../../src/lib/juego/personajes.ts'
@@ -36,7 +46,7 @@ import { PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 /** Ticks con que una persona reconoce el ataque del otro (14 = 233 ms). */
 export const REACCION_HUMANA = 14
 
-export const MODELOS = ['simple', 'novato', 'apunta', 'botonero', 'casual', 'casual2'] as const
+export const MODELOS = ['simple', 'novato', 'apunta', 'botonero', 'casual', 'casual2', 'impaciente'] as const
 export type ModeloPersona = (typeof MODELOS)[number]
 
 /** Una persona de bot: decide la entrada de cada tick (se llama una vez por tick, antes de avanzar). */
@@ -233,6 +243,41 @@ export const RANGO_PERSONA: Readonly<Record<IdPersonaje, readonly [readonly [num
   brian: [
     [0, 118],
     [150, 700],
+  ],
+  // Quinta tanda (14/nov), del diseño de la tanda (dónde rinde cada especial para el que apunta).
+  // El All In se aprieta cuando el rival arranca un golpe cerca: el modelo no reacciona así, va [0, 200].
+  chino: [
+    [80, 480],
+    [0, 200],
+  ],
+  fran: [
+    [180, 460],
+    [150, 210],
+  ],
+  lautaro: [
+    [150, 330],
+    [0, 160],
+  ],
+  leo: [
+    [130, 560],
+    [80, 250],
+  ],
+  nacho: [
+    [105, 255],
+    [120, 400],
+  ],
+  nehuen: [
+    [220, 520],
+    [150, 600],
+  ],
+  // La Orden Final la tira de cerca, donde entran los tres anillos; el Monopatín, de cerca (los dos golpes).
+  nico_m: [
+    [80, 300],
+    [160, 420],
+  ],
+  tony: [
+    [0, 260],
+    [60, 170],
   ],
 }
 
@@ -560,6 +605,267 @@ function casual2(r: () => number, reaccion: number): Persona {
   }
 }
 
+// ─── Lo que una persona aprendió de los especiales de la quinta tanda ─────────
+
+/**
+ * Lo que una persona aprende de las piezas de la quinta tanda (14/nov) después de comerse cada especial
+ * un par de veces. Hasta la primera parte de la tanda los modelos no las leían: le pegaban al anillo del
+ * All In, no se agachaban de los Lentes ni del Lanzamiento Aéreo, pisaban las púas clavadas, se quedaban
+ * a tiro del agarre de media distancia de Nacho y nunca devolvían nada con el Smash, así que E
+ * sobrevaloraba esos especiales y subvaloraba a Nehuen. No son expertos: cada lectura se decide UNA vez
+ * por ocasión (un especial del rival, una púa, un tiro) con la probabilidad de su modelo —la misma
+ * atención con la que ya se cubría de lo que ve venir—, mira al rival con la reacción de su modelo y no
+ * compensa la demora del online (lo aprendió contra la CPU). El que aprieta todo sin mirar (el botonero)
+ * no aprende nada y el que nunca se cubre ni salta (casual2) sólo deja de pegarle al anillo. Además de
+ * las del informe de la primera parte, una más: cegado por el Spray de Leo, cubrirse (antes seguía
+ * apretando golpes que no salían y se comía todo: con «apunta» sin demora Leo ganaba 74 %).
+ */
+export interface Lectura {
+  /** No pegarle al anillo del All In (Chino): mientras lo ve, no aprieta golpes ni especiales. */
+  dominio: number
+  /** Agacharse de lo que va a la cara: los Lentes (Fran) y el Lanzamiento Aéreo (Lautaro). */
+  agacharse: number
+  /** Saltar la púa clavada (Nico M.) que le queda adelante, donde va a pisar. */
+  pua: number
+  /** Saltar o irse del agarre de media distancia (Nacho) al verlo arrancar a su alcance. */
+  agarre: number
+  /** Con el Smash de Pádel (Nehuen): tirarlo cuando ve venir un tiro que se puede devolver, más o menos a tiempo. */
+  smash: number
+  /** Cegado por el Spray (Leo): cubrirse mientras le dura, en vez de apretar golpes que no salen. */
+  cegado: number
+}
+
+export const LECTURA: Readonly<Record<ModeloPersona, Lectura>> = {
+  simple: { dominio: 0.3, agacharse: 0.3, pua: 0.3, agarre: 0.3, smash: 0, cegado: 0.3 },
+  novato: { dominio: 0.3, agacharse: 0.3, pua: 0.3, agarre: 0.3, smash: 0, cegado: 0.3 },
+  apunta: { dominio: 0.5, agacharse: 0.5, pua: 0.5, agarre: 0.5, smash: 0.5, cegado: 0.5 },
+  botonero: { dominio: 0, agacharse: 0, pua: 0, agarre: 0, smash: 0, cegado: 0 },
+  casual: { dominio: 0.25, agacharse: 0.25, pua: 0.25, agarre: 0.25, smash: 0, cegado: 0.25 },
+  casual2: { dominio: 0.25, agacharse: 0, pua: 0, agarre: 0, smash: 0, cegado: 0 },
+  impaciente: { dominio: 0, agacharse: 0, pua: 0, agarre: 0, smash: 0, cegado: 0 },
+}
+
+/** Un tiro del rival, como lo ve la persona (con su retraso). */
+interface TiroVisto {
+  id: number
+  tipo: string
+  x: number
+  vx: number
+  ancho: number
+  /** El Smash lo puede devolver (la misma regla que `devolvible` de proyectiles.ts). */
+  devolvible: boolean
+}
+
+interface VistoLectura {
+  x: number
+  mov: string | null
+  dominio: boolean
+  tiros: TiroVisto[]
+  /** El propio cegado (también se nota con la reacción: aprieta y no sale nada). */
+  cegado: boolean
+}
+
+function vistoLectura(p: Partida, lado: Lado): VistoLectura {
+  const otro = (1 - lado) as Lado
+  const l = p.luchadores[otro]
+  const tiros: TiroVisto[] = []
+  for (const pi of internoDe(p).proyectiles) {
+    const q = pi.pub
+    if (q.duenio !== otro || q.golpesRestantes <= 0 || q.plantado) continue
+    const d = pi.def
+    const devolvible = !!d && !pi.cosmetico && !pi.nube && !d.chorro && !d.onda && !d.diferido && !d.rastrero && !d.bumeran && !(d.desliza && pi.enSuelo)
+    tiros.push({ id: q.id, tipo: q.tipo, x: q.x, vx: q.vx, ancho: q.ancho, devolvible })
+  }
+  return { x: l.x, mov: l.movimiento, dominio: l.efectos.dominio > 0, tiros, cegado: p.luchadores[lado].efectos.cegado > 0 }
+}
+
+/** Cuántos ticks se agacha como mucho de los Lentes (si no ve pasar la mirada) y del Lanzamiento Aéreo. */
+const AGACHADO_LENTES = 90
+const AGACHADO_LANZAMIENTO = 30
+/**
+ * La púa clavada (de centro a centro) se salta con la púa en el medio del salto: lo que avanza en el aire
+ * (`saltoVx` por los ≈ 38 ticks de vuelo) partido en dos, y nunca a menos de PUA_CERCA (pisándola ya).
+ * Sólo la pisa el que está en el piso: alcanza con despegar y aterrizar fuera de su caja.
+ */
+const VUELO_SALTO = (2 * VEL_SALTO) / GRAVEDAD
+const PUA_CERCA = 58
+/** El agarre de Nacho se lee a esta distancia (pegado no alcanza; de más lejos, tampoco). */
+const AGARRE_MEDIO: readonly [number, number] = [85, 260]
+/**
+ * El Smash sale si lo que ve del tiro (con su retraso) llega a la paleta entre esto: con reacción 14 y
+ * sin demora, el tiro llega entre el tick 7 y el 20 de la paleta (que devuelve del 6 al 22).
+ */
+const SMASH_VISTO: readonly [number, number] = [21, 34]
+
+/**
+ * Le suma a una persona `lec` (LECTURA de su modelo). Lleva su propia vista con retraso y su propio
+ * azar: en una pelea sin esas piezas no tira ningún número y la persona juega idéntica a la de antes.
+ */
+function conLectura(base: Persona, lec: Lectura, reaccion: number, r: () => number): Persona {
+  if (!lec.dominio && !lec.agacharse && !lec.pua && !lec.agarre && !lec.smash && !lec.cegado) return base
+  const m = {
+    hist: [] as VistoLectura[],
+    movAntes: null as string | null,
+    dominioVisto: false,
+    respeta: false,
+    lentes: false,
+    agachadoT: 0,
+    puas: new Set<number>(),
+    tiros: new Set<number>(),
+    escape: null as null | 'salto' | 'dash',
+    smashAntes: false,
+    cegadoVisto: false,
+    seCubre: false,
+  }
+  return (p, lado) => {
+    const e0 = base(p, lado)
+    const rv = ver(m.hist, vistoLectura(p, lado), reaccion)
+    const nuevo = rv.mov !== m.movAntes ? rv.mov : null
+    m.movAntes = rv.mov
+    if (p.fase !== 'pelea') {
+      m.respeta = false
+      m.lentes = false
+      m.agachadoT = 0
+      m.escape = null
+      m.seCubre = false
+      return e0
+    }
+    const yo = p.luchadores[lado]
+    const hacia = rv.x >= yo.x ? 1 : -1
+    const d = Math.abs(rv.x - yo.x)
+    let e = e0
+
+    // El anillo del All In: se decide una vez por dominio que ve.
+    if (rv.dominio && !m.dominioVisto) {
+      m.dominioVisto = true
+      m.respeta = lec.dominio > 0 && r() < lec.dominio
+    } else if (!rv.dominio) {
+      m.dominioVisto = false
+      m.respeta = false
+    }
+
+    // Lo que va a la cara: los Lentes (agachado hasta que ve pasar la mirada) y el Lanzamiento Aéreo.
+    if (nuevo === 'lentes_hipnoticos' && lec.agacharse > 0 && r() < lec.agacharse) {
+      m.lentes = true
+      m.agachadoT = AGACHADO_LENTES
+    } else if (nuevo === 'lanzamiento_aereo' && d < 230 && lec.agacharse > 0 && r() < lec.agacharse) {
+      m.lentes = false
+      m.agachadoT = AGACHADO_LANZAMIENTO
+    }
+    if (m.agachadoT > 0) {
+      m.agachadoT--
+      if (m.lentes) {
+        // Se para cuando ya no ve el lente del rival por delante (ni al rival tirándolo).
+        const viene = rv.tiros.some((q) => q.tipo === 'hipnosis' && (q.x - yo.x) * hacia > -30)
+        if (!viene && rv.mov !== 'lentes_hipnoticos') m.agachadoT = 0
+      }
+      if (m.agachadoT > 0) e = { ...ENTRADA_VACIA, abajo: true }
+    }
+
+    // El agarre de media distancia de Nacho: lo salta o se va con la esquiva, a su alcance.
+    if (nuevo === 'agarre_y_ejecucion' && d >= AGARRE_MEDIO[0] && d <= AGARRE_MEDIO[1] && lec.agarre > 0 && r() < lec.agarre) {
+      m.escape = r() < 0.5 ? 'salto' : 'dash'
+    }
+    if (m.escape) {
+      const huye = { ...ENTRADA_VACIA, [m.escape === 'salto' ? 'arriba' : 'dash']: true }
+      if (hacia > 0) huye.izquierda = true
+      else huye.derecha = true
+      e = huye
+      m.escape = null
+      m.agachadoT = 0
+    }
+
+    // La púa clavada adelante, donde va a pisar (están quietas: se ven sin retraso).
+    const dir = e.derecha && !e.izquierda ? 1 : e.izquierda && !e.derecha ? -1 : 0
+    if (dir !== 0 && lec.pua > 0 && yo.enSuelo && !e.arriba) {
+      for (const q of p.proyectiles) {
+        if (!q.plantado || q.duenio === lado || q.golpesRestantes <= 0 || m.puas.has(q.id)) continue
+        const adelante = (q.x - yo.x) * dir
+        if (adelante < PUA_CERCA || adelante > (VUELO_SALTO * MOVIMIENTOS[yo.id].saltoVx) / 2 + 4) continue
+        m.puas.add(q.id)
+        if (r() < lec.pua) e = { ...e, arriba: true, guardia: false, golpe: false, herramienta: false }
+        break
+      }
+    }
+
+    // El Smash de Pádel cuando ve venir un tiro (una vez por tiro).
+    if (lec.smash > 0) {
+      const kit = MOVIMIENTOS[yo.id]
+      const esp = kit.especiales.find((x) => x.devuelve)
+      if (esp && esp.devuelve && yo.carga + 1e-9 >= PERSONAJES[yo.id].especiales[esp.numero - 1].costo) {
+        for (const q of rv.tiros) {
+          if (!q.devolvible || m.tiros.has(q.id) || (yo.x - q.x) * q.vx <= 0) continue
+          const dq = Math.abs(q.x - yo.x)
+          const llega = (dq - esp.devuelve.caja.x1 - q.ancho / 2) / Math.max(1, Math.abs(q.vx))
+          if (llega > SMASH_VISTO[1] || llega < SMASH_VISTO[0]) continue
+          m.tiros.add(q.id)
+          if (r() < lec.smash) {
+            const b = esp.numero === 1 ? 'especial1' : 'especial2'
+            if (!m.smashAntes) e = { ...ENTRADA_VACIA, [b]: true }
+          }
+          break
+        }
+      }
+      m.smashAntes = e.especial1 || e.especial2
+    }
+
+    // Cegado: se cubre mientras se ve cegado (se decide una vez por cegada).
+    if (rv.cegado && !m.cegadoVisto) {
+      m.cegadoVisto = true
+      m.seCubre = lec.cegado > 0 && r() < lec.cegado
+    } else if (!rv.cegado) {
+      m.cegadoVisto = false
+      m.seCubre = false
+    }
+    if (m.seCubre && !e.arriba && !e.abajo) e = { ...ENTRADA_VACIA, guardia: true }
+
+    // Con el anillo a la vista, nada que le pegue.
+    if (m.respeta && (e.golpe || e.herramienta || e.especial1 || e.especial2)) e = { ...e, golpe: false, herramienta: false, especial1: false, especial2: false }
+    return e
+  }
+}
+
+/** «impaciente»: el especial apenas se enciende (el que se prende primero; con los dos, al azar) y a pegar sin esperar. */
+function impaciente(r: () => number, reaccion: number): Persona {
+  const m = { hist: [] as Visto[], pulsoT: 0, prev: {} as Partial<EntradaJugador> }
+  const decidir = (p: Partida, lado: Lado): EntradaJugador => {
+    const e: EntradaJugador = { ...ENTRADA_VACIA }
+    const rv = ver(m.hist, vistoDe(p, lado), reaccion)
+    if (p.fase === 'final') {
+      if (p.tick % 6 === 0) e.golpe = true
+      return e
+    }
+    if (p.fase !== 'pelea') return e
+    const yo = p.luchadores[lado]
+    const d = Math.abs(rv.x - yo.x)
+    const hacia = rv.x >= yo.x ? 1 : -1
+    const f = PERSONAJES[yo.id]
+    const listos = ([1, 2] as const).filter((n) => yo.carga + 1e-9 >= f.especiales[n - 1].costo)
+    if (listos.length) {
+      const n = listos.length === 2 ? (r() < 0.5 ? 1 : 2) : listos[0]
+      const b = n === 1 ? 'especial1' : 'especial2'
+      if (!m.prev[b]) {
+        e[b] = true
+        return e
+      }
+    }
+    if (d < 140) {
+      if (m.pulsoT <= 0) {
+        m.pulsoT = 4 + Math.floor(r() * 4)
+        if (r() < 0.7) e.golpe = true
+        else e.herramienta = true
+      } else m.pulsoT--
+    } else if (hacia > 0) e.derecha = true
+    else e.izquierda = true
+    return e
+  }
+  return (p, lado) => {
+    const e = decidir(p, lado)
+    m.prev = e
+    return e
+  }
+}
+
 /** Reacción de cada modelo si el nombre no la dice. */
 const REACCION_DE: Record<ModeloPersona, number> = {
   simple: REACCION_HUMANA,
@@ -568,6 +874,7 @@ const REACCION_DE: Record<ModeloPersona, number> = {
   botonero: REACCION_HUMANA,
   casual: 15,
   casual2: 15,
+  impaciente: REACCION_HUMANA,
 }
 
 /** Crea una persona por su nombre («simple», «novato0», «apunta», …) con su azar. */
@@ -575,20 +882,26 @@ export function crearPersona(nombre: string, semilla: number): Persona {
   const { modelo, reaccion } = leerNombre(nombre)
   const r = rng(semilla)
   const reac = reaccion ?? REACCION_DE[modelo]
-  switch (modelo) {
-    case 'simple':
-      return simple(r, reac)
-    case 'novato':
-      return novato(r, reac)
-    case 'apunta':
-      return apunta(r, reac)
-    case 'botonero':
-      return botonero(r, reac)
-    case 'casual':
-      return casual(r, reac)
-    case 'casual2':
-      return casual2(r, reac)
-  }
+  const base = ((): Persona => {
+    switch (modelo) {
+      case 'simple':
+        return simple(r, reac)
+      case 'novato':
+        return novato(r, reac)
+      case 'apunta':
+        return apunta(r, reac)
+      case 'botonero':
+        return botonero(r, reac)
+      case 'casual':
+        return casual(r, reac)
+      case 'casual2':
+        return casual2(r, reac)
+      case 'impaciente':
+        return impaciente(r, reac)
+    }
+  })()
+  // Lo que aprendió de las piezas de la quinta tanda, con un azar aparte (ver conLectura).
+  return conLectura(base, LECTURA[modelo], reac, rng(Math.imul(semilla, 0x2c1b3c6d) ^ 0x297a2d39))
 }
 
 /** Reacción efectiva de una persona por su nombre (para los informes). */

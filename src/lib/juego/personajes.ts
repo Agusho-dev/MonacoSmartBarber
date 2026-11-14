@@ -502,17 +502,330 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     retratoFijo: true,
     rutas: ruta('brian'),
   },
+  // ─── Quinta tanda (14/nov): los cuatro barberos que faltaban ───
+  chino: {
+    id: 'chino',
+    nombre: 'Chino',
+    apodo: 'El Tahúr',
+    staffId: '5912180f-7ab4-419a-a357-5555db49844d',
+    sucursal: 'parana',
+    color: '#BE123C',
+    colorSecundario: '#7C3AED',
+    atributos: { fuerza: 6, velocidad: 7, defensa: 6, tecnica: 9, alcance: 6 },
+    vidaMax: 1000,
+    alturaMundo: 210,
+    herramientas: ['Remate', 'Golpe pesado'],
+    especiales: [
+      {
+        nombre: 'Cartas Malditas',
+        costo: 4,
+        icono: 'cartas',
+        efecto: 'multigolpe',
+        descripcion: 'Tira tres cartas en abanico: una alta, una al medio y una al ras del piso. Saltando o agachado alguna te alcanza: hay que cubrirse.',
+      },
+      {
+        nombre: 'All In / Dominio',
+        costo: 5,
+        icono: 'dominio',
+        efecto: 'contra',
+        descripcion: 'Arma su dominio de cartas y espera tu golpe: si le pegás o le tirás algo, te contesta con todo y te tira al piso. Si nadie lo toca, igual sale con una embestida más floja.',
+      },
+    ],
+    pasiva: {
+      nombre: 'La casa siempre gana',
+      descripcion: 'Cada especial que tira el rival le suma media carga.',
+    },
+    frases: ['¿Cortás o barajás?', 'Te leí la jugada antes de que la pienses.', 'Voy all in con tu flequillo.'],
+    // Ya tiene su portada (la base de la quinta tanda).
+    retratoFijo: true,
+    rutas: ruta('chino'),
+  },
+  fran: {
+    id: 'fran',
+    nombre: 'Fran',
+    apodo: 'El Hipnótico',
+    staffId: '21fa3b8c-6605-424f-86ae-ec65042cb6b1',
+    sucursal: 'pueyrredon',
+    color: '#8B5CF6',
+    colorSecundario: '#38BDF8',
+    atributos: { fuerza: 6, velocidad: 7, defensa: 6, tecnica: 8, alcance: 7 },
+    vidaMax: 1000,
+    alturaMundo: 208,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Lentes Hipnóticos',
+        costo: 4,
+        icono: 'lentes',
+        efecto: 'hipnotiza',
+        descripcion: 'Te mira a los ojos: si te alcanza de lejos, caminás hacia él sin poder hacer nada hasta que te pega. Agachado o cubierto, no te hace nada.',
+      },
+      {
+        nombre: 'Corte de Precisión',
+        costo: 5,
+        icono: 'corte',
+        efecto: 'precision',
+        descripcion: 'Una estocada larga con la tijera grande, sin moverse del lugar: con la punta, siempre es crítico.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Pulso fino',
+      descripcion: 'Después de cubrir un golpe, el próximo que tira enseguida es crítico.',
+    },
+    frases: ['Mirame a los ojos…', 'Un milímetro, ni uno más.', 'Quedate quieto, que te dibujo el fade.'],
+    rutas: ruta('fran'),
+  },
+  lautaro: {
+    id: 'lautaro',
+    nombre: 'Lautaro',
+    apodo: 'El Gigante',
+    staffId: '6d39bf28-eca0-4d0b-8e2a-ea2652a25909',
+    sucursal: 'pueyrredon',
+    color: '#3B5BDB',
+    colorSecundario: '#A9BCD6',
+    atributos: { fuerza: 8, velocidad: 4, defensa: 7, tecnica: 5, alcance: 10 },
+    vidaMax: 1050,
+    alturaMundo: 214,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Gigante',
+        costo: 6,
+        icono: 'gigante',
+        efecto: 'derriba',
+        descripcion: 'Se hace gigante, da un paso enorme y aplasta todo lo que tiene adelante: te tira al piso. Mientras crece, los golpes chicos no lo frenan; uno fuerte o un especial, sí.',
+      },
+      {
+        nombre: 'Lanzamiento Aéreo',
+        costo: 5,
+        icono: 'lanzamiento',
+        efecto: 'agarre',
+        descripcion: 'Te agarra del cuello, aunque estés saltando, y te revolea por el aire. No se bloquea: agachate o esquivalo.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Brazos largos',
+      descripcion: 'Sus golpes llegan más lejos que los de cualquiera.',
+    },
+    frases: ['Desde acá arriba te veo chiquito.', 'Agarrate, que vas para arriba.', 'Cuando me agrando, no hay techo.'],
+    rutas: ruta('lautaro'),
+  },
+  leo: {
+    id: 'leo',
+    nombre: 'Leo',
+    apodo: 'El Filoso',
+    staffId: '33b3cac2-0e2d-4121-b077-61db6fe4ee04',
+    sucursal: 'pueyrredon',
+    color: '#C9CED6',
+    colorSecundario: '#8E3B2F',
+    atributos: { fuerza: 5, velocidad: 8, defensa: 5, tecnica: 8, alcance: 8 },
+    vidaMax: 980,
+    alturaMundo: 206,
+    // Su herramienta1 es el golpe con la máquina (IconoHerramienta elige el ícono por esta etiqueta).
+    herramientas: ['Máquina', 'Tijera'],
+    especiales: [
+      {
+        nombre: 'Lanzamiento de Herramientas',
+        costo: 5,
+        icono: 'herramientas',
+        efecto: 'multigolpe',
+        descripcion: 'Tira un secador, una tijera y otro secador que van adonde estás, aunque saltes: hay que cubrirse.',
+      },
+      {
+        nombre: 'Spray Cegador',
+        costo: 4,
+        icono: 'aerosol',
+        efecto: 'ciega',
+        descripcion: 'Te tira spray en los ojos: un segundo sin poder pegar ni tirar especiales (podés moverte y cubrirte). Si te cubrís, no te ciega.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Pibe de goma',
+      descripcion: 'Cuando lo tiran al piso, se levanta antes que nadie.',
+    },
+    frases: ['Traje el cinturón completo.', 'Ojo con el spray, que pica.', 'Tijera, máquina y a casa.'],
+    rutas: ruta('leo'),
+  },
+  // ─── Quinta tanda (14/nov): los dueños (sólo los eligen los dueños; los apodos pueden cambiar) ───
+  nacho: {
+    id: 'nacho',
+    nombre: 'Nacho',
+    apodo: 'El Admin',
+    // Sin ficha de staff: no atiende clientes.
+    staffId: null,
+    sucursal: 'rondeau',
+    // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).
+    soloDuenos: true,
+    color: '#00C2FF',
+    colorSecundario: '#FF3B5C',
+    atributos: { fuerza: 6, velocidad: 6, defensa: 6, tecnica: 9, alcance: 7 },
+    vidaMax: 1000,
+    alturaMundo: 210,
+    herramientas: ['Remate', 'Laptopazo'],
+    especiales: [
+      {
+        nombre: 'Agarre y Ejecución',
+        costo: 5,
+        icono: 'ejecucion',
+        efecto: 'agarre',
+        descripcion: 'Te agarra con un brazo de código desde media distancia (no se bloquea), te vuelve código y te roba carga. Pegado a él no te alcanza, y en el aire tampoco.',
+      },
+      {
+        nombre: 'Terremoto de Código',
+        costo: 6,
+        icono: 'codigo',
+        efecto: 'derriba',
+        descripcion: 'Pone las manos en el piso y salen columnas de código, una detrás de otra y cada vez más lejos: la que te agarra te lanza por el aire. Se cubre.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Overclock',
+      descripcion: 'Con la carga en 8 o más, camina y corre 12 % más rápido.',
+    },
+    frases: ['¿Probaste apagar y volver a prender?', 'Rival.exe dejó de responder.', 'Este juego lo programé yo.'],
+    rutas: ruta('nacho'),
+  },
+  nehuen: {
+    id: 'nehuen',
+    nombre: 'Nehuen',
+    apodo: 'El Fantasma',
+    staffId: '4d35842c-9eb4-4d78-9a0d-92cc4e4f8e60',
+    sucursal: 'caseros',
+    // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).
+    soloDuenos: true,
+    color: '#C8F542',
+    colorSecundario: '#FF7A1A',
+    atributos: { fuerza: 6, velocidad: 9, defensa: 5, tecnica: 8, alcance: 6 },
+    vidaMax: 960,
+    alturaMundo: 206,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Desaparecer',
+        costo: 5,
+        icono: 'fantasma',
+        efecto: 'empuja',
+        descripcion: 'Se vuelve transparente: nada lo toca mientras cruza hasta tu cara, y reaparece pegándote con la pelota. Cubrite cuando ves que desaparece.',
+      },
+      {
+        nombre: 'Smash de Pádel',
+        costo: 5,
+        icono: 'padel',
+        efecto: 'devuelve',
+        descripcion: 'Remata con la paleta: de cerca te pega el paletazo y de lejos la pelota. Lo que le tires mientras remata, te lo devuelve más rápido.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Volea',
+      descripcion: 'Sus golpes en el aire pegan 25 % más.',
+    },
+    frases: ['¿Jugamos un set?', 'Te la devuelvo por tres.', 'Ahora me ves, ahora no.'],
+    rutas: ruta('nehuen'),
+  },
+  nico_m: {
+    id: 'nico_m',
+    nombre: 'Nico M.',
+    apodo: 'El Dorado',
+    staffId: '7608c22a-e8cb-43be-8017-319ccc8d8fff',
+    sucursal: 'rondeau',
+    // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).
+    soloDuenos: true,
+    color: '#FFC93C',
+    colorSecundario: '#FFF3B0',
+    atributos: { fuerza: 6, velocidad: 5, defensa: 7, tecnica: 7, alcance: 9 },
+    vidaMax: 1000,
+    alturaMundo: 208,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Orden Final',
+        costo: 6,
+        icono: 'orden',
+        efecto: 'multigolpe',
+        descripcion: 'Te señala y salen anillos dorados que cruzan casi toda la pantalla: de cerca te pegan los tres, de lejos uno. No se salta ni se pasa agachado: cubrite.',
+      },
+      {
+        nombre: 'Espinas',
+        costo: 5,
+        icono: 'espinas',
+        efecto: 'trampa',
+        descripcion: 'Se le paran los pelos y dispara tres púas doradas en arco. Las que no te pegan quedan clavadas en el piso un rato: si pisás una, te tira. Saltalas.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Pelo de punta',
+      descripcion: 'El que le pega de cerca se pincha: cada golpe cuerpo a cuerpo que recibe o cubre le saca 7 de vida al que pega.',
+    },
+    frases: ['Es una orden.', 'Se me pararon los pelos.', 'Acá se hace lo que digo yo.'],
+    rutas: ruta('nico_m'),
+  },
+  tony: {
+    id: 'tony',
+    nombre: 'Tony',
+    apodo: 'El Jefe',
+    staffId: '0cf2b028-7b7d-49ff-ab84-db9423dbf570',
+    sucursal: 'rondeau',
+    // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).
+    soloDuenos: true,
+    color: '#C9A27A',
+    colorSecundario: '#FF9F1C',
+    atributos: { fuerza: 9, velocidad: 6, defensa: 7, tecnica: 5, alcance: 7 },
+    vidaMax: 1080,
+    alturaMundo: 212,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Monopatín',
+        costo: 6,
+        icono: 'monopatin',
+        efecto: 'derriba',
+        descripcion: 'Revolea el monopatín eléctrico (si estás cerca, te pega) y te lo tira: sale despacio y va acelerando. Si te agarra, te tira al piso. Cubrite o saltalo.',
+      },
+      {
+        nombre: 'Despido Final',
+        costo: 7,
+        icono: 'despido',
+        efecto: 'derriba',
+        descripcion: 'Te muestra el papel del despido: si no te cubriste, te arrodillás llorando y te come una patada voladora. Cubierto no pasa nada y Tony queda regalado.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Presencia de jefe',
+      descripcion: 'Cerca de él, el rival camina 5 % más lento.',
+    },
+    frases: ['Pasá por la oficina.', 'Estás despedido.', 'Acá el que manda soy yo.'],
+    rutas: ruta('tony'),
+  },
 }
 
 export const IDS_PERSONAJES = Object.keys(PERSONAJES) as IdPersonaje[]
 
-/** Los barberos que todavía no tienen hoja de sprites. */
-export const PROXIMAMENTE: FichaProximamente[] = [
-  { nombre: 'Nico M.', sucursal: 'rondeau' },
-  { nombre: 'Tony', sucursal: 'rondeau' },
-  { nombre: 'Nehuen', sucursal: 'caseros' },
-  { nombre: 'Chino', sucursal: 'parana' },
-  { nombre: 'Fran', sucursal: 'pueyrredon' },
-  { nombre: 'Lautaro', sucursal: 'pueyrredon' },
-  { nombre: 'Leo', sucursal: 'pueyrredon' },
-]
+// ─── Quién ve a quién (los dueños, `soloDuenos` en tipos.ts) ────────────────────
+
+/** ¿Es un personaje de los dueños? (sólo con el pase de dueños; src/lib/juego/ui/pase-duenos.ts). */
+export const esSoloDuenos = (id: IdPersonaje): boolean => PERSONAJES[id]?.soloDuenos === true
+
+/** Los que ve y elige un cliente: los barberos (el catálogo sin los de los dueños), en su orden. */
+export const IDS_PARA_CLIENTES: readonly IdPersonaje[] = IDS_PERSONAJES.filter((id) => !esSoloDuenos(id))
+
+/** Los personajes de los dueños: el grupo «Dueños» de la selección, sólo con el pase. */
+export const IDS_SOLO_DUENOS: readonly IdPersonaje[] = IDS_PERSONAJES.filter(esSoloDuenos)
+
+/** Los que ve y elige un dueño (con el pase): todos, los barberos primero. */
+export const IDS_PARA_DUENOS: readonly IdPersonaje[] = [...IDS_PARA_CLIENTES, ...IDS_SOLO_DUENOS]
+
+/** Los que puede elegir ESTE celular: con el pase de dueños, todos; sin el pase, los barberos. */
+export const idsVisibles = (conPase: boolean): readonly IdPersonaje[] => (conPase ? IDS_PARA_DUENOS : IDS_PARA_CLIENTES)
+
+/**
+ * Una pelea con un personaje de dueño de cualquier lado: no se guarda (ni ranking ni estadísticas
+ * de los barberos). La miran la pantalla del resultado, la raíz (los récords locales) y
+ * `guardarPartidaJuego`.
+ */
+export const peleaConDuenos = (a: IdPersonaje, b: IdPersonaje): boolean => esSoloDuenos(a) || esSoloDuenos(b)
+
+/**
+ * Los barberos que todavía no tienen hoja de sprites. Los dueños (Nico M., Tony, Nehuen y Nacho) no
+ * van acá: los clientes no los ven nunca, ni bloqueados.
+ */
+export const PROXIMAMENTE: FichaProximamente[] = []

@@ -18,6 +18,20 @@
  *   cd scripts/juego/simulador && node --import ./cargador.mjs afinar-balanzas.mts --balanza=personas \
  *     --vueltas=4 --semillas=12 [--desde=ajuste.json] [--salida=x.json] [--ganancia=0.2] [--hilos=10]
  *
+ * `--elenco=barberos|duenos|todos|cruce` (def. barberos) se le pasa a balance.mts: los personajes de los
+ * dueños (quinta tanda) se afinan aparte, entre ellos (meta E de los dueños); «cruce» (los dueños contra
+ * los barberos) sólo tiene sentido con «persona-cpu»: afina la `asistencia` de cada dueño con su fila
+ * contra las CPU de los barberos (lo que juega un dueño con su pase) y no toca la `periciaHumano` de
+ * nadie (la de los barberos es de la meta B de los barberos).
+ *
+ * `--afinar=a,b` (def. todos los del elenco): sólo esos se tocan; los demás se miden y quedan como están
+ * (quinta tanda: el kit de los 13 de antes no se toca si no hace falta).
+ *
+ * `--campo=asistencia|periciaHumano` (sólo con persona-cpu; def. los dos): toca sólo ése. Si un personaje no
+ * tiene `periciaHumano`, arranca de su `pericia` (es la que usa su CPU contra una persona mientras falta).
+ *
+ * `--sales=base,1` se le pasa a balance.mts (más partidas por vuelta, las mismas en cada vuelta).
+ *
  * `--desde` es un ajuste de balance.mts (cambios de kit, costos, …) que se respeta y se completa; el
  * resultado (el mismo ajuste con lo afinado) queda en `--salida` para probarlo con balance.mts
  * --ajuste y copiarlo a mano a movimientos.ts (DANIO_KIT y EstiloCpu). Con el ruido de cada vuelta
@@ -29,7 +43,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DANIO_KIT, MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
-import { IDS_PERSONAJES } from '../../../src/lib/juego/personajes.ts'
+import { IDS_PERSONAJES, PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 import type { Dificultad, IdPersonaje } from '../../../src/lib/juego/tipos.ts'
 
 const args = process.argv.slice(2)
@@ -54,7 +68,13 @@ interface Ajuste {
   [k: string]: unknown
 }
 const ajuste: Ajuste = desde && existsSync(desde) ? (JSON.parse(readFileSync(desde, 'utf8')) as Ajuste) : {}
-const ids = IDS_PERSONAJES as IdPersonaje[]
+const elenco = arg('elenco') ?? 'barberos'
+const DUENOS_T5: readonly string[] = ['nacho', 'nehuen', 'nico_m', 'tony']
+const esDueno = (id: IdPersonaje) => (PERSONAJES[id] as { soloDuenos?: boolean }).soloDuenos === true || DUENOS_T5.includes(id)
+const ids = (IDS_PERSONAJES as IdPersonaje[]).filter((id) => elenco === 'todos' || elenco === 'cruce' || (elenco === 'duenos') === esDueno(id))
+/** Los que se tocan (`--afinar`; en «cruce», las filas: los dueños). */
+const afinables = new Set<IdPersonaje>(arg('afinar')?.split(',').filter(Boolean) as IdPersonaje[] | undefined ?? ids.filter((id) => elenco !== 'cruce' || esDueno(id)))
+for (const id of afinables) if (!ids.includes(id)) throw new Error(`--afinar: ${id} no está en el elenco ${elenco}`)
 const lg = (p: number) => {
   const q = Math.min(0.97, Math.max(0.03, p))
   return Math.log(q / (1 - q))
@@ -72,7 +92,8 @@ for (const campo of ['pericia', 'periciaHumano', 'asistencia'] as const) {
 
 function correrBalance(extra: string[]): Record<string, unknown> {
   writeFileSync(tmp, JSON.stringify(ajuste))
-  execFileSync(process.execPath, ['--import', './cargador.mjs', 'balance.mts', `--hilos=${hilos}`, `--ajuste=${tmp}`, `--json=${crudo}`, ...extra], {
+  const sales = arg('sales') ? [`--sales=${arg('sales')}`] : []
+  execFileSync(process.execPath, ['--import', './cargador.mjs', 'balance.mts', `--hilos=${hilos}`, `--elenco=${elenco}`, `--ajuste=${tmp}`, `--json=${crudo}`, ...sales, ...extra], {
     cwd: import.meta.dirname,
     stdio: ['ignore', 'ignore', 'inherit'],
   })
@@ -98,6 +119,7 @@ for (let v = 1; v <= vueltas; v++) {
       y[1] += g1
     }
     for (const id of ids) {
+      if (!afinables.has(id)) continue
       const vs = Object.entries(col)
         .filter(([k]) => k.endsWith(`|${id}`))
         .map(([, [n, g]]) => lg(g / n))
@@ -126,6 +148,7 @@ for (let v = 1; v <= vueltas; v++) {
       y[1] += g1
     }
     for (const id of ids) {
+      if (!afinables.has(id)) continue
       const partes: string[] = []
       for (const dif of ['facil', 'normal', 'dificil'] as const) {
         const [n, g] = gan[`${dif}|${id}`] ?? [1, 0.5]
@@ -137,8 +160,9 @@ for (let v = 1; v <= vueltas; v++) {
       lineas.push(`${id} ${partes.join(' | ')}`)
     }
   } else {
-    // Un múltiplo de 26 (los 13 rivales, de los dos lados): así cada fila y cada columna tienen partidas.
-    const n = Math.max(26, Math.round(Number(arg('semillas') ?? 780) / 26) * 26)
+    // Un múltiplo de dos veces los rivales (todos, de los dos lados): así cada celda tiene lo mismo.
+    const paso = 2 * (elenco === 'cruce' ? ids.filter((id) => !esDueno(id)).length : ids.length)
+    const n = Math.max(paso, Math.round(Number(arg('semillas') ?? 780) / paso) * paso)
     const ac = correrBalance(['--dif=normal', '--semillas=0', '--humano=0', `--humanoNormal=${n}`, '--novatos=0', '--humanos=simple,novato'])
     const hum = ac.humanos as Record<string, [number, number]>
     const fila: Record<string, [number, number]> = {}
@@ -153,18 +177,23 @@ for (let v = 1; v <= vueltas; v++) {
       y[1] += w
     }
     const L0 = lg(objetivo)
+    const lgDe = (x: [number, number] | undefined) => (x && x[0] > 0 ? lg(x[1] / x[0]) : NaN)
+    const pc = (x: [number, number] | undefined) => (x && x[0] > 0 ? ((100 * x[1]) / x[0]).toFixed(1) : '–')
     for (const id of ids) {
-      const F = (lg(fila[`simple|${id}`][1] / fila[`simple|${id}`][0]) + lg(fila[`novato|${id}`][1] / fila[`novato|${id}`][0])) / 2
-      const C = (lg(col[`simple|${id}`][1] / col[`simple|${id}`][0]) + lg(col[`novato|${id}`][1] / col[`novato|${id}`][0])) / 2
+      if (!afinables.has(id)) continue
       const a = (ajuste.asistencia as Record<string, PorDif>)[id]
       const ph = (ajuste.periciaHumano as Record<string, PorDif>)[id]
       const a0 = a.normal ?? 0
-      const p0 = ph.normal ?? 0
-      a.normal = acotar(a0 + ganancia * (L0 - F), -2, 2)
-      ph.normal = acotar(p0 + ganancia * (C - L0), -2, 2)
-      const pc = (x: [number, number]) => ((100 * x[1]) / x[0]).toFixed(1)
+      const p0 = ph.normal ?? (ajuste.pericia as Record<string, PorDif>)[id]?.normal ?? 0
+      const campo = arg('campo')
+      // La fila (la persona con este personaje) mueve su asistencia; la columna (su CPU contra una
+      // persona), su periciaHumano. En «cruce» sólo hay filas de los dueños.
+      const F = (lgDe(fila[`simple|${id}`]) + lgDe(fila[`novato|${id}`])) / 2
+      const C = (lgDe(col[`simple|${id}`]) + lgDe(col[`novato|${id}`])) / 2
+      if (Number.isFinite(F) && campo !== 'periciaHumano') a.normal = acotar(a0 + ganancia * (L0 - F), -2, 2)
+      if (Number.isFinite(C) && elenco !== 'cruce' && campo !== 'asistencia') ph.normal = acotar(p0 + ganancia * (C - L0), -2, 2)
       lineas.push(
-        `${id} fila ${pc(fila[`simple|${id}`])}/${pc(fila[`novato|${id}`])} col ${pc(col[`simple|${id}`])}/${pc(col[`novato|${id}`])} asistencia ${a0} → ${a.normal} periciaHumano ${p0} → ${ph.normal}`,
+        `${id} fila ${pc(fila[`simple|${id}`])}/${pc(fila[`novato|${id}`])} col ${pc(col[`simple|${id}`])}/${pc(col[`novato|${id}`])} asistencia ${a0} → ${a.normal ?? a0} periciaHumano ${p0} → ${ph.normal ?? p0}`,
       )
     }
   }

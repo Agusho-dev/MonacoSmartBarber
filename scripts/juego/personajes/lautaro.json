@@ -1,0 +1,2670 @@
+{
+  "_nota": "Lautaro para «Corte Final» (cuarta tanda, 31/oct/2026), hoja de 18 paneles (1600x900, foto realista). Se procesa con scripts/juego/extraer_lautaro.py (atajo del motor de extraer_gabriel.py).",
+  "personaje": "lautaro",
+  "hoja": "../../../../juego-fuentes/lautaro_anim.jpg",
+  "salida": "../../../public/juego/personajes/lautaro",
+  "reglas": {
+    "barraE1": [
+      {
+        "nota": "la barra violeta del título del especial 1 (las cabezas del gigante se meten)",
+        "zona": [
+          480,
+          425,
+          1594,
+          459
+        ],
+        "satMin": 0.75,
+        "bMenosGMin": 45
+      }
+    ],
+    "barraE2": [
+      {
+        "nota": "la barra violeta del título del especial 2 (la cabeza del último cuadro se mete)",
+        "zona": [
+          1290,
+          596,
+          1400,
+          627
+        ],
+        "satMin": 0.75,
+        "bMenosGMin": 45
+      }
+    ],
+    "barraSaltar": [
+      {
+        "nota": "la barra azul del título de SALTAR (el puño del salto se mete)",
+        "zona": [
+          700,
+          152,
+          1063,
+          182
+        ],
+        "satMin": 0.8,
+        "lumMin": 22,
+        "bMenosRMin": 30
+      }
+    ],
+    "aura": [
+      {
+        "nota": "aura azul fuerte",
+        "bMenosRMin": 90
+      },
+      {
+        "nota": "aura azul oscura (la remera no pasa de 0,6 de saturación)",
+        "bMenosRMin": 55,
+        "bMenosGMin": 45,
+        "satMin": 0.62
+      }
+    ],
+    "filoAura": [
+      {
+        "nota": "filo azul o violeta del aura sobre la ropa y el pelo",
+        "bMenosRMin": 70
+      },
+      {
+        "nota": "filo celeste claro",
+        "bMenosRMin": 40,
+        "lumMin": 120
+      }
+    ],
+    "rojo": [
+      {
+        "nota": "chispas y brillo rojo del impacto (la piel en sombra no llega)",
+        "rMenosGMin": 110,
+        "satMin": 0.7
+      }
+    ],
+    "peloVioleta": [
+      {
+        "nota": "pelo teñido por la barra violeta del título (sólo en la caja de la cabeza)",
+        "bMenosGMin": 8,
+        "lumMax": 75
+      }
+    ],
+    "rival": [
+      {
+        "nota": "la ropa negra del rival (la remera azul de Lautaro pasa de 0,5 de saturación)",
+        "lumMax": 70,
+        "satMax": 0.5
+      }
+    ]
+  },
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho&panel",
+      "region": [
+        9,
+        33,
+        394,
+        147
+      ],
+      "cajas": [
+        [
+          12,
+          33,
+          84,
+          147
+        ],
+        [
+          84,
+          33,
+          160,
+          147
+        ],
+        [
+          160,
+          33,
+          234,
+          147
+        ],
+        [
+          234,
+          33,
+          304,
+          147
+        ],
+        [
+          304,
+          33,
+          392,
+          147
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "usar": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "_nota": "la hoja dibuja dos poses (manos en los bolsillos, brazos cruzados) y una mano en el pelo: el quieto es la respiración de las manos en los bolsillos (0 y 1, cada uno repetido 3 veces: ≈ 0,4 s por pose a 8 cuadros/s); los brazos cruzados y la mano en el pelo quedan sin usar"
+    },
+    "caminar": {
+      "inferencia": "ancho&panel",
+      "region": [
+        406,
+        33,
+        758,
+        147
+      ],
+      "cajas": [
+        [
+          406,
+          33,
+          476,
+          147
+        ],
+        [
+          474,
+          33,
+          545,
+          147
+        ],
+        [
+          543,
+          33,
+          613,
+          147
+        ],
+        [
+          611,
+          33,
+          679,
+          147
+        ],
+        [
+          677,
+          33,
+          758,
+          147
+        ]
+      ],
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "2": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              588,
+              82,
+              606,
+              102
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "3": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              655,
+              82,
+              672,
+              102
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "4": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      }
+    },
+    "correr": {
+      "inferencia": "ancho",
+      "region": [
+        770,
+        34,
+        1133,
+        147
+      ],
+      "cajas": [
+        [
+          773,
+          36,
+          876,
+          147
+        ],
+        [
+          858,
+          36,
+          958,
+          147
+        ],
+        [
+          938,
+          36,
+          1046,
+          147
+        ],
+        [
+          1024,
+          36,
+          1133,
+          147
+        ]
+      ],
+      "_nota": "la inferencia «ancho» se traga parches de fondo negro encerrados entre los brazos, la espalda y las piernas: «fondoOscuro» (extraer_lautaro.py) los saca sin tocar el pelo; «pegados» deja afuera el pie del corredor de al lado",
+      "fondoOscuro": {
+        "0": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              806,
+              56,
+              834,
+              90
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "1": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              890,
+              56,
+              918,
+              90
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "3": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      },
+      "pegados": 2,
+      "excluir": {
+        "0": [
+          [
+            860,
+            112,
+            878,
+            147
+          ]
+        ],
+        "1": [
+          [
+            946,
+            112,
+            958,
+            147
+          ]
+        ]
+      },
+      "sombra": {
+        "0": {
+          "zona": [
+            776,
+            136,
+            830,
+            148
+          ],
+          "lumMax": 40
+        }
+      }
+    },
+    "dash": {
+      "_nota": "los tres cuadros del DASH de la hoja son la misma carrera con humo y estelas encima: se prestan los de «correr» (mismo rectángulo del atlas)",
+      "usar": [
+        [
+          "correr",
+          1
+        ],
+        [
+          "correr",
+          2
+        ],
+        [
+          "correr",
+          3
+        ]
+      ]
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "region": [
+        10,
+        182,
+        370,
+        286
+      ],
+      "cajas": [
+        [
+          10,
+          182,
+          90,
+          286
+        ],
+        [
+          90,
+          182,
+          178,
+          286
+        ],
+        [
+          178,
+          182,
+          268,
+          286
+        ],
+        [
+          268,
+          182,
+          370,
+          286
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "apoyoX": {
+        "0": 48.5,
+        "1": 132.5,
+        "2": 223.5,
+        "3": 313.5
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+    },
+    "agachado": {
+      "inferencia": "ancho&panel",
+      "region": [
+        382,
+        182,
+        689,
+        286
+      ],
+      "cajas": [
+        [
+          382,
+          182,
+          455,
+          286
+        ],
+        [
+          455,
+          182,
+          530,
+          286
+        ],
+        [
+          530,
+          182,
+          605,
+          286
+        ],
+        [
+          605,
+          182,
+          689,
+          286
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      }
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "cajas": [
+        [
+          702,
+          182,
+          775,
+          286
+        ],
+        [
+          776,
+          160,
+          875,
+          286
+        ],
+        [
+          876,
+          152,
+          975,
+          286
+        ],
+        [
+          980,
+          165,
+          1060,
+          286
+        ]
+      ],
+      "pintar": "barraSaltar",
+      "quitarColor": [
+        "barraSaltar"
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "usar": [
+        0,
+        1,
+        2
+      ],
+      "desaturar": {
+        "2": [{"nota": "quinta tanda: los arcos azules que la barra del título deja sobre el pelo", "zona": [936, 168, 962, 184], "bMenosRMin": 15}]
+      }
+    },
+    "caer": {
+      "inferencia": "ancho",
+      "region": [
+        1073,
+        182,
+        1591,
+        286
+      ],
+      "cajas": [
+        [
+          1076,
+          182,
+          1200,
+          286
+        ],
+        [
+          1200,
+          182,
+          1298,
+          286
+        ],
+        [
+          1298,
+          182,
+          1390,
+          286
+        ],
+        [
+          1390,
+          182,
+          1488,
+          286
+        ],
+        [
+          1488,
+          182,
+          1591,
+          286
+        ]
+      ],
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "3": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "4": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              1553,
+              245,
+              1566,
+              278
+            ],
+            "lumMax": 40,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ]
+      },
+      "pegados": 2,
+      "usar": [
+        [
+          "saltar",
+          3
+        ],
+        [
+          "saltar",
+          3
+        ],
+        0,
+        2,
+        4
+      ],
+      "_nota": "como en las otras hojas de 18: la caída es la bajada del salto (saltar[3]) y el aterrizaje, los cuadros 0, 2 y 4 de la hoja (el 1 trae humo)",
+      "sombra": {
+        "4": {
+          "zona": [
+            1490,
+            266,
+            1591,
+            287
+          ],
+          "lumMax": 40
+        }
+      }
+    },
+    "golpe": {
+      "inferencia": "ancho&panel",
+      "region": [
+        10,
+        321,
+        483,
+        424
+      ],
+      "cajas": [
+        [
+          10,
+          321,
+          95,
+          424
+        ],
+        [
+          95,
+          321,
+          185,
+          424
+        ],
+        [
+          185,
+          321,
+          295,
+          424
+        ],
+        [
+          295,
+          321,
+          404,
+          424
+        ]
+      ],
+      "impactos": [
+        3
+      ],
+      "inferenciaPorCuadro": {
+        "3": "caja"
+      },
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              153,
+              336,
+              165,
+              352
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          },
+          {
+            "zona": [
+              154,
+              352,
+              167,
+              372
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "3": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      },
+      "pegados": 2,
+      "incluirLum": {
+        "3": [
+          {
+            "zona": [
+              388,
+              340,
+              399,
+              352
+            ],
+            "lumMin": 45,
+            "suavizar": 1
+          }
+        ]
+      },
+      "excluirUltimo": {
+        "3": [
+          [
+            399,
+            330,
+            412,
+            360
+          ]
+        ]
+      },
+      "_nota": "31/oct (corrección): golpe[3] (impacto) con el puño redondo («incluirLum», lo que brilla en la zona) y sin el destello de adelante («excluirUltimo»); golpe[1] sin el fondo entre el brazo y la remera"
+    },
+    "patada": {
+      "inferencia": "ancho",
+      "region": [
+        496,
+        321,
+        947,
+        424
+      ],
+      "cajas": [
+        [
+          496,
+          321,
+          600,
+          424
+        ],
+        [
+          600,
+          321,
+          730,
+          424
+        ],
+        [
+          726,
+          321,
+          850,
+          424
+        ]
+      ],
+      "impactos": [
+        2
+      ],
+      "inferenciaPorCuadro": {
+        "2": "caja"
+      },
+      "fondoOscuro": {
+        "0": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              553,
+              366,
+              571,
+              396
+            ],
+            "lumMax": 36,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      },
+      "pegados": 2
+    },
+    "combo": {
+      "inferencia": "ancho",
+      "region": [
+        959,
+        321,
+        1591,
+        424
+      ],
+      "cajas": [
+        [
+          959,
+          321,
+          1042,
+          424
+        ],
+        [
+          1040,
+          321,
+          1128,
+          424
+        ],
+        [
+          1124,
+          321,
+          1206,
+          424
+        ],
+        [
+          1200,
+          321,
+          1287,
+          424
+        ],
+        [
+          1280,
+          321,
+          1368,
+          424
+        ],
+        [
+          1358,
+          321,
+          1468,
+          424
+        ],
+        [
+          1438,
+          321,
+          1525,
+          424
+        ]
+      ],
+      "impactos": [
+        2,
+        3,
+        5
+      ],
+      "inferenciaPorCuadro": {
+        "5": "panel"
+      },
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "2": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              1145,
+              352,
+              1159,
+              366
+            ],
+            "lumMax": 34,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          },
+          {
+            "zona": [
+              1136,
+              350,
+              1151,
+              374
+            ],
+            "lumMax": 70,
+            "suavizar": 1,
+            "areaMin": 3,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "3": [
+          {
+            "lumMax": 24,
+            "suavizar": 3,
+            "areaMin": 40
+          },
+          {
+            "zona": [
+              1258,
+              346,
+              1294,
+              371
+            ],
+            "lumMax": 40,
+            "suavizar": 1,
+            "areaMin": 4,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "4": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "5": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40,
+          "proteger": [
+            [
+              1410,
+              322,
+              1442,
+              348
+            ]
+          ]
+        },
+        "6": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      },
+      "pegados": 2,
+      "usar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "excluir": {
+        "4": [
+          [
+            1352,
+            395,
+            1368,
+            424
+          ]
+        ],
+        "5": [
+          [
+            1440,
+            370,
+            1468,
+            424
+          ]
+        ]
+      },
+      "incluirLum": {
+        "5": [
+          {
+            "zona": [
+              1434,
+              345,
+              1452,
+              355
+            ],
+            "lumMin": 45,
+            "suavizar": 1
+          }
+        ]
+      },
+      "excluirUltimo": {
+        "3": [
+          [
+            1275,
+            344,
+            1294,
+            360
+          ]
+        ],
+        "5": [
+          [
+            1453,
+            338,
+            1470,
+            362
+          ]
+        ],
+        "2": [
+          [
+            [
+              1146,
+              364
+            ],
+            [
+              1151,
+              364
+            ],
+            [
+              1151,
+              369
+            ],
+            [
+              1146,
+              369
+            ]
+          ]
+        ]
+      },
+      "_nota": "31/oct (corrección): combo[2] sin la vara (el puente de 4 filas de la estela entre el antebrazo de atrás y la remera: «excluirUltimo»), combo[3] sin el bloque negro pegado al puño, combo[5] con el pelo entero y el puño redondo sin la estela"
+    },
+    "herramienta1": {
+      "alias": "combo",
+      "usar": [
+        3,
+        4,
+        5,
+        4
+      ],
+      "impactos": [
+        2
+      ],
+      "_nota": "botón MÁQUINA («Remate», como en las otras hojas de 18): los cuadros finales del combo (combo[3], combo[4], combo[5], combo[4]), impacto en combo[5]"
+    },
+    "herramienta2": {
+      "alias": "patada",
+      "usar": [
+        0,
+        1,
+        2
+      ],
+      "impactos": [
+        2
+      ],
+      "_nota": "2.ª herramienta: la PATADA de la hoja (alias)"
+    },
+    "especial1": {
+      "inferencia": "ancho",
+      "region": [
+        10,
+        425,
+        1591,
+        592
+      ],
+      "cajas": [
+        [
+          12,
+          470,
+          112,
+          592
+        ],
+        [
+          118,
+          470,
+          216,
+          592
+        ],
+        [
+          236,
+          459,
+          330,
+          592
+        ],
+        [
+          355,
+          452,
+          454,
+          592
+        ],
+        [
+          500,
+          425,
+          624,
+          592
+        ],
+        [
+          700,
+          425,
+          862,
+          592
+        ],
+        [
+          925,
+          420,
+          1105,
+          592
+        ],
+        [
+          1160,
+          455,
+          1345,
+          592
+        ],
+        [
+          1460,
+          425,
+          1575,
+          592
+        ]
+      ],
+      "pintar": "barraE1",
+      "quitarColor": {
+        "0": [
+          "aura",
+          {
+            "nota": "aura azul oscura entre las piernas",
+            "zona": [
+              12,
+              553,
+              112,
+              592
+            ],
+            "lumMax": 75,
+            "bMenosRMin": 35
+          }
+        ],
+        "1": [
+          "aura",
+          {
+            "nota": "aura azul oscura entre las piernas",
+            "zona": [
+              118,
+              553,
+              216,
+              592
+            ],
+            "lumMax": 75,
+            "bMenosRMin": 35
+          }
+        ],
+        "2": [
+          "aura",
+          {
+            "nota": "aura azul entre las piernas",
+            "zona": [
+              [
+                270,
+                592
+              ],
+              [
+                276,
+                560
+              ],
+              [
+                284,
+                548
+              ],
+              [
+                294,
+                560
+              ],
+              [
+                300,
+                592
+              ]
+            ],
+            "bMenosRMin": 35
+          },
+          {
+            "nota": "aura celeste entre el brazo y el cuerpo",
+            "zona": [
+              255,
+              505,
+              280,
+              537
+            ],
+            "bMenosRMin": 55,
+            "lumMin": 110
+          }
+        ],
+        "3": [
+          "aura",
+          {
+            "nota": "aura azul oscura entre las piernas",
+            "zona": [
+              355,
+              530,
+              454,
+              592
+            ],
+            "lumMax": 75,
+            "bMenosRMin": 35
+          },
+          {
+            "nota": "aura azul en la punta de la zapatilla",
+            "zona": [
+              360,
+              578,
+              402,
+              593
+            ],
+            "bMenosRMin": 40,
+            "lumMin": 50
+          },
+          {
+            "nota": "aura celeste entre el brazo y el cuerpo",
+            "zona": [
+              388,
+              506,
+              401,
+              531
+            ],
+            "bMenosRMin": 55,
+            "lumMin": 110
+          }
+        ],
+        "4": [
+          "aura",
+          "barraE1"
+        ],
+        "5": [
+          "aura",
+          "barraE1"
+        ],
+        "6": [
+          "aura",
+          "barraE1",
+          {
+            "nota": "escombros y humo blancos",
+            "zona": [
+              975,
+              538,
+              1062,
+              592
+            ],
+            "satMax": 0.16,
+            "lumMin": 70,
+            "rMenosBMin": -6
+          },
+          {
+            "nota": "piedras negras",
+            "zona": [
+              975,
+              538,
+              1062,
+              592
+            ],
+            "suavizar": 3,
+            "lumMax": 45,
+            "satMax": 0.4
+          }
+        ],
+        "7": [
+          "aura",
+          "rojo",
+          {
+            "nota": "rayos y escombros blancos",
+            "zona": [
+              [
+                1172,
+                495
+              ],
+              [
+                1312,
+                495
+              ],
+              [
+                1312,
+                584
+              ],
+              [
+                1213,
+                584
+              ],
+              [
+                1213,
+                566
+              ],
+              [
+                1172,
+                566
+              ]
+            ],
+            "satMax": 0.16,
+            "lumMin": 70,
+            "rMenosBMin": -6
+          },
+          {
+            "nota": "piedras y el rival aplastado (negro neutro)",
+            "zona": [
+              [
+                1172,
+                495
+              ],
+              [
+                1312,
+                495
+              ],
+              [
+                1312,
+                584
+              ],
+              [
+                1213,
+                584
+              ],
+              [
+                1213,
+                566
+              ],
+              [
+                1172,
+                566
+              ]
+            ],
+            "suavizar": 3,
+            "lumMax": 45,
+            "satMax": 0.4
+          }
+        ],
+        "8": [
+          "aura",
+          "barraE1",
+          "rojo"
+        ]
+      },
+      "impactos": [
+        7
+      ],
+      "inferenciaPorCuadro": {
+        "0": "panel",
+        "1": "panel",
+        "2": "panel",
+        "3": "caja",
+        "4": "caja",
+        "5": "caja",
+        "6": "panel",
+        "8": "caja"
+      },
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "pelarColor": {
+        "reglas": "filoAura",
+        "pasos": 2
+      },
+      "excluir": {
+        "6": [
+          [
+            1062,
+            520,
+            1110,
+            592
+          ],
+          [
+            [
+              975,
+              592
+            ],
+            [
+              979,
+              566
+            ],
+            [
+              988,
+              554
+            ],
+            [
+              1003,
+              549
+            ],
+            [
+              1022,
+              547
+            ],
+            [
+              1042,
+              549
+            ],
+            [
+              1056,
+              555
+            ],
+            [
+              1063,
+              566
+            ],
+            [
+              1064,
+              592
+            ]
+          ]
+        ],
+        "5": [
+          [
+            [
+              790,
+              527
+            ],
+            [
+              793,
+              531
+            ],
+            [
+              805,
+              550
+            ],
+            [
+              813,
+              570
+            ],
+            [
+              817,
+              580
+            ],
+            [
+              820,
+              592
+            ],
+            [
+              750,
+              592
+            ],
+            [
+              753,
+              580
+            ],
+            [
+              761,
+              570
+            ],
+            [
+              775,
+              550
+            ],
+            [
+              787,
+              531
+            ]
+          ]
+        ],
+        "2": [
+          [
+            [
+              274,
+              592
+            ],
+            [
+              277,
+              580
+            ],
+            [
+              281,
+              571
+            ],
+            [
+              285,
+              580
+            ],
+            [
+              288,
+              592
+            ]
+          ]
+        ]
+      },
+      "limite": {
+        "7": [
+          [
+            [
+              1171,
+              591
+            ],
+            [
+              1172,
+              572
+            ],
+            [
+              1176,
+              554
+            ],
+            [
+              1181,
+              546
+            ],
+            [
+              1193,
+              530
+            ],
+            [
+              1196,
+              510
+            ],
+            [
+              1198,
+              496
+            ],
+            [
+              1204,
+              488
+            ],
+            [
+              1222,
+              479
+            ],
+            [
+              1240,
+              474
+            ],
+            [
+              1258,
+              473
+            ],
+            [
+              1270,
+              470
+            ],
+            [
+              1282,
+              478
+            ],
+            [
+              1281,
+              496
+            ],
+            [
+              1287,
+              502
+            ],
+            [
+              1291,
+              526
+            ],
+            [
+              1295,
+              540
+            ],
+            [
+              1298,
+              556
+            ],
+            [
+              1309,
+              564
+            ],
+            [
+              1309,
+              577
+            ],
+            [
+              1298,
+              582
+            ],
+            [
+              1270,
+              582
+            ],
+            [
+              1268,
+              564
+            ],
+            [
+              1258,
+              550
+            ],
+            [
+              1244,
+              526
+            ],
+            [
+              1238,
+              512
+            ],
+            [
+              1234,
+              514
+            ],
+            [
+              1222,
+              530
+            ],
+            [
+              1212,
+              548
+            ],
+            [
+              1211,
+              568
+            ],
+            [
+              1210,
+              590
+            ],
+            [
+              1190,
+              592
+            ]
+          ]
+        ]
+      },
+      "incluir": {
+        "7": [
+          [
+            [
+              1171,
+              591
+            ],
+            [
+              1172,
+              572
+            ],
+            [
+              1176,
+              554
+            ],
+            [
+              1181,
+              546
+            ],
+            [
+              1193,
+              530
+            ],
+            [
+              1196,
+              510
+            ],
+            [
+              1198,
+              496
+            ],
+            [
+              1204,
+              488
+            ],
+            [
+              1222,
+              479
+            ],
+            [
+              1240,
+              474
+            ],
+            [
+              1258,
+              473
+            ],
+            [
+              1270,
+              470
+            ],
+            [
+              1282,
+              478
+            ],
+            [
+              1281,
+              496
+            ],
+            [
+              1287,
+              502
+            ],
+            [
+              1291,
+              526
+            ],
+            [
+              1295,
+              540
+            ],
+            [
+              1298,
+              556
+            ],
+            [
+              1309,
+              564
+            ],
+            [
+              1309,
+              577
+            ],
+            [
+              1298,
+              582
+            ],
+            [
+              1270,
+              582
+            ],
+            [
+              1268,
+              564
+            ],
+            [
+              1258,
+              550
+            ],
+            [
+              1244,
+              526
+            ],
+            [
+              1238,
+              512
+            ],
+            [
+              1234,
+              514
+            ],
+            [
+              1222,
+              530
+            ],
+            [
+              1212,
+              548
+            ],
+            [
+              1211,
+              568
+            ],
+            [
+              1210,
+              590
+            ],
+            [
+              1190,
+              592
+            ]
+          ]
+        ]
+      },
+      "desaturar": {
+        "4": [
+          {
+            "nota": "pelo teñido por la barra violeta del título (sólo en la caja de la cabeza)",
+            "bMenosGMin": 8,
+            "lumMax": 75,
+            "zona": [
+              566,
+              425,
+              612,
+              451
+            ]
+          }
+        ],
+        "5": [
+          {
+            "nota": "pelo teñido por la barra violeta del título (sólo en la caja de la cabeza)",
+            "bMenosGMin": 8,
+            "lumMax": 75,
+            "zona": [
+              783,
+              425,
+              830,
+              451
+            ]
+          }
+        ],
+        "6": [
+          {
+            "zona": [
+              1048,
+              454,
+              1082,
+              476
+            ],
+            "bMenosRMin": 25
+          }
+        ]
+      },
+      "_nota": "GIGANTE: crece de su tamaño (0-2) a ≈ 1,5 veces (4-8). Las cabezas del gigante se meten en la barra del título: se pinta («barraE1») y el pelo teñido de violeta se pasa a gris («desaturar», extraer_lautaro.py). El aura se saca por color («aura») y su filo azul se pela del contorno («pelarColor»). El 7 (el pisotón con las dos manos sobre el rival) se arma con el contorno del cuerpo a mano («limite» + «incluir») y se le restan por color los rayos blancos, las piedras y el rival negro. El 8 (de pie sobre el rival) tiene el pie derecho tapado por los escombros: no se usa. Orden: se agacha y carga (0, 1), crece (2 → 3 → 4: de 1,0 a 1,46 veces el alto de «quieto»), avanza gigante (5), levanta el puño (6), aplasta con las dos manos (7, el impacto) y vuelve a su tamaño (4 → 3 → 2). En el 3 el modelo perdía el antebrazo derecho (teñido por el aura): «incluirUltimo» con su contorno.",
+      "usar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        4,
+        3,
+        2
+      ],
+      "incluirUltimo": {
+        "6": [
+          [
+            [
+              1053,
+              461
+            ],
+            [
+              1060,
+              457
+            ],
+            [
+              1070,
+              458
+            ],
+            [
+              1075,
+              463
+            ],
+            [
+              1072,
+              470
+            ],
+            [
+              1062,
+              473
+            ],
+            [
+              1055,
+              470
+            ]
+          ],
+          [
+            1013,
+            485,
+            1025,
+            497
+          ]
+        ],
+        "3": [
+          [
+            [
+              388,
+              510
+            ],
+            [
+              398,
+              510
+            ],
+            [
+              399,
+              522
+            ],
+            [
+              398,
+              532
+            ],
+            [
+              392,
+              534
+            ],
+            [
+              387,
+              530
+            ],
+            [
+              386,
+              520
+            ]
+          ]
+        ]
+      },
+      "rellenarUltimo": {
+        "1": 150,
+        "7": 200
+      },
+      "incluirLum": {
+        "6": [
+          {
+            "zona": [
+              [
+                1055,
+                510
+              ],
+              [
+                1069,
+                510
+              ],
+              [
+                1077,
+                538
+              ],
+              [
+                1079,
+                560
+              ],
+              [
+                1066,
+                563
+              ],
+              [
+                1060,
+                540
+              ]
+            ],
+            "lumMin": 70,
+            "suavizar": 1,
+            "sinColor": [
+              {
+                "nota": "aura azul o celeste pegada al brazo",
+                "bMenosRMin": 30
+              }
+            ],
+            "rellenar": false
+          }
+        ]
+      },
+      "_notaCorreccion": "31/oct (corrección): el 6 recupera el antebrazo que baja hacia el rival («incluirLum», sin el aura: «sinColor») y tapa el hueco de la remera («incluirUltimo», adentro de la remera: sin bordes a la vista); el 1 y el 7 tapan los huecos que dejaban las limpiezas por color («rellenarUltimo»). Quedan del dibujo: en el 6, la pierna de atrás tapada por las piedras desde la rodilla; en el 7, el contorno negro dentado de las manos sobre el rival y la zapatilla de atrás cortada por la caja",
+      "piernas": {
+        "4": [{"nota": "quinta tanda: la zapatilla derecha del gigante (blanca sobre el humo blanco: el modelo no la separa) sale de especial1[5]", "de": ["especial1", 5], "forma": [818, 580, 858, 593], "desde": [836, 582], "hasta": [604, 583]}]
+      },
+      "piso": {"4": 592}
+    },
+    "especial2": {
+      "inferencia": "ancho",
+      "region": [
+        10,
+        598,
+        1591,
+        732
+      ],
+      "cajas": [
+        [
+          10,
+          625,
+          130,
+          732
+        ],
+        [
+          125,
+          625,
+          240,
+          732
+        ],
+        [
+          265,
+          625,
+          340,
+          732
+        ],
+        [
+          460,
+          625,
+          560,
+          732
+        ],
+        [
+          660,
+          625,
+          745,
+          732
+        ],
+        [
+          895,
+          640,
+          960,
+          732
+        ],
+        [
+          1300,
+          598,
+          1385,
+          732
+        ]
+      ],
+      "impactos": [
+        1,
+        3
+      ],
+      "pintar": {
+        "6": "barraE2"
+      },
+      "quitarColor": {
+        "0": [
+          {
+            "nota": "la ropa negra del rival (la remera azul de Lautaro pasa de 0,5 de saturación)",
+            "lumMax": 70,
+            "satMax": 0.5,
+            "zona": [
+              [
+                84,
+                638
+              ],
+              [
+                126,
+                638
+              ],
+              [
+                126,
+                733
+              ],
+              [
+                48,
+                733
+              ],
+              [
+                48,
+                712
+              ],
+              [
+                56,
+                690
+              ],
+              [
+                64,
+                676
+              ],
+              [
+                72,
+                664
+              ],
+              [
+                78,
+                652
+              ],
+              [
+                84,
+                648
+              ]
+            ]
+          }
+        ],
+        "1": [
+          {
+            "nota": "la ropa negra del rival (la remera azul de Lautaro pasa de 0,5 de saturación)",
+            "lumMax": 70,
+            "satMax": 0.5,
+            "zona": [
+              [
+                186,
+                645
+              ],
+              [
+                241,
+                645
+              ],
+              [
+                241,
+                733
+              ],
+              [
+                191,
+                733
+              ],
+              [
+                191,
+                718
+              ],
+              [
+                183,
+                700
+              ],
+              [
+                183,
+                690
+              ],
+              [
+                186,
+                668
+              ]
+            ]
+          },
+          {
+            "nota": "el pelo del rival entre los brazos",
+            "zona": [
+              172,
+              661,
+              216,
+              671
+            ],
+            "lumMax": 55
+          }
+        ],
+        "3": [
+          {
+            "nota": "humo oscuro entre el brazo caído y la pierna",
+            "zona": [
+              466,
+              683,
+              490,
+              733
+            ],
+            "lumMax": 60
+          },
+          {
+            "nota": "humo gris al costado de la pierna (la piel del puño pasa de 0,2)",
+            "zona": [
+              458,
+              700,
+              490,
+              733
+            ],
+            "satMax": 0.2,
+            "lumMax": 210
+          },
+          {
+            "nota": "sombra entre los pies",
+            "zona": [
+              496,
+              720,
+              507,
+              733
+            ],
+            "lumMax": 70
+          }
+        ],
+        "5": [
+          {
+            "nota": "sombra entre los pies",
+            "zona": [
+              923,
+              712,
+              937,
+              733
+            ],
+            "lumMax": 60
+          },
+          {
+            "nota": "humo oscuro detrás del brazo",
+            "zona": [
+              898,
+              668,
+              913,
+              722
+            ],
+            "lumMax": 50
+          }
+        ]
+      },
+      "inferenciaPorCuadro": {
+        "2": "caja",
+        "4": "panel",
+        "6": "caja"
+      },
+      "excluir": {
+        "0": [
+          [
+            50,
+            718,
+            67,
+            734
+          ],
+          [
+            106,
+            716,
+            127,
+            734
+          ]
+        ],
+        "1": [
+          [
+            218,
+            716,
+            241,
+            734
+          ],
+          [
+            182,
+            670,
+            194,
+            688
+          ],
+          [
+            [
+              184,
+              700
+            ],
+            [
+              192,
+              700
+            ],
+            [
+              192,
+              722
+            ],
+            [
+              185,
+              722
+            ]
+          ]
+        ],
+        "2": [
+          [
+            [
+              339,
+              620
+            ],
+            [
+              401,
+              620
+            ],
+            [
+              401,
+              733
+            ],
+            [
+              329,
+              733
+            ],
+            [
+              329,
+              690
+            ],
+            [
+              338,
+              680
+            ]
+          ],
+          [
+            331,
+            626,
+            341,
+            651
+          ]
+        ]
+      },
+      "humo": {},
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "5": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        }
+      },
+      "_nota": "LANZAMIENTO AÉREO: guardia (golpe[0], prestado), agarra al rival del cuello (1: el rival se saca por color —ropa negra— y su mano con «excluir»), lo levanta (2), lo revolea hacia arriba (3), lo sigue con el brazo (4) y lo mira caer de espaldas (5). Impactos: 1 (el agarre) y 3 (el revoleo). El cuadro 0 de la hoja (la pierna de atrás tapada por el rival) y el 6 (los pies en los escombros) no se usan. Desde el 2 el borde de abajo del panel corta los pies: «piernas» (extraer_lautaro.py) les pone las zapatillas de quieto[0]. El 5 de la hoja (de espaldas, mirando cómo cae) está dibujado más lejos: escala 1,22.",
+      "excluirFinal": {
+        "0": [
+          [
+            91,
+            630,
+            130,
+            733
+          ]
+        ],
+        "1": [
+          [
+            214,
+            630,
+            241,
+            733
+          ]
+        ]
+      },
+      "abrirZona": {
+        "0": {
+          "zona": [
+            48,
+            676,
+            91,
+            722
+          ],
+          "radio": 1
+        },
+        "1": {
+          "zona": [
+            178,
+            676,
+            214,
+            733
+          ],
+          "radio": 1
+        }
+      },
+      "usar": [
+        [
+          "golpe",
+          0
+        ],
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "piernas": {
+        "2": [{"de": ["quieto", 0], "forma": [20, 137, 42, 149], "desde": [32, 135], "hasta": [288, 727]}, {"de": ["quieto", 0], "forma": [47, 137, 73, 149], "desde": [58, 135], "hasta": [326, 727]}],
+        "3": [{"de": ["quieto", 0], "forma": [20, 137, 42, 149], "desde": [32, 135], "hasta": [495, 727]}, {"de": ["quieto", 0], "forma": [47, 137, 73, 149], "desde": [58, 135], "hasta": [511, 727]}],
+        "4": [{"de": ["quieto", 0], "forma": [20, 137, 42, 149], "desde": [32, 135], "hasta": [692, 727]}, {"de": ["quieto", 0], "forma": [47, 137, 73, 149], "desde": [58, 135], "hasta": [725, 727]}],
+        "5": [{"de": ["quieto", 0], "forma": [20, 137, 42, 149], "desde": [32, 135], "hasta": [917, 727]}, {"de": ["quieto", 0], "forma": [47, 137, 73, 149], "desde": [58, 135], "hasta": [942, 727]}]
+      },
+      "escalaPorCuadro": {
+        "5": 1.22
+      },
+      "excluirUltimo": {
+        "1": [[[188, 646], [218, 646], [218, 661], [210, 661], [206, 660], [204, 657], [188, 656]]],
+        "2": [[262, 729, 345, 740]],
+        "3": [[455, 729, 565, 740]],
+        "4": [[655, 729, 750, 740]],
+        "5": [[890, 729, 965, 740]]
+      }
+    },
+    "danio": {
+      "inferencia": "ancho&panel",
+      "region": [
+        10,
+        765,
+        326,
+        881
+      ],
+      "cajas": [
+        [
+          10,
+          765,
+          84,
+          881
+        ],
+        [
+          84,
+          765,
+          166,
+          881
+        ],
+        [
+          166,
+          765,
+          242,
+          881
+        ],
+        [
+          242,
+          765,
+          326,
+          881
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "incluirUltimo": {
+        "0": [
+          [
+            [
+              68,
+              770
+            ],
+            [
+              71,
+              768
+            ],
+            [
+              75,
+              767
+            ],
+            [
+              79,
+              769
+            ],
+            [
+              82,
+              773
+            ],
+            [
+              83,
+              778
+            ],
+            [
+              82,
+              783
+            ],
+            [
+              79,
+              786
+            ],
+            [
+              75,
+              787
+            ],
+            [
+              71,
+              786
+            ],
+            [
+              68,
+              780
+            ]
+          ]
+        ]
+      },
+      "_nota": "31/oct (corrección): danio[0] sin el pelo (el modelo no lo tomaba): «incluirUltimo» con su contorno"
+    },
+    "ko": {
+      "inferencia": "ancho",
+      "region": [
+        338,
+        765,
+        657,
+        881
+      ],
+      "cajas": [
+        [
+          338,
+          765,
+          470,
+          881
+        ],
+        [
+          470,
+          765,
+          588,
+          881
+        ],
+        [
+          586,
+          765,
+          657,
+          881
+        ]
+      ],
+      "ancla": "caja",
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40
+        },
+        "1": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40,
+          "proteger": [
+            [
+              500,
+              839,
+              524,
+              861
+            ]
+          ]
+        },
+        "2": {
+          "lumMax": 24,
+          "suavizar": 3,
+          "areaMin": 40,
+          "proteger": [
+            [
+              624,
+              831,
+              651,
+              861
+            ]
+          ]
+        }
+      },
+      "incluirUltimo": {
+        "0": [
+          [
+            [
+              444,
+              811
+            ],
+            [
+              447,
+              808
+            ],
+            [
+              452,
+              807
+            ],
+            [
+              456,
+              808
+            ],
+            [
+              459,
+              811
+            ],
+            [
+              461,
+              815
+            ],
+            [
+              461,
+              822
+            ],
+            [
+              459,
+              826
+            ],
+            [
+              455,
+              829
+            ],
+            [
+              451,
+              828
+            ],
+            [
+              446,
+              826
+            ]
+          ]
+        ]
+      },
+      "_nota": "31/oct (corrección): el pelo negro se lo comía «fondoOscuro» (es tan oscuro y liso como el fondo): en 1 y 2 «proteger» la cabeza; en 0 el modelo no lo tomaba y va con «incluirUltimo» y su contorno"
+    },
+    "levantarse": {
+      "inferencia": "ancho&panel",
+      "region": [
+        669,
+        765,
+        939,
+        881
+      ],
+      "cajas": [
+        [
+          669,
+          765,
+          724,
+          881
+        ],
+        [
+          724,
+          765,
+          800,
+          881
+        ],
+        [
+          800,
+          765,
+          868,
+          881
+        ],
+        [
+          868,
+          765,
+          939,
+          881
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      }
+    },
+    "victoria": {
+      "inferencia": "ancho&panel",
+      "region": [
+        951,
+        764,
+        1259,
+        882
+      ],
+      "cajas": [
+        [
+          951,
+          764,
+          1026,
+          882
+        ],
+        [
+          1026,
+          764,
+          1104,
+          882
+        ],
+        [
+          1104,
+          764,
+          1190,
+          882
+        ],
+        [
+          1190,
+          764,
+          1259,
+          882
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "apoyoX": {
+        "0": 990.5,
+        "1": 1063.5,
+        "2": 1147.0,
+        "3": 1226.0
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+    },
+    "burla": {
+      "inferencia": "ancho&panel",
+      "region": [
+        1272,
+        764,
+        1591,
+        882
+      ],
+      "cajas": [
+        [
+          1272,
+          764,
+          1362,
+          882
+        ],
+        [
+          1362,
+          764,
+          1470,
+          882
+        ],
+        [
+          1470,
+          764,
+          1591,
+          882
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 24,
+        "suavizar": 3,
+        "areaMin": 40
+      },
+      "espejoPorCuadro": {
+        "1": true,
+        "2": true
+      },
+      "_nota": "1 y 2 se espejan: en la hoja el gesto (la mano abierta, «vení») apunta a la izquierda y el rival está a la derecha. El 0 es mirar el celular (sale del bolsillo); el último cuadro es el gesto, mirando al rival y sin el celular",
+      "apoyoX": {
+        "0": 1318.5,
+        "1": 1429.0,
+        "2": 1545.5
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): no patina al espejar"
+    }
+  },
+  "retrato": {
+    "anim": "victoria",
+    "cuadro": 0,
+    "alto": 720,
+    "cara": {
+      "lado": 29,
+      "arriba": 2,
+      "filas": 12
+    },
+    "_nota": "31/oct (corrección): la cara de la grilla con «lado» 29 (era 36): con 36 entraban el collar y la remera y a 43 px era la menos legible del elenco"
+  }
+}

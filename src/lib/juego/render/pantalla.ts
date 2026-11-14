@@ -185,6 +185,8 @@ const BANDA_H = 150
 export const DUR_SUPER = 1000
 /** Altura de la banda (fracción del alto visible): la de siempre y la del segundo especial. */
 const FILAS_BANDA = [0.3, 0.62] as const
+/** La inclinación de la banda (radianes). */
+const ROT_BANDA = -0.16
 
 /**
  * El super flash de UN lado. Cada luchador tiene el suyo: si los dos tiran un especial casi
@@ -474,6 +476,30 @@ function dibujarEncendido(E: Escena, f: FlashLado, l: LuchadorEstado, v: VisualL
   if (oscuro > 0.05) dibujarLuchador(E, l, v, Math.max(0, 1 - t / 260) * 0.75)
 }
 
+/**
+ * La y de mundo del borde de abajo de la banda de la fila de arriba en la x de mundo `x` (−∞ si no hay
+ * ninguna en pantalla). Los textos de la quinta tanda que salen con su propio super flash se corren
+ * debajo (textos.dibujarMundo(2)): encima de la banda tapaban el nombre del especial.
+ */
+export function debajoDeLaBanda(E: Escena, sf: SuperFlash, altoVista: number, x: number): number {
+  let borde = -Infinity
+  if (!sf.activo) return borde
+  const u = E.cam.base
+  const X = E.cam.tx + E.cam.esc * x
+  for (const f of sf.lados) {
+    if (!f.activo || !f.banda || f.fila !== 0 || f.edad < 50) continue
+    const s = (u / f.bandaEscala) * acotar(altoVista / 540, 0.75, 1)
+    const c = Math.cos(ROT_BANDA) * s
+    const sn = Math.sin(ROT_BANDA) * s
+    const mitad = f.banda.height / 2
+    // el punto del borde de abajo (y local = mitad) que cae en la X de pantalla
+    const lx = (X - 480 * u + sn * mitad) / c
+    const Y = sn * lx + c * mitad + altoVista * FILAS_BANDA[f.fila] * u
+    borde = Math.max(borde, (Y - E.cam.ty) / E.cam.esc)
+  }
+  return borde
+}
+
 /** Las bandas en diagonal con la cara y el nombre (capa de pantalla, arriba de la viñeta). */
 export function dibujarSuperFlashBanda(E: Escena, sf: SuperFlash, altoVista: number): void {
   if (!sf.activo) return
@@ -496,7 +522,7 @@ function dibujarBanda(E: Escena, f: FlashLado, lado: Lado, altoVista: number): v
   const offset = desliza * BANDA_W * dir
   const ctx = E.ctx
   const u = E.cam.base
-  const rot = -0.16
+  const rot = ROT_BANDA
   // en pantallas más anchas que 16:9 (celular acostado) la banda se achica con el alto visible
   const s = (u / f.bandaEscala) * acotar(altoVista / 540, 0.75, 1)
   const c = Math.cos(rot) * s

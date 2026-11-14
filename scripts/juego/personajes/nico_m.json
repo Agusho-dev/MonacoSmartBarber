@@ -1,0 +1,2145 @@
+{
+ "_nota": "Nico M. para «Corte Final» (quinta tanda, 14/nov/2026), hoja de 18 paneles (1536x1024, los mismos paneles que la de Chino). Se procesa con scripts/juego/extraer_nico_m.py (motor de extraer_gabriel.py + las extensiones de extraer_chino.py y extraer_lautaro.py + el donante por cuadro del injerto; ver su docstring). Remera blanca, bermuda cargo negra, gorra negra y zapatillas blancas: la bermuda y la gorra no se separan del fondo por color; la gorra se pierde con la inferencia «ancho» en varios cuadros de pegada y vuelve con un polígono medido (incluirUltimo) o con la inferencia del panel (sumar). La fila de abajo está dibujada 1,19 veces más grande (escala 0,84). Los dos especiales son primeros planos cortados por el borde del panel (1,65 veces más grandes): se injertan sobre las piernas de quieto[0] o de golpe[3] (escala 0,6 y 0,63). herramienta1 = el remate del combo (combo 2-3-4: guardia, cruzado y patada lateral) y herramienta2 = alias de la patada. Efecto del atlas: «pua» (una de las púas que vuelan en «Espinas», sin la estela dorada). Lo que se saca de los cuadros: el rival, los anillos y rayos dorados, el humo, las estelas y los arcos rojos.",
+ "personaje": "nico_m",
+ "hoja": "../../../../juego-fuentes/nico_m_anim.jpg",
+ "salida": "../../../public/juego/personajes/nico_m",
+ "retrato": {
+  "anim": "victoria",
+  "cuadro": 1,
+  "alto": 720,
+  "cara": {
+   "anim": "especial1",
+   "cuadro": 2,
+   "lado": 44,
+   "arriba": 2,
+   "filas": 16,
+   "dx": 2
+  }
+ },
+ "reglas": {
+  "rojos": [
+   {
+    "nota": "arcos y brillo rojo del combo (la piel tiene r - g < 60)",
+    "rMenosGMin": 70,
+    "satMin": 0.4,
+    "lumMin": 30
+   }
+  ],
+  "rojosOscuros": [
+   {
+    "nota": "brillo rojo oscuro del arco",
+    "rMenosGMin": 30,
+    "rMenosBMin": 15,
+    "satMin": 0.5,
+    "lumMax": 90
+   }
+  ],
+  "dorados": [
+   {
+    "nota": "anillos, rayos y chispas doradas de los especiales (la piel no llega a esa saturación)",
+    "rMenosBMin": 90,
+    "satMin": 0.62,
+    "lumMin": 70
+   }
+  ]
+ },
+ "animaciones": {
+  "quieto": {
+   "_nota": "Panel IDLE, 5 cuadros. apoyoX por cuadro (el punto medio de los pies, medido sobre la máscara final): no patina.",
+   "inferencia": "ancho&panel",
+   "region": [
+    12,
+    34,
+    351,
+    160
+   ],
+   "cajas": [
+    [
+     13,
+     34,
+     77,
+     160
+    ],
+    [
+     77,
+     34,
+     143,
+     160
+    ],
+    [
+     143,
+     34,
+     209,
+     160
+    ],
+    [
+     209,
+     34,
+     277,
+     160
+    ],
+    [
+     277,
+     34,
+     347,
+     160
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "apoyoX": {
+    "0": 45.0,
+    "1": 107.5,
+    "2": 175.0,
+    "3": 242.0,
+    "4": 308.0
+   }
+  },
+  "caminar": {
+   "_nota": "Panel CAMINAR, 5 cuadros; las zapatillas de los vecinos se pisan: pegados 3.",
+   "inferencia": "ancho&panel",
+   "region": [
+    362,
+    34,
+    721,
+    160
+   ],
+   "cajas": [
+    [
+     364,
+     34,
+     437,
+     160
+    ],
+    [
+     436,
+     34,
+     506,
+     160
+    ],
+    [
+     505,
+     34,
+     567,
+     160
+    ],
+    [
+     566,
+     34,
+     635,
+     160
+    ],
+    [
+     634,
+     34,
+     712,
+     160
+    ]
+   ],
+   "pegados": 3,
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   }
+  },
+  "correr": {
+   "_nota": "Panel CORRER, 4 cuadros que se pisan: limite por cuadro para separar a cada corredor, «ancho&panel» (la del cuadro solo dejaba un filo negro de fondo de 3-6 px alrededor del brazo, la rodilla y la zapatilla), y la gorra de [0] y [1] con su contorno medido (la intersección la perdía). [1]: fuera el mechón borroso detrás de la gorra.",
+   "inferencia": "ancho&panel",
+   "region": [
+    732,
+    34,
+    1107,
+    160
+   ],
+   "cajas": [
+    [
+     734,
+     36,
+     860,
+     160
+    ],
+    [
+     828,
+     36,
+     946,
+     160
+    ],
+    [
+     906,
+     36,
+     1022,
+     160
+    ],
+    [
+     988,
+     36,
+     1104,
+     160
+    ]
+   ],
+   "pegados": 3,
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "limite": {
+    "0": [
+     [
+      [
+       734,
+       36
+      ],
+      [
+       862,
+       36
+      ],
+      [
+       862,
+       96
+      ],
+      [
+       848,
+       112
+      ],
+      [
+       838,
+       128
+      ],
+      [
+       832,
+       160
+      ],
+      [
+       734,
+       160
+      ]
+     ]
+    ],
+    "1": [
+     [
+      [
+       858,
+       36
+      ],
+      [
+       946,
+       36
+      ],
+      [
+       946,
+       68
+      ],
+      [
+       941,
+       72
+      ],
+      [
+       936,
+       80
+      ],
+      [
+       943,
+       83
+      ],
+      [
+       943,
+       97
+      ],
+      [
+       928,
+       99
+      ],
+      [
+       929,
+       110
+      ],
+      [
+       929,
+       120
+      ],
+      [
+       921,
+       128
+      ],
+      [
+       913,
+       136
+      ],
+      [
+       911,
+       145
+      ],
+      [
+       912,
+       160
+      ],
+      [
+       828,
+       160
+      ],
+      [
+       828,
+       128
+      ],
+      [
+       850,
+       105
+      ],
+      [
+       860,
+       98
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       946,
+       36
+      ],
+      [
+       1022,
+       36
+      ],
+      [
+       1022,
+       112
+      ],
+      [
+       996,
+       118
+      ],
+      [
+       990,
+       135
+      ],
+      [
+       990,
+       160
+      ],
+      [
+       911,
+       160
+      ],
+      [
+       911,
+       148
+      ],
+      [
+       920,
+       138
+      ],
+      [
+       930,
+       126
+      ],
+      [
+       938,
+       114
+      ],
+      [
+       942,
+       104
+      ],
+      [
+       941,
+       86
+      ],
+      [
+       946,
+       80
+      ]
+     ]
+    ],
+    "3": [
+     [
+      [
+       1020,
+       36
+      ],
+      [
+       1104,
+       36
+      ],
+      [
+       1104,
+       160
+      ],
+      [
+       988,
+       160
+      ],
+      [
+       988,
+       128
+      ],
+      [
+       1004,
+       114
+      ],
+      [
+       1016,
+       104
+      ],
+      [
+       1019,
+       96
+      ]
+     ]
+    ]
+   },
+   "fondoOscuro": {
+    "lumMax": 24,
+    "lisoMax": 3,
+    "areaMin": 12,
+    "crecer": 4,
+    "pelar": 0,
+    "cabeza": false,
+    "proteger": [
+     [
+      828,
+      40,
+      862,
+      64
+     ],
+     [
+      900,
+      42,
+      950,
+      70
+     ],
+     [
+      988,
+      42,
+      1022,
+      68
+     ],
+     [
+      1062,
+      46,
+      1102,
+      72
+     ]
+    ]
+   },
+   "incluirUltimo": {
+    "0": [
+     [
+      [
+       832,
+       56
+      ],
+      [
+       834,
+       52
+      ],
+      [
+       838,
+       50
+      ],
+      [
+       844,
+       49
+      ],
+      [
+       849,
+       50
+      ],
+      [
+       852,
+       53
+      ],
+      [
+       853,
+       58
+      ],
+      [
+       855,
+       62
+      ],
+      [
+       857,
+       66
+      ],
+      [
+       855,
+       68
+      ],
+      [
+       850,
+       64
+      ],
+      [
+       846,
+       61
+      ],
+      [
+       838,
+       60
+      ],
+      [
+       832,
+       60
+      ]
+     ]
+    ],
+    "1": [
+     [
+      [
+       922,
+       58
+      ],
+      [
+       924,
+       53
+      ],
+      [
+       929,
+       50
+      ],
+      [
+       935,
+       49
+      ],
+      [
+       941,
+       50
+      ],
+      [
+       945,
+       54
+      ],
+      [
+       946,
+       60
+      ],
+      [
+       947,
+       64
+      ],
+      [
+       946,
+       67
+      ],
+      [
+       942,
+       65
+      ],
+      [
+       938,
+       62
+      ],
+      [
+       930,
+       61
+      ],
+      [
+       922,
+       61
+      ]
+     ]
+    ]
+   },
+   "excluirUltimo": {
+    "1": [
+     [
+      [
+       900,
+       48
+      ],
+      [
+       921,
+       48
+      ],
+      [
+       921,
+       57
+      ],
+      [
+       917,
+       62
+      ],
+      [
+       910,
+       64
+      ],
+      [
+       900,
+       64
+      ]
+     ],
+     [
+      [
+       947,
+       48
+      ],
+      [
+       958,
+       48
+      ],
+      [
+       958,
+       78
+      ],
+      [
+       947,
+       78
+      ]
+     ]
+    ]
+   },
+   "quitarColor": {
+    "2": [
+     {
+      "nota": "sprites-fix: el fondo negro encerrado entre la barba, la remera y el antebrazo (casi negro y neutro: la barba y la piel tienen r > b)",
+      "zona": [
+       [
+        996,
+        71
+       ],
+       [
+        1014,
+        71
+       ],
+       [
+        1014,
+        91
+       ],
+       [
+        997,
+        91
+       ]
+      ],
+      "lumMax": 25,
+      "bMenosRMin": -6
+     }
+    ]
+   },
+   "_notaFix": "Sprites-fix (quinta tanda): en el 2 (y dash[1], su préstamo) sale el «bolsillo» negro entre la cara y el puño con una regla de color en una zona chica (lo casi negro y neutro); con un rectángulo se cortaba la cara. «apoyoX» del 2 con el valor de antes (977,0 px de la hoja).",
+   "apoyoX": {
+    "2": 977.0
+   }
+  },
+  "dash": {
+   "_nota": "Prestado: correr[1..3]. El panel DASH es la misma carrera envuelta en humo y estelas.",
+   "usar": [
+    [
+     "correr",
+     1
+    ],
+    [
+     "correr",
+     2
+    ],
+    [
+     "correr",
+     3
+    ]
+   ]
+  },
+  "guardia": {
+   "_nota": "Panel DEFENSA, 4 cuadros. apoyoX por cuadro: no patina.",
+   "inferencia": "ancho&panel",
+   "region": [
+    12,
+    195,
+    346,
+    313
+   ],
+   "cajas": [
+    [
+     13,
+     195,
+     90,
+     313
+    ],
+    [
+     89,
+     195,
+     174,
+     313
+    ],
+    [
+     173,
+     195,
+     256,
+     313
+    ],
+    [
+     255,
+     195,
+     345,
+     313
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "apoyoX": {
+    "0": 50.5,
+    "1": 132.0,
+    "2": 213.0,
+    "3": 297.5
+   }
+  },
+  "agachado": {
+   "_nota": "Panel AGACHARSE, 3 cuadros.",
+   "inferencia": "ancho&panel",
+   "region": [
+    357,
+    195,
+    641,
+    313
+   ],
+   "cajas": [
+    [
+     358,
+     228,
+     438,
+     313
+    ],
+    [
+     438,
+     228,
+     532,
+     313
+    ],
+    [
+     538,
+     228,
+     632,
+     313
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 4.5,
+    "pasos": 40
+   },
+   "fondoOscuro": {
+    "lumMax": 24,
+    "lisoMax": 3,
+    "areaMin": 30,
+    "crecer": 4,
+    "pelar": 0,
+    "cabeza": {
+     "alto": 20,
+     "ancho": 34
+    }
+   }
+  },
+  "saltar": {
+   "_nota": "Panel SALTAR, 4 cuadros; en [2] la gorra toca la barra azul del título: se pinta antes de inferir y se resta por color.",
+   "inferencia": "ancho",
+   "region": [
+    652,
+    180,
+    1011,
+    313
+   ],
+   "cajas": [
+    [
+     655,
+     222,
+     738,
+     313
+    ],
+    [
+     740,
+     185,
+     832,
+     313
+    ],
+    [
+     832,
+     180,
+     922,
+     310
+    ],
+    [
+     912,
+     210,
+     1009,
+     313
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "pintar": {
+    "2": [
+     {
+      "zona": [
+       832,
+       180,
+       935,
+       197
+      ],
+      "bMenosRMin": 28
+     }
+    ]
+   },
+   "quitarColor": {
+    "2": [
+     {
+      "zona": [
+       832,
+       180,
+       935,
+       197
+      ],
+      "bMenosRMin": 28
+     }
+    ]
+   }
+  },
+  "caer": {
+   "_nota": "saltar[3] dos veces y agachado[0] como aterrizaje: los cuadros del panel CAER traen humo y el primero sale teñido de rosa.",
+   "inferencia": "ancho",
+   "region": [
+    1023,
+    195,
+    1524,
+    313
+   ],
+   "cajas": [
+    [
+     1040,
+     205,
+     1166,
+     313
+    ],
+    [
+     1170,
+     225,
+     1262,
+     313
+    ],
+    [
+     1262,
+     228,
+     1346,
+     313
+    ],
+    [
+     1346,
+     225,
+     1432,
+     313
+    ],
+    [
+     1432,
+     205,
+     1522,
+     313
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "humo": {
+    "lumMin": 70,
+    "satMax": 0.25,
+    "pasos": 4
+   },
+   "usar": [
+    [
+     "saltar",
+     3
+    ],
+    [
+     "saltar",
+     3
+    ],
+    [
+     "agachado",
+     0
+    ]
+   ]
+  },
+  "golpe": {
+   "_nota": "Panel GOLPE 1, 5 cuadros: guardia, guardia, jab, directo (impacto) y guardia. La gorra de [3] y [4] (el modelo la pierde) vuelve con su contorno medido.",
+   "inferencia": "ancho",
+   "region": [
+    12,
+    352,
+    443,
+    472
+   ],
+   "cajas": [
+    [
+     12,
+     352,
+     89,
+     472
+    ],
+    [
+     89,
+     352,
+     173,
+     472
+    ],
+    [
+     173,
+     352,
+     270,
+     472
+    ],
+    [
+     262,
+     352,
+     368,
+     472
+    ],
+    [
+     346,
+     352,
+     441,
+     472
+    ]
+   ],
+   "pegados": 3,
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "impactos": [
+    3
+   ],
+   "incluirUltimo": {
+    "3": [
+     [
+      [
+       306,
+       377
+      ],
+      [
+       307,
+       370
+      ],
+      [
+       311,
+       365
+      ],
+      [
+       317,
+       363
+      ],
+      [
+       323,
+       364
+      ],
+      [
+       327,
+       368
+      ],
+      [
+       328,
+       374
+      ],
+      [
+       330,
+       379
+      ],
+      [
+       326,
+       380
+      ],
+      [
+       321,
+       377
+      ],
+      [
+       312,
+       377
+      ]
+     ]
+    ],
+    "4": [
+     [
+      [
+       393,
+       380
+      ],
+      [
+       394,
+       373
+      ],
+      [
+       398,
+       368
+      ],
+      [
+       404,
+       366
+      ],
+      [
+       410,
+       367
+      ],
+      [
+       413,
+       372
+      ],
+      [
+       414,
+       378
+      ],
+      [
+       416,
+       383
+      ],
+      [
+       411,
+       383
+      ],
+      [
+       405,
+       380
+      ],
+      [
+       396,
+       381
+      ]
+     ]
+    ]
+   }
+  },
+  "patada": {
+   "_nota": "Panel GOLPE 2: usar [1,2,3] = rodilla arriba, patada alta (impacto) y vuelta. La pierna que patea en [2] (bermuda, canilla y zapatilla con la estela) se suma con incluirFinal medido; en [1] se saca la mancha oscura junto a la pierna de apoyo. La caja de [1] arranca en 566 (el brazo que cuelga tocaba el borde).",
+   "inferencia": "ancho",
+   "region": [
+    455,
+    352,
+    842,
+    472
+   ],
+   "cajas": [
+    [
+     458,
+     352,
+     575,
+     472
+    ],
+    [
+     566,
+     352,
+     634,
+     472
+    ],
+    [
+     632,
+     352,
+     778,
+     472
+    ],
+    [
+     745,
+     352,
+     840,
+     472
+    ]
+   ],
+   "pegados": 3,
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "usar": [
+    1,
+    2,
+    3
+   ],
+   "impactos": [
+    1
+   ],
+   "incluirFinal": {
+    "2": [
+     [
+      [
+       693,
+       395
+      ],
+      [
+       702,
+       392
+      ],
+      [
+       715,
+       392
+      ],
+      [
+       724,
+       391
+      ],
+      [
+       735,
+       390
+      ],
+      [
+       745,
+       388
+      ],
+      [
+       751,
+       384
+      ],
+      [
+       760,
+       383
+      ],
+      [
+       767,
+       386
+      ],
+      [
+       769,
+       392
+      ],
+      [
+       766,
+       398
+      ],
+      [
+       757,
+       401
+      ],
+      [
+       748,
+       400
+      ],
+      [
+       738,
+       399
+      ],
+      [
+       726,
+       402
+      ],
+      [
+       722,
+       410
+      ],
+      [
+       714,
+       416
+      ],
+      [
+       703,
+       418
+      ],
+      [
+       693,
+       414
+      ]
+     ]
+    ]
+   },
+   "fondoOscuro": {
+    "lumMax": 24,
+    "lisoMax": 3,
+    "areaMin": 30,
+    "crecer": 4,
+    "pelar": 0,
+    "cabeza": {
+     "alto": 20,
+     "ancho": 34
+    }
+   },
+   "excluirUltimo": {
+    "1": [
+     [
+      [
+       571,
+       438
+      ],
+      [
+       586,
+       438
+      ],
+      [
+       588,
+       446
+      ],
+      [
+       585,
+       456
+      ],
+      [
+       582,
+       468
+      ],
+      [
+       571,
+       468
+      ]
+     ]
+    ]
+   }
+  },
+  "combo": {
+   "_nota": "Panel GOLPE 3: usar [0..4] = guardia, jab, guardia, cruzado y patada lateral (impactos 1, 3 y 4). La gorra de [4..7] y la pierna de la patada de [4] salen de la inferencia del panel (sumar). Quedan afuera [5] (el humo y la zapatilla de la patada vecina se le meten entre las piernas), [6] (la estocada pierde la gorra y la pierna de adelante) y [7] (el arco rojo y el puño en el destello). En [1] y [2], el fondo encerrado entre la cara y el puño sale con una pasada de fondoOscuro por zona.",
+   "inferencia": "ancho",
+   "region": [
+    854,
+    352,
+    1524,
+    472
+   ],
+   "cajas": [
+    [
+     854,
+     352,
+     932,
+     472
+    ],
+    [
+     932,
+     352,
+     1016,
+     472
+    ],
+    [
+     1012,
+     352,
+     1080,
+     472
+    ],
+    [
+     1078,
+     352,
+     1176,
+     472
+    ],
+    [
+     1167,
+     352,
+     1270,
+     472
+    ],
+    [
+     1256,
+     352,
+     1336,
+     472
+    ],
+    [
+     1298,
+     352,
+     1418,
+     472
+    ],
+    [
+     1400,
+     352,
+     1522,
+     472
+    ]
+   ],
+   "pintar": "rojos",
+   "quitarColor": [
+    "rojos",
+    "rojosOscuros"
+   ],
+   "pegados": 3,
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "usar": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "impactos": [
+    1,
+    3,
+    4
+   ],
+   "limite": {
+    "5": [
+     [
+      [
+       1256,
+       352
+      ],
+      [
+       1336,
+       352
+      ],
+      [
+       1336,
+       438
+      ],
+      [
+       1306,
+       442
+      ],
+      [
+       1303,
+       472
+      ],
+      [
+       1256,
+       472
+      ]
+     ]
+    ]
+   },
+   "humo": {
+    "5": {
+     "lumMin": 45,
+     "lumMax": 170,
+     "satMax": 0.25,
+     "pasos": 5,
+     "zona": [
+      1256,
+      440,
+      1336,
+      472
+     ]
+    }
+   },
+   "sumar": {
+    "4": [
+     {
+      "modo": "panel",
+      "zona": [
+       1188,
+       356,
+       1236,
+       390
+      ]
+     },
+     {
+      "modo": "panel",
+      "zona": [
+       1214,
+       398,
+       1272,
+       432
+      ]
+     }
+    ],
+    "5": [
+     {
+      "modo": "panel",
+      "zona": [
+       1272,
+       356,
+       1312,
+       390
+      ]
+     }
+    ],
+    "6": [
+     {
+      "modo": "panel",
+      "zona": [
+       1362,
+       356,
+       1402,
+       390
+      ]
+     },
+     {
+      "modo": "panel",
+      "zona": [
+       [
+        1366,
+        426
+       ],
+       [
+        1352,
+        434
+       ],
+       [
+        1336,
+        440
+       ],
+       [
+        1318,
+        446
+       ],
+       [
+        1303,
+        452
+       ],
+       [
+        1300,
+        472
+       ],
+       [
+        1332,
+        472
+       ],
+       [
+        1342,
+        458
+       ],
+       [
+        1368,
+        448
+       ]
+      ]
+     }
+    ],
+    "7": [
+     {
+      "modo": "panel",
+      "zona": [
+       1452,
+       356,
+       1492,
+       390
+      ]
+     }
+    ]
+   },
+   "fondoOscuro": {
+    "0": {
+     "lumMax": 24,
+     "lisoMax": 3,
+     "areaMin": 30,
+     "crecer": 4,
+     "pelar": 0,
+     "cabeza": {
+      "alto": 20,
+      "ancho": 34
+     }
+    },
+    "3": {
+     "lumMax": 24,
+     "lisoMax": 3,
+     "areaMin": 30,
+     "crecer": 4,
+     "pelar": 0,
+     "cabeza": {
+      "alto": 20,
+      "ancho": 34
+     }
+    },
+    "4": {
+     "lumMax": 24,
+     "lisoMax": 3,
+     "areaMin": 30,
+     "crecer": 4,
+     "pelar": 0,
+     "cabeza": {
+      "alto": 20,
+      "ancho": 34
+     }
+    },
+    "1": [
+     {
+      "lumMax": 24,
+      "lisoMax": 3,
+      "areaMin": 30,
+      "crecer": 4,
+      "pelar": 0,
+      "cabeza": {
+       "alto": 20,
+       "ancho": 34
+      }
+     },
+     {
+      "zona": [
+       994,
+       374,
+       1014,
+       399
+      ],
+      "lumMax": 30,
+      "areaMin": 8,
+      "suavizar": 1,
+      "pelar": 0,
+      "cabeza": false
+     }
+    ],
+    "2": [
+     {
+      "lumMax": 24,
+      "lisoMax": 3,
+      "areaMin": 30,
+      "crecer": 4,
+      "pelar": 0,
+      "cabeza": {
+       "alto": 20,
+       "ancho": 34
+      }
+     },
+     {
+      "zona": [
+       1068,
+       374,
+       1088,
+       401
+      ],
+      "lumMax": 30,
+      "areaMin": 8,
+      "suavizar": 1,
+      "pelar": 0,
+      "cabeza": false
+     }
+    ]
+   },
+   "excluirUltimo": {
+    "1": [
+     [
+      1010,
+      452,
+      1017,
+      473
+     ]
+    ]
+   }
+  },
+  "herramienta1": {
+   "_nota": "«Remate»: combo[2], combo[3] (cruzado) y combo[4] (patada lateral); impactos 1 y 2. Los mismos rectángulos del combo.",
+   "usar": [
+    [
+     "combo",
+     2
+    ],
+    [
+     "combo",
+     3
+    ],
+    [
+     "combo",
+     4
+    ]
+   ],
+   "impactos": [
+    1,
+    2
+   ]
+  },
+  "herramienta2": {
+   "_nota": "Alias de la patada: impacto en la patada alta.",
+   "alias": "patada",
+   "usar": [
+    1,
+    2,
+    3
+   ],
+   "impactos": [
+    1
+   ]
+  },
+  "especial1": {
+   "_nota": "«Orden Final»: primeros planos INJERTADOS (escala 0,6, corteDonante): [0] mano en el pecho, cortado en el ruedo de la remera, sobre las piernas de quieto[0] (sus manos en los bolsillos completan el brazo que cuelga) y [1] señalando al rival sobre las piernas de golpe[3] (el directo, la misma postura). usar [0,0,1,1], impacto 2 (el dedo que señala; los anillos dorados los dibuja el render). Fuera: E1_2 y E1_4 (el destello en la punta del dedo y los anillos encima del cuerpo: el modelo se queda sin la remera) y los cuadros del rival. El pelarFondo y el humo van sólo en la franja de abajo: en todo el cuadro se comían la gorra y el borde de la remera. La estela dorada que cruza el brazo que señala se reconstruye en la hoja antes de inferir (limpiezasColor, raíz del JSON): sin eso el brazo salía rayado. Sprites-fix (quinta tanda): el injerto de [1] (el que señala) va con \"solape\" 6 (el motor usa 3): con 3 quedaba una línea transparente de 1-2 px entre el ruedo de la remera y la bermuda, que en el juego se veía como un cinturón claro.",
+   "inferencia": "ancho",
+   "region": [
+    13,
+    505,
+    1524,
+    640
+   ],
+   "cajas": [
+    [
+     20,
+     512,
+     112,
+     640
+    ],
+    [
+     150,
+     512,
+     300,
+     640
+    ],
+    [
+     330,
+     512,
+     445,
+     640
+    ]
+   ],
+   "pintar": "dorados",
+   "quitarColor": "dorados",
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3,
+    "zona": [
+     13,
+     598,
+     1524,
+     640
+    ]
+   },
+   "humo": {
+    "lumMin": 45,
+    "lumMax": 165,
+    "satMax": 0.22,
+    "pasos": 4,
+    "zona": [
+     13,
+     600,
+     1524,
+     640
+    ]
+   },
+   "injerto": {
+    "donante": [
+     "quieto",
+     0
+    ],
+    "escala": 0.6,
+    "cuadros": {
+     "0": {
+      "corte": 621,
+      "corteDonante": 101
+     },
+     "1": {
+      "corte": 633,
+      "corteDonante": 429,
+      "donante": [
+       "golpe",
+       3
+      ],
+      "solape": 6
+     },
+     "2": {
+      "corte": 633,
+      "corteDonante": 429,
+      "donante": [
+       "golpe",
+       3
+      ]
+     }
+    }
+   },
+   "usar": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "impactos": [
+    2
+   ]
+  },
+  "especial2": {
+   "_nota": "«Espinas»: primeros planos injertados sobre las piernas de quieto[0] (escala 0,63): [0] se saca la gorra, [1] el pelo se le para en púas doradas (con la gorra en la mano), [2] mano en la cabeza con las púas doradas, [3] el pelo en púas oscuras (cabeza gacha) y otra vez [3] como impacto (las púas que salen las dibuja el render con el efecto «pua»). Las púas del pelo son PARTE DEL CUERPO (el pelo), dorado en [1] y [2] y oscuro en [3]: el brillo lo hace el render. Las púas oscuras de [3] vuelven con incluirLum. Fuera: E2_5 a E2_7 (agachado tirando púas: el modelo pierde el cuerpo entre las púas que vuelan). La base del pelo de [3] (entre las púas y la frente) vuelve con su contorno medido (incluirUltimo).",
+   "inferencia": "ancho",
+   "region": [
+    12,
+    670,
+    1524,
+    810
+   ],
+   "cajas": [
+    [
+     18,
+     672,
+     125,
+     804
+    ],
+    [
+     128,
+     672,
+     250,
+     804
+    ],
+    [
+     250,
+     672,
+     354,
+     804
+    ],
+    [
+     490,
+     672,
+     575,
+     804
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3,
+    "zona": [
+     12,
+     770,
+     1524,
+     810
+    ]
+   },
+   "humo": {
+    "lumMin": 45,
+    "lumMax": 165,
+    "satMax": 0.22,
+    "pasos": 4,
+    "zona": [
+     12,
+     775,
+     1524,
+     810
+    ]
+   },
+   "injerto": {
+    "donante": [
+     "quieto",
+     0
+    ],
+    "escala": 0.63,
+    "cuadros": {
+     "0": {
+      "corte": 802,
+      "corteDonante": 101
+     },
+     "1": {
+      "corte": 802,
+      "corteDonante": 101
+     },
+     "2": {
+      "corte": 802,
+      "corteDonante": 101
+     },
+     "3": {
+      "corte": 802,
+      "corteDonante": 101
+     }
+    }
+   },
+   "impactos": [
+    4
+   ],
+   "incluirLum": {
+    "3": [
+     {
+      "zona": [
+       512,
+       686,
+       568,
+       728
+      ],
+      "lumMin": 24,
+      "rellenar": false
+     }
+    ]
+   },
+   "usar": [
+    0,
+    1,
+    2,
+    3,
+    3
+   ],
+   "rellenar": 80,
+   "incluirUltimo": {
+    "3": [
+     [
+      [
+       515,
+       708
+      ],
+      [
+       528,
+       704
+      ],
+      [
+       548,
+       704
+      ],
+      [
+       560,
+       708
+      ],
+      [
+       562,
+       716
+      ],
+      [
+       552,
+       722
+      ],
+      [
+       540,
+       724
+      ],
+      [
+       528,
+       724
+      ],
+      [
+       518,
+       720
+      ]
+     ]
+    ]
+   }
+  },
+  "danio": {
+   "_nota": "ko[0], danio[2] y ko[0]: en el panel RECIBIR DAÑO, [0], [1] y [3] están SIN gorra (pelo largo revuelto) y el personaje no se reconoce; se usan los cuadros con gorra. Inferencia «ancho» (la del panel perdía las zapatillas). Escala 0,84.",
+   "inferencia": "ancho",
+   "region": [
+    12,
+    839,
+    326,
+    986
+   ],
+   "cajas": [
+    [
+     12,
+     839,
+     80,
+     986
+    ],
+    [
+     80,
+     839,
+     146,
+     986
+    ],
+    [
+     146,
+     839,
+     212,
+     986
+    ],
+    [
+     210,
+     839,
+     263,
+     986
+    ],
+    [
+     262,
+     839,
+     324,
+     986
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 4.5,
+    "pasos": 40
+   },
+   "escala": 0.84,
+   "pegados": 3,
+   "usar": [
+    [
+     "ko",
+     0
+    ],
+    2,
+    [
+     "ko",
+     0
+    ]
+   ],
+   "fondoOscuro": {
+    "lumMax": 24,
+    "lisoMax": 3,
+    "areaMin": 30,
+    "crecer": 4,
+    "pelar": 0,
+    "cabeza": {
+     "alto": 20,
+     "ancho": 34
+    }
+   }
+  },
+  "ko": {
+   "_nota": "Panel KO, 3 cuadros: de pie encorvado, más encorvado y tendido boca abajo (la pierna doblada encima es del dibujo). Escala 0,84. La caja de [2] arranca en 448 (la zapatilla tocaba el borde); pegados 2 saca el pie del cuadro vecino.",
+   "inferencia": "ancho",
+   "region": [
+    337,
+    839,
+    656,
+    986
+   ],
+   "cajas": [
+    [
+     339,
+     839,
+     402,
+     986
+    ],
+    [
+     400,
+     839,
+     470,
+     986
+    ],
+    [
+     448,
+     915,
+     652,
+     986
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "escala": 0.84,
+   "pegados": 2
+  },
+  "levantarse": {
+   "_nota": "Panel LEVANTARSE, 4 cuadros. Escala 0,84.",
+   "inferencia": "ancho&panel",
+   "region": [
+    667,
+    839,
+    923,
+    987
+   ],
+   "cajas": [
+    [
+     667,
+     895,
+     732,
+     987
+    ],
+    [
+     732,
+     868,
+     795,
+     987
+    ],
+    [
+     795,
+     860,
+     856,
+     987
+    ],
+    [
+     856,
+     839,
+     921,
+     987
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "escala": 0.84
+  },
+  "victoria": {
+   "_nota": "Panel VICTORIA, 3 cuadros. Escala 0,84.",
+   "inferencia": "ancho&panel",
+   "region": [
+    934,
+    839,
+    1217,
+    987
+   ],
+   "cajas": [
+    [
+     938,
+     839,
+     1022,
+     987
+    ],
+    [
+     1030,
+     839,
+     1122,
+     987
+    ],
+    [
+     1125,
+     839,
+     1212,
+     987
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "escala": 0.84
+  },
+  "burla": {
+   "_nota": "usar [0,1]: señala al rival y abre los brazos mirando al frente (el último mira al rival, sin utilería). El tercero es DE ESPALDAS y no se usa. Escala 0,84.",
+   "inferencia": "ancho&panel",
+   "region": [
+    1229,
+    839,
+    1524,
+    987
+   ],
+   "cajas": [
+    [
+     1229,
+     845,
+     1322,
+     987
+    ],
+    [
+     1316,
+     845,
+     1436,
+     987
+    ],
+    [
+     1436,
+     839,
+     1522,
+     987
+    ]
+   ],
+   "pelarFondo": {
+    "lumMax": 34,
+    "stdMax": 3.5,
+    "pasos": 40,
+    "bMenosRMin": 3
+   },
+   "escala": 0.84,
+   "usar": [
+    0,
+    1
+   ]
+  }
+ },
+ "efectos": {
+  "pua": {
+   "caja": [
+    1132,
+    718,
+    1177,
+    741
+   ],
+   "inferencia": "caja",
+   "limite": [
+    [
+     [
+      1136,
+      723
+     ],
+     [
+      1150,
+      722
+     ],
+     [
+      1160,
+      725
+     ],
+     [
+      1173,
+      729
+     ],
+     [
+      1160,
+      733
+     ],
+     [
+      1150,
+      736
+     ],
+     [
+      1136,
+      737
+     ],
+     [
+      1142,
+      730
+     ]
+    ]
+   ],
+   "incluir": [
+    [
+     [
+      1136,
+      723
+     ],
+     [
+      1150,
+      722
+     ],
+     [
+      1160,
+      725
+     ],
+     [
+      1173,
+      729
+     ],
+     [
+      1160,
+      733
+     ],
+     [
+      1150,
+      736
+     ],
+     [
+      1136,
+      737
+     ],
+     [
+      1142,
+      730
+     ]
+    ]
+   ],
+   "rellenar": 200
+  }
+ },
+ "limpiezasColor": [
+  {
+   "nota": "la estela dorada que cruza el brazo que señala en «Orden Final» (E1_1): se reconstruye la piel antes de inferir",
+   "zona": [
+    [
+     196,
+     536
+    ],
+    [
+     302,
+     536
+    ],
+    [
+     302,
+     566
+    ],
+    [
+     196,
+     566
+    ]
+   ],
+   "rMenosBMin": 70,
+   "satMin": 0.5,
+   "lumMin": 120,
+   "dilatar": 1,
+   "radio": 3
+  }
+ ]
+}

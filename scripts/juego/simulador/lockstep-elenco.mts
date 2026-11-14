@@ -1,5 +1,5 @@
 /**
- * Banco de pruebas del lockstep online con el elenco de 13: dos clientes con el motor REAL, el
+ * Banco de pruebas del lockstep online con el elenco (21 desde la quinta tanda): dos clientes con el motor REAL, el
  * loop.ts REAL (con requestAnimationFrame simulado), el lockstep y una red simulada (latencia,
  * jitter, pérdida, entrega en orden como WebSocket). Compara el hash de CADA tick de los dos lados.
  * Los cruces son de barberos nuevos (agarre, nube, onda, chorros, cura, bumerán) y el bot aprieta
@@ -23,7 +23,6 @@ const [latArg, jitArg, perArg, semArg] = process.argv.slice(2)
 const LAT = Number(latArg ?? 190)
 const JIT = Number(jitArg ?? 30)
 const PERDIDA = Number(perArg ?? 0.01)
-const PARTIDAS = Number(semArg ?? 8)
 
 const META = {} as Record<IdPersonaje, MetaAnimaciones>
 for (const id of IDS_PERSONAJES) {
@@ -40,7 +39,21 @@ const CRUCES: [IdPersonaje, IdPersonaje][] = [
   ['nico_u', 'brian'],
   ['lucas', 'guillermo'],
   ['rodrigo', 'joaquin'],
+  // Quinta tanda (14/nov): la contra, el hipnotizado, el cegado, el agarre en el aire, el robo de carga y
+  // la devolución (con tiros del rival que se pueden devolver: el lente, las cartas, las herramientas).
+  ['chino', 'fran'],
+  ['lautaro', 'leo'],
+  ['nacho', 'nehuen'],
+  ['nehuen', 'chino'],
+  ['fran', 'nehuen'],
+  ['leo', 'nacho'],
+  // Las púas clavadas, el monopatín que acelera, el Despido y la Presencia.
+  ['nico_m', 'tony'],
+  ['tony', 'nehuen'],
+  ['nico_m', 'chino'],
 ]
+/** Por defecto, una partida por cruce (eran 8: los 8 cruces del elenco de 13). */
+const PARTIDAS = Number(semArg ?? CRUCES.length)
 
 /** mulberry32 para el bot y la red (fuera del motor). */
 function rng(semilla: number) {

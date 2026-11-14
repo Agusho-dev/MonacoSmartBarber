@@ -25,7 +25,8 @@ export interface Sprites {
   estrella5: HTMLCanvasElement[]
   /**
    * Estallidos de golpe: 0 fuego, 1 azul (bloqueo), 2 oro (crítico), 3 eléctrico, 4 hielo,
-   * 5 violeta (graffiti, grito), 6 verde (curación, gas).
+   * 5 violeta (graffiti, grito), 6 verde (curación, gas); desde la quinta tanda, 7 rojo (las cartas de
+   * Chino) y 8 cian (el código de Nacho).
    */
   estallido: HTMLCanvasElement[]
   /**
@@ -510,6 +511,8 @@ export function crearSprites(): Sprites {
       estallido('#E9FCFF', '#38B6FF'),
       estallido('#FFE3FF', '#A855F7'),
       estallido('#E9FFE6', '#22C55E'),
+      estallido('#FFE4EA', '#E11D48'),
+      estallido('#E0FBFF', '#06B6D4'),
     ],
     nube: [
       nube('#B9AE9F', 0.55),

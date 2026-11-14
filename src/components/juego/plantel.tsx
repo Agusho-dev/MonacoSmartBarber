@@ -1,6 +1,6 @@
 'use client'
 
-import { Heart, Lock, MapPin, Scissors, Sparkles, Trophy } from 'lucide-react'
+import { Crown, Heart, Lock, MapPin, Scissors, Sparkles, Trophy } from 'lucide-react'
 import type { CSSProperties, Ref } from 'react'
 import { espejarRetrato, PERSONAJES } from '@/lib/juego/personajes'
 import type { Atributos, EstadisticaPersonaje, FichaPersonaje, FichaProximamente, IdPersonaje } from '@/lib/juego/tipos'
@@ -13,8 +13,9 @@ import { ImagenJuego } from './imagen-juego'
 
 /**
  * Piezas de la elección de luchador, compartidas por la selección contra la CPU y la elección
- * de la pelea online: la grilla de caras, el filtro por sucursal, los «próximamente», la ficha
- * grande del enfocado y su detalle (especiales, pasiva, estadísticas).
+ * de la pelea online: la grilla de caras, el filtro por sucursal, el grupo de los dueños (sólo con
+ * el pase), los «próximamente», la ficha grande del enfocado y su detalle (especiales, pasiva,
+ * estadísticas).
  */
 
 /** A quién se le está eligiendo luchador con la grilla. */
@@ -73,10 +74,11 @@ export function GrillaPlantel({
   barbero = null,
   bloqueada = false,
   etiquetaRival = 'CPU',
+  etiqueta,
   onElegir,
   ref,
 }: {
-  ids: IdPersonaje[]
+  ids: readonly IdPersonaje[]
   jugador: IdPersonaje
   /** Sin rival (online): sólo se marca el propio. */
   rival?: IdPersonaje | null
@@ -86,12 +88,19 @@ export function GrillaPlantel({
   /** Online, ya confirmó: no se puede cambiar. */
   bloqueada?: boolean
   etiquetaRival?: string
+  /** El nombre del grupo para el lector de pantalla (por defecto, «Elegí tu barbero» o «Elegí el rival»). */
+  etiqueta?: string
   onElegir: (id: IdPersonaje) => void
   ref?: Ref<HTMLDivElement>
 }) {
   const enfocado = modo === 'rival' && rival ? rival : jugador
   return (
-    <div ref={ref} className="cf-plantel" role="group" aria-label={modo === 'rival' ? 'Elegí el rival' : 'Elegí tu barbero'}>
+    <div
+      ref={ref}
+      className="cf-plantel"
+      role="group"
+      aria-label={etiqueta ?? (modo === 'rival' ? 'Elegí el rival' : 'Elegí tu barbero')}
+    >
       {ids.map((id) => {
         const f = PERSONAJES[id]
         const esJugador = id === jugador
@@ -142,6 +151,28 @@ export function GrillaPlantel({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+// ─── Los dueños (sólo con el pase) ─────────────────────────────────────────────
+
+/**
+ * El grupo «Dueños»: los personajes `soloDuenos`, aparte de los barberos y fuera del filtro por
+ * sucursal. Sólo lo dibuja quien tiene el pase de dueños (src/lib/juego/ui/pase-duenos.ts): sin
+ * pase o sin personajes de dueños, `ids` llega vacío y no se dibuja nada. Las mismas caras y marcas
+ * que la grilla de los barberos (es una `GrillaPlantel`).
+ */
+export function GrupoDuenos({ ids, ...grilla }: Omit<Parameters<typeof GrillaPlantel>[0], 'etiqueta' | 'ref'>) {
+  if (ids.length === 0) return null
+  return (
+    <div className="cf-duenos">
+      <p className="cf-duenos__rotulo">
+        <Crown aria-hidden="true" />
+        <span>Dueños</span>
+        <small>Con tu pase · no van al ranking</small>
+      </p>
+      <GrillaPlantel ids={ids} {...grilla} etiqueta="Los dueños" />
     </div>
   )
 }
@@ -298,6 +329,15 @@ export function VictoriasLuchador({
   stats: EstadisticaPersonaje[] | null
   local: RegistroPersonaje | undefined
 }) {
+  // Las peleas con un dueño no se guardan: no hay porcentaje que mostrar (ni «estrenalo»).
+  if (ficha.soloDuenos) {
+    return (
+      <div className="cf-bloque cf-victorias">
+        <Crown aria-hidden="true" />
+        <span>Personaje de los dueños: sus peleas no van al ranking ni a las estadísticas.</span>
+      </div>
+    )
+  }
   const global = stats?.find((s) => s.personaje === ficha.id) ?? null
   return (
     <div className="cf-bloque cf-victorias">

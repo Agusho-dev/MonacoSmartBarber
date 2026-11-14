@@ -9,9 +9,14 @@
  * un «jugador humano simple» (sólo aprieta GOLPE cerca y a veces guardia) contra la CPU. Verifica
  * invariantes (terminan, sin NaN, dentro del escenario, nadie trabado, cuadros válidos), que todo
  * ocurra alguna vez (cada especial y cada efecto del elenco), la duración de los rounds y un
- * balance grueso (cada luchador entre 40 y 60 %). El balance fino (13×13, las metas del dueño)
- * está en balance.mts, con hilos. Si existen los atlas reales (public/juego/personajes/<id>/atlas.json)
+ * balance grueso (cada luchador entre 40 y 60 %). El balance fino (las metas del dueño) está en
+ * balance.mts, con hilos. Si existen los atlas reales (public/juego/personajes/<id>/atlas.json)
  * usa su meta; si no, la meta típica. Sale con código 1 si algo no da.
+ *
+ * Quinta tanda (14/nov): los personajes de los dueños (los que sólo eligen los dueños) no entran en el
+ * balance de los barberos: los barberos se miden entre ellos y los dueños entre ellos (con más
+ * semillas, porque son pocos); los cruces dueño contra barbero corren para los invariantes y para que
+ * aparezca todo, y su % se informa sin ser meta.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,7 +34,7 @@ import type {
 import { CLAVES_ANIMACION, ENTRADA_VACIA, TPS } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
 import { duracionesDeRounds } from '../../../src/lib/juego/motor/partida.ts'
-import { IDS_PERSONAJES } from '../../../src/lib/juego/personajes.ts'
+import { IDS_PERSONAJES, PERSONAJES as FICHAS } from '../../../src/lib/juego/personajes.ts'
 
 const REPO = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '')
 const ARGS = process.argv.slice(2)
@@ -42,6 +47,18 @@ const MAX_TICKS = 6 * 60 * TPS
 const TRABADO_TICKS = 6 * TPS
 const PERSONAJES: IdPersonaje[] = [...IDS_PERSONAJES]
 const DIFICULTADES: Dificultad[] = ['facil', 'normal', 'dificil']
+/**
+ * Los personajes de los dueños: la ficha los marca con `soloDuenos` (lo suma el frente de acceso de la
+ * quinta tanda); mientras no esté, la lista del diseño.
+ */
+const DUENOS_T5: readonly string[] = ['nacho', 'nehuen', 'nico_m', 'tony']
+const esDueno = (id: IdPersonaje) => (FICHAS[id] as { soloDuenos?: boolean }).soloDuenos === true || DUENOS_T5.includes(id)
+const BARBEROS = PERSONAJES.filter((id) => !esDueno(id))
+const DUENOS = PERSONAJES.filter((id) => esDueno(id))
+/** Semillas de los cruces entre dueños (son pocos: con las de siempre, el % de cada uno salía con ± 6). */
+const SEMILLAS_DUENOS = Number(ARGS.find((a) => a.startsWith('--semillasDuenos='))?.split('=')[1] ?? (RAPIDO ? 4 : 36))
+/** Semillas de los cruces dueño contra barbero (invariantes y que aparezca todo; el % no es meta). */
+const SEMILLAS_CRUCE = Number(ARGS.find((a) => a.startsWith('--semillasCruce='))?.split('=')[1] ?? (RAPIDO ? 1 : 2))
 
 // ─── Meta de animaciones ─────────────────────────────────────────────────────
 
@@ -357,10 +374,12 @@ const t0 = performance.now()
 const fallas: string[] = []
 const resultadosCpu: { pj: [IdPersonaje, IdPersonaje]; dif: Dificultad; r: Resultado }[] = []
 let semillaBase = 1000
+/** Cuántas semillas por cruce: barberos entre ellos, dueños entre ellos o un cruce de grupos. */
+const semillasDe = (a: IdPersonaje, b: IdPersonaje) => (esDueno(a) !== esDueno(b) ? SEMILLAS_CRUCE : esDueno(a) ? SEMILLAS_DUENOS : SEMILLAS)
 for (const dif of DIFICULTADES) {
   for (const a of PERSONAJES) {
     for (const b of PERSONAJES) {
-      for (let s = 0; s < SEMILLAS; s++) {
+      for (let s = 0; s < semillasDe(a, b); s++) {
         const semilla = semillaBase++ * 7919
         const r = jugar([a, b], dif, semilla, null)
         resultadosCpu.push({ pj: [a, b], dif, r })
@@ -376,10 +395,12 @@ for (let s = 0; s < (RAPIDO ? 4 : 12); s++) {
 }
 
 const resultadosHumano: { dif: Dificultad; humano: IdPersonaje; cpu: IdPersonaje; gano: boolean; r: Resultado }[] = []
+// La persona juega con cualquiera contra las CPU de los barberos (con un dueño, una semilla por cruce:
+// es lo que juegan los dueños con su pase).
 for (const dif of DIFICULTADES) {
   for (const hu of PERSONAJES) {
-    for (const cp of PERSONAJES) {
-      for (let s = 0; s < SEMILLAS_HUMANO; s++) {
+    for (const cp of BARBEROS) {
+      for (let s = 0; s < (esDueno(hu) ? 1 : SEMILLAS_HUMANO); s++) {
         const semilla = semillaBase++ * 104729
         const r = jugar([hu, cp], dif, semilla, 0)
         resultadosHumano.push({ dif, humano: hu, cpu: cp, gano: r.ganador === 0, r })
@@ -418,16 +439,31 @@ for (const { pj, dif, r } of resultadosCpu) {
     }
   }
 }
-// Balance grueso por luchador (el fino, con las metas del dueño, en balance.mts).
+// Balance grueso por luchador (el fino, con las metas del dueño, en balance.mts): los barberos contra
+// los barberos y los dueños contra los dueños; el cruce de grupos se informa aparte (no es meta).
 const balance: Record<string, Record<string, number>> = {}
+const cruce: Record<string, Record<string, number>> = {}
 for (const dif of DIFICULTADES) {
-  const d = porDif[dif]
+  const g: Record<string, [number, number]> = {}
+  const gc: Record<string, [number, number]> = {}
+  for (const { pj, dif: d, r } of resultadosCpu) {
+    if (d !== dif || pj[0] === pj[1] || r.ganador === null) continue
+    const mismoGrupo = esDueno(pj[0]) === esDueno(pj[1])
+    for (const lado of [0, 1] as const) {
+      const t = ((mismoGrupo ? g : gc)[pj[lado]] ??= [0, 0])
+      t[0]++
+      if (r.ganador === lado) t[1]++
+    }
+  }
   balance[dif] = {}
+  cruce[dif] = {}
   for (const id of PERSONAJES) {
-    const g = d.gana[id] ?? [0, 0]
-    const pct = (100 * g[1]) / Math.max(1, g[0])
+    const x = g[id] ?? [0, 0]
+    const pct = (100 * x[1]) / Math.max(1, x[0])
     balance[dif][id] = pct
-    if (!RAPIDO && (pct < 40 || pct > 60)) fallas.push(`balance en ${dif}: ${id} gana ${pct.toFixed(1)} % (fuera de 40–60)`)
+    if (x[0] > 0 && !RAPIDO && (pct < 40 || pct > 60)) fallas.push(`balance en ${dif}: ${id} gana ${pct.toFixed(1)} % contra ${esDueno(id) ? 'los dueños' : 'los barberos'} (fuera de 40–60)`)
+    const y = gc[id]
+    if (y) cruce[dif][id] = (100 * y[1]) / Math.max(1, y[0])
   }
 }
 
@@ -460,6 +496,24 @@ const DEBEN_OCURRIR: [string, string][] = [
   ...(['bombo', 'navaja', 'guante', 'moto', 'bala', 'break', 'graffiti', 'trago', 'botella', 'baile', 'onda', 'gorro', 'dragon', 'pelota', 'leche', 'panal', 'mate', 'agua', 'agarre', 'sismo'] as const).map(
     (h): [string, string] => [`herramienta:${h}`, `golpe de ${h}`],
   ),
+  // Quinta tanda (14/nov): con qué pega cada especial nuevo y sus eventos (de cada uno, si está en el catálogo).
+  ...(
+    [
+      ['chino', ['carta', 'dominio'], ['contra']],
+      ['fran', ['hipnosis', 'tijera'], ['hipnotizado', 'precision']],
+      ['lautaro', ['gigante', 'lanzamiento'], []],
+      ['leo', ['secador', 'aerosol'], ['cegado']],
+      ['nacho', ['laptop', 'ejecucion', 'codigo'], ['carga_robada']],
+      ['nehuen', ['fantasma', 'paleta'], ['devuelto']],
+      ['nico_m', ['anillos', 'espinas'], ['pinchazo', 'plantada']],
+      ['tony', ['monopatin', 'despido'], ['despido']],
+    ] as const
+  )
+    .filter(([id]) => (PERSONAJES as string[]).includes(id))
+    .flatMap(([id, hs, evs]): [string, string][] => [
+      ...hs.map((h): [string, string] => [`herramienta:${h}`, `${id}: golpe de ${h}`]),
+      ...evs.map((e): [string, string] => [`ev:${e}`, `${id}: evento ${e}`]),
+    ]),
   ['ev:agarre', 'agarre'],
   ['ev:aturdido', 'aturdido'],
   ['ev:mareado', 'mareado'],
@@ -487,17 +541,20 @@ const pct = (n: number, d: number) => `${((100 * n) / Math.max(1, d)).toFixed(1)
 const prom = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length)
 console.log(`\nCORTE FINAL — simulador del motor (${(ms / 1000).toFixed(1)} s)`)
 console.log(`meta: ${PERSONAJES.map((id) => `${id} = ${ORIGEN_META[id]}`).join('; ')}`)
-console.log(`partidas CPU vs CPU: ${resultadosCpu.length}; humano simple vs CPU: ${resultadosHumano.length}; metas raras: ${RAPIDO ? 4 : 12}`)
+console.log(`partidas CPU vs CPU: ${resultadosCpu.length} (barberos ${BARBEROS.length}: ${SEMILLAS} semillas por cruce; dueños ${DUENOS.length}: ${SEMILLAS_DUENOS}; cruces de grupo: ${SEMILLAS_CRUCE}); humano simple vs CPU de los barberos: ${resultadosHumano.length}; metas raras: ${RAPIDO ? 4 : 12}`)
 console.log(`terminan: ${todos.length - noTerminan}/${todos.length} (máx ${(maxTicks / TPS / 60).toFixed(2)} min simulados)`)
 console.log(`violaciones (NaN, fuera de escenario, cuadros, trabados): ${conViolaciones.length} partidas`)
 console.log(`round medio CPU vs CPU: ${mediaRound.toFixed(1)} s`)
 for (const dif of DIFICULTADES) {
   const d = porDif[dif]
   const rs = d.rounds.map((x) => x / TPS)
-  const vals = Object.values(balance[dif])
+  const vals = BARBEROS.map((id) => balance[dif][id])
   console.log(
-    `  ${dif.padEnd(7)} round ${prom(rs).toFixed(1)} s (min ${Math.min(...rs).toFixed(1)}, máx ${Math.max(...rs).toFixed(1)}) · KO ${d.kos} / tiempo ${d.tiempos} · victorias por luchador entre ${Math.min(...vals).toFixed(1)} y ${Math.max(...vals).toFixed(1)} %`,
+    `  ${dif.padEnd(7)} round ${prom(rs).toFixed(1)} s (min ${Math.min(...rs).toFixed(1)}, máx ${Math.max(...rs).toFixed(1)}) · KO ${d.kos} / tiempo ${d.tiempos} · victorias por barbero entre ${Math.min(...vals).toFixed(1)} y ${Math.max(...vals).toFixed(1)} %`,
   )
+  console.log(`          barberos: ${BARBEROS.map((id) => `${id} ${balance[dif][id].toFixed(1)}`).join(' · ')}`)
+  if (DUENOS.length > 1) console.log(`          dueños entre ellos: ${DUENOS.map((id) => `${id} ${balance[dif][id].toFixed(1)}`).join(' · ')}`)
+  if (DUENOS.length) console.log(`          cruce (no es meta): ${PERSONAJES.map((id) => `${id} ${(cruce[dif][id] ?? 0).toFixed(1)}`).join(' · ')}`)
 }
 for (const dif of DIFICULTADES) {
   const h = humano[dif]

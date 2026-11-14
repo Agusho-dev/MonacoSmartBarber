@@ -17,11 +17,12 @@
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getClientIP, rateLimit } from '@/lib/rate-limit'
-import { buildAppUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
-import { IDS_PERSONAJES } from '@/lib/juego/personajes'
+import { IDS_PARA_CLIENTES, IDS_PERSONAJES, esSoloDuenos, peleaConDuenos } from '@/lib/juego/personajes'
 import { IDS_ARENAS } from '@/lib/juego/arenas'
 import { firmarTokenJuego, leerTokenJuego } from '@/lib/juego/token'
+import { leerPaseDuenos, paseConfigurado } from '@/lib/juego/pase'
+import type { RespuestaPaseDuenos } from '@/lib/juego/ui/pase-duenos'
 import {
   APODO_ANONIMO,
   LIMITE_GUARDAR_IP,
@@ -40,6 +41,7 @@ import {
   orgDelJuego,
   sucursalPorId,
   sucursalPorSlug,
+  urlDelJuego,
   validarApodo,
   type SucursalJuego,
 } from '@/lib/juego/servidor'
@@ -52,9 +54,6 @@ import type {
   IdPersonaje,
   PeriodoRanking,
 } from '@/lib/juego/tipos'
-
-/** El dominio propio de «Corte Final» (next.config.ts, HOST_JUEGO). */
-const ORIGEN_JUEGO = 'https://juego.monacobarberstudio.com'
 
 const ERROR_GUARDAR = 'No pudimos guardar la partida. Probá de nuevo en un rato.'
 const ERROR_DATOS = 'Los datos de la partida no son válidos.'
@@ -371,6 +370,13 @@ export async function guardarPartidaJuego(input: PartidaAGuardar): Promise<Respu
   }
   const p = parseo.data
 
+  // Una pelea con un personaje de los dueños (`soloDuenos`) no entra al ranking ni a las
+  // estadísticas de los barberos. La pantalla del resultado ya no la manda: esto la frena si igual
+  // llega (antes de tocar la base, como el apodo; con 'datos' no entra a la cola de pendientes).
+  if (peleaConDuenos(p.personaje as IdPersonaje, p.rival as IdPersonaje)) {
+    return { ok: false, error: 'Las peleas con los dueños no se guardan.', motivo: 'datos' }
+  }
+
   const apodo = validarApodo(p.apodo)
   if (!apodo.ok) return { ok: false, error: apodo.error, motivo: 'apodo' }
 
@@ -507,8 +513,9 @@ export async function obtenerRankingJuego(
     }
 
     const filas: FilaRanking[] = ((data ?? []) as FilaRankingSql[])
-      // Un luchador que salió del catálogo no se puede dibujar: su fila no se muestra.
-      .filter((f) => esPersonaje(f.personaje))
+      // Un luchador que salió del catálogo no se puede dibujar: su fila no se muestra. Tampoco la
+      // de un dueño (sus peleas no se guardan; si alguna quedó, el ranking es de los clientes).
+      .filter((f) => esPersonaje(f.personaje) && !esSoloDuenos(f.personaje))
       // Las peleas que se cerraron sin confirmar apodo se guardan como «Anónimo» para las
       // estadísticas de los barberos, pero no compiten en el ranking.
       .filter((f) => f.apodo !== APODO_ANONIMO)
@@ -536,7 +543,8 @@ interface FilaEstadisticaSql {
 /**
  * Peleas y victorias por personaje del jugador, de todas las sucursales. Un
  * personaje sin partidas va con 0 (es un dato, no una falla: si la lectura
- * falla la respuesta es `{ ok: false }`).
+ * falla la respuesta es `{ ok: false }`). Sólo los barberos: las peleas con los
+ * dueños no se guardan y sus personajes no viajan a ningún celular por acá.
  */
 export async function obtenerEstadisticasPersonajes(): Promise<
   { ok: true; datos: EstadisticaPersonaje[] } | { ok: false; error: string }
@@ -550,7 +558,7 @@ export async function obtenerEstadisticasPersonajes(): Promise<
       return { ok: false, error: ERROR_ESTADISTICAS }
     }
     const porPersonaje = new Map(((data ?? []) as FilaEstadisticaSql[]).map((f) => [f.personaje, f]))
-    const datos: EstadisticaPersonaje[] = IDS_PERSONAJES.map((id) => ({
+    const datos: EstadisticaPersonaje[] = IDS_PARA_CLIENTES.map((id) => ({
       personaje: id,
       peleas: porPersonaje.get(id)?.peleas ?? 0,
       victorias: porPersonaje.get(id)?.victorias ?? 0,
@@ -618,13 +626,38 @@ export async function crearEnlaceJuego(
 
     const token = firmarTokenJuego({ queueEntryId, branchId: entrada.branch_id })
     if (!token) return { ok: false, error: 'No pudimos armar el enlace del juego.' }
-    // En producción el QR va al dominio propio del juego (HOST_JUEGO en next.config.ts): ahí la raíz es
-    // el juego y borrando la ruta no se llega al login del sistema. En desarrollo y en las vistas
-    // previas, al mismo host de siempre.
-    const base = process.env.VERCEL_ENV === 'production' ? `${ORIGEN_JUEGO}/` : `${await buildAppUrl()}/juego`
-    return { ok: true, url: `${base}?t=${token}` }
+    // En producción el QR va al dominio propio del juego; en desarrollo y en las vistas previas, al
+    // mismo host de siempre (urlDelJuego, servidor.ts).
+    return { ok: true, url: await urlDelJuego(`t=${token}`) }
   } catch (e) {
     console.error('[juego] crearEnlaceJuego:', mensaje(e))
     return { ok: false, error: 'No pudimos armar el enlace del juego.' }
+  }
+}
+
+// ── El pase de dueños ───────────────────────────────────────────────────────
+
+/**
+ * Valida el pase de dueños que trajo el link de «Jugar como dueño» (`?d=`) o que el celular ya tenía
+ * guardado (src/lib/juego/ui/pase-duenos.ts): firma, vencimiento y que sea de la organización del
+ * juego (src/lib/juego/pase.ts). No escribe nada. `invalido: true` = no vale (alterado, vencido, de
+ * otra organización o mal formado) y el celular lo borra sin avisar; `invalido: false` = no se pudo
+ * revisar (la base o el secreto) y el celular lo guarda para preguntar más tarde. Nunca tira.
+ */
+export async function validarPaseDuenos(pase: string): Promise<RespuestaPaseDuenos> {
+  if (typeof pase !== 'string' || pase.length === 0 || pase.length > 400) return { ok: false, invalido: true }
+  // Sin secreto no se puede validar nada, pero eso es del servidor, no del pase: que no lo borre.
+  if (!paseConfigurado()) {
+    console.error('[juego] validarPaseDuenos: sin secreto configurado')
+    return { ok: false, invalido: false }
+  }
+  try {
+    const orgId = await orgDelJuego(createAdminClient())
+    const datos = leerPaseDuenos(pase, orgId)
+    if (!datos) return { ok: false, invalido: true }
+    return { ok: true, venceEn: datos.venceEn }
+  } catch (e) {
+    console.error('[juego] validarPaseDuenos:', mensaje(e))
+    return { ok: false, invalido: false }
   }
 }

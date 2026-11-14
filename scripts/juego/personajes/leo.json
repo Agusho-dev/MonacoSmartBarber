@@ -1,0 +1,1757 @@
+{
+  "_nota": "Leo para «Corte Final» (cuarta tanda, 31/oct/2026), hoja de 18 paneles (1536x1024, foto realista). Se procesa con scripts/juego/extraer_leo.py (atajo de extraer_lautaro.py, que envuelve el motor de extraer_gabriel.py). El fondo es casi del mismo negro que el jean y el pelo: los parches de fondo que el modelo se traga salen con «fondoOscuro» con «lisoMax» (lo oscuro y LISO; el jean tiene pliegues y roturas).",
+  "personaje": "leo",
+  "hoja": "../../../../juego-fuentes/leo_anim.jpg",
+  "salida": "../../../public/juego/personajes/leo",
+  "reglas": {},
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho&panel",
+      "region": [
+        12,
+        34,
+        350,
+        165
+      ],
+      "cajas": [
+        [
+          14,
+          34,
+          85,
+          165
+        ],
+        [
+          85,
+          34,
+          156,
+          165
+        ],
+        [
+          156,
+          34,
+          224,
+          165
+        ],
+        [
+          224,
+          34,
+          286,
+          165
+        ],
+        [
+          286,
+          34,
+          350,
+          165
+        ]
+      ],
+      "fondoOscuro": {
+        "0": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              62,
+              88,
+              70,
+              108
+            ],
+            "lumMax": 32,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          },
+          {
+            "zona": [
+              31,
+              90,
+              38,
+              108
+            ],
+            "lumMax": 32,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "1": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              101,
+              90,
+              109,
+              106
+            ],
+            "lumMax": 32,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "2": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "3": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "4": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        }
+      },
+      "pegados": 2,
+      "usar": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "_nota": "el quieto es la respiración de pie (0 y 1, cada uno repetido 3 veces: ≈ 0,4 s por pose a 8 cuadros/s); el celular (2), los brazos cruzados (3) y la mano en el pelo (4) van a la burla",
+      "apoyoX": {
+        "0": 52.0,
+        "1": 118.5,
+        "2": 191.5,
+        "3": 257.5,
+        "4": 314.5
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina",
+      "quitarColor": {"0": [{"nota": "sprites-fix: la sombra negra del piso a la derecha de la punta de la zapatilla de adelante (E4)", "zona": [[69, 153], [81, 153], [81, 166], [74, 166], [74, 159], [72, 157], [69, 156]], "lumMax": 40}]}
+    },
+    "caminar": {
+      "inferencia": "ancho",
+      "region": [
+        362,
+        34,
+        716,
+        165
+      ],
+      "cajas": [
+        [
+          362,
+          34,
+          434,
+          165
+        ],
+        [
+          432,
+          34,
+          505,
+          165
+        ],
+        [
+          500,
+          34,
+          562,
+          165
+        ],
+        [
+          560,
+          34,
+          632,
+          165
+        ],
+        [
+          630,
+          34,
+          716,
+          165
+        ]
+      ],
+      "pegados": 2,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      }
+    },
+    "correr": {
+      "inferencia": "panel",
+      "region": [
+        729,
+        34,
+        1103,
+        165
+      ],
+      "cajas": [
+        [
+          729,
+          34,
+          843,
+          165
+        ],
+        [
+          802,
+          34,
+          930,
+          165
+        ],
+        [
+          902,
+          34,
+          1020,
+          165
+        ],
+        [
+          990,
+          34,
+          1103,
+          165
+        ]
+      ],
+      "pegados": 2,
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "1": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "2": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              990,
+              72,
+              1012,
+              97
+            ],
+            "lumMax": 40,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "3": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        }
+      },
+      "_notaCajas": "las cajas se pisan 12 px: el pie de atrás de cada corredor entra en la caja del anterior («pegados» deja afuera el puño del vecino)",
+      "quitarColor": {"2": [{"nota": "sprites-fix: la sombra negra del piso delante de la zapatilla de adelante (E3; también dash[1])", "zona": [[983, 148], [997, 148], [997, 167], [986, 167], [986, 161], [984, 156]], "lumMax": 40}]}
+    },
+    "dash": {
+      "_nota": "los tres cuadros del DASH de la hoja son la carrera envuelta en humo: se prestan los de «correr» (mismo rectángulo del atlas)",
+      "usar": [
+        [
+          "correr",
+          1
+        ],
+        [
+          "correr",
+          2
+        ],
+        [
+          "correr",
+          3
+        ]
+      ]
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "region": [
+        12,
+        200,
+        346,
+        329
+      ],
+      "cajas": [
+        [
+          12,
+          200,
+          96,
+          329
+        ],
+        [
+          96,
+          200,
+          178,
+          329
+        ],
+        [
+          178,
+          200,
+          262,
+          329
+        ],
+        [
+          262,
+          200,
+          346,
+          329
+        ]
+      ],
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "1": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              159,
+              270,
+              168,
+              288
+            ],
+            "lumMax": 32,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "2": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "3": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              314,
+              255,
+              324,
+              274
+            ],
+            "lumMax": 32,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ]
+      },
+      "pegados": 2,
+      "apoyoX": {
+        "0": 53.5,
+        "1": 137.0,
+        "2": 219.5,
+        "3": 303.0
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina",
+      "_notaExcluir": "31/oct (corrección): sin «excluir»: los cuadriláteros de 1 y 3 dejaban paredes rectas. En el 3 el antebrazo que cuelga es del dibujo y queda; en el 1 lo de al lado de la remera es la mano movida (marrón, semitransparente) y sale por color («quitarColor»), sin tocar la remera ni el jean",
+      "quitarColor": {
+        "1": [
+          {
+            "nota": "el brazo «fantasma» (la mano movida del dibujo, marrón y semitransparente) al costado de la remera: r − b de 25 a 80; la remera crema no pasa de 22 y el jean es gris",
+            "zona": [
+              152,
+              244,
+              172,
+              273
+            ],
+            "rMenosBMin": 24
+          }
+        ]
+      }
+    },
+    "agachado": {
+      "inferencia": "ancho",
+      "region": [
+        358,
+        200,
+        639,
+        329
+      ],
+      "cajas": [
+        [
+          358,
+          200,
+          434,
+          329
+        ],
+        [
+          434,
+          200,
+          504,
+          329
+        ],
+        [
+          504,
+          200,
+          572,
+          329
+        ],
+        [
+          572,
+          200,
+          639,
+          329
+        ]
+      ],
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "cajas": [
+        [
+          652,
+          200,
+          738,
+          329
+        ],
+        [
+          728,
+          186,
+          842,
+          329
+        ],
+        [
+          842,
+          176,
+          1012,
+          329
+        ]
+      ],
+      "usar": [
+        0,
+        1,
+        2
+      ],
+      "region": [
+        652,
+        176,
+        1012,
+        329
+      ],
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2
+    },
+    "caer": {
+      "inferencia": "ancho",
+      "region": [
+        1025,
+        200,
+        1524,
+        329
+      ],
+      "cajas": [
+        [
+          1025,
+          200,
+          1162,
+          329
+        ],
+        [
+          1160,
+          200,
+          1242,
+          329
+        ],
+        [
+          1242,
+          200,
+          1337,
+          329
+        ],
+        [
+          1337,
+          200,
+          1425,
+          329
+        ],
+        [
+          1425,
+          200,
+          1524,
+          329
+        ]
+      ],
+      "usar": [
+        [
+          "saltar",
+          2
+        ],
+        0,
+        0,
+        3,
+        4
+      ],
+      "pegados": 2,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "_nota": "SALTAR tiene 3 cuadros en la hoja (agachado, subiendo, arriba con el brazo estirado): la caída es saltar[2] y la bajada con el brazo estirado (caer 0); el aterrizaje, los agachados 3 y 4 de la hoja (el 1 y el 2 traen humo y polvo)"
+    },
+    "golpe": {
+      "inferencia": "ancho",
+      "region": [
+        12,
+        365,
+        449,
+        482
+      ],
+      "cajas": [
+        [
+          12,
+          365,
+          118,
+          482
+        ],
+        [
+          112,
+          365,
+          212,
+          482
+        ],
+        [
+          206,
+          365,
+          345,
+          482
+        ]
+      ],
+      "impactos": [
+        2
+      ],
+      "pegados": 2,
+      "escala": 0.92,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "sombra": {
+        "zona": [
+          12,
+          465,
+          449,
+          482
+        ],
+        "lumMax": 20,
+        "recuperar": 1
+      },
+      "_nota": "GOLPE BÁSICO 1 (TIJERA) de la hoja: avanza con la tijera y corta (impacto en el 2)",
+      "incluirLum": {
+        "0": [
+          {
+            "zona": [
+              105,
+              376,
+              139,
+              412
+            ],
+            "lumMin": 50,
+            "suavizar": 1,
+            "rellenar": false
+          }
+        ],
+        "2": [
+          {
+            "zona": [
+              322,
+              372,
+              357,
+              409
+            ],
+            "lumMin": 50,
+            "suavizar": 1,
+            "rellenar": false
+          }
+        ]
+      }
+    },
+    "patada": {
+      "inferencia": "ancho",
+      "region": [
+        462,
+        365,
+        896,
+        482
+      ],
+      "cajas": [
+        [
+          462,
+          365,
+          560,
+          482
+        ],
+        [
+          554,
+          365,
+          668,
+          482
+        ],
+        [
+          662,
+          365,
+          815,
+          482
+        ]
+      ],
+      "impactos": [
+        2
+      ],
+      "pegados": 2,
+      "escala": 0.92,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "sombra": {
+        "zona": [
+          462,
+          465,
+          896,
+          482
+        ],
+        "lumMax": 20,
+        "recuperar": 1
+      },
+      "_nota": "La hoja de Leo no tiene patada: el panel GOLPE BÁSICO 2 (MÁQUINA) va en el lugar de la patada (embiste con la máquina, impacto en el 2)",
+      "incluirLum": {
+        "1": [
+          {
+            "zona": [
+              655,
+              376,
+              690,
+              404
+            ],
+            "lumMin": 50,
+            "suavizar": 1,
+            "rellenar": false
+          }
+        ],
+        "2": [
+          {
+            "zona": [
+              780,
+              372,
+              812,
+              404
+            ],
+            "lumMin": 50,
+            "suavizar": 1,
+            "rellenar": false
+          }
+        ]
+      }
+    },
+    "combo": {
+      "inferencia": "panel",
+      "region": [
+        908,
+        365,
+        1524,
+        482
+      ],
+      "cajas": [
+        [
+          905,
+          365,
+          1000,
+          482
+        ],
+        [
+          994,
+          365,
+          1105,
+          482
+        ],
+        [
+          1096,
+          365,
+          1200,
+          482
+        ],
+        [
+          1186,
+          365,
+          1292,
+          482
+        ],
+        [
+          1266,
+          365,
+          1374,
+          482
+        ],
+        [
+          1360,
+          365,
+          1455,
+          482
+        ]
+      ],
+      "impactos": [
+        1,
+        3,
+        5
+      ],
+      "pegados": 2,
+      "escala": 0.92,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "inferenciaPorCuadro": {
+        "0": "ancho"
+      },
+      "sombra": {
+        "zona": [
+          905,
+          465,
+          1524,
+          482
+        ],
+        "lumMax": 20,
+        "recuperar": 1
+      },
+      "usar": [
+        1,
+        2,
+        [
+          "patada",
+          1
+        ],
+        [
+          "patada",
+          2
+        ],
+        4,
+        [
+          "golpe",
+          2
+        ]
+      ],
+      "excluir": {
+        "4": [
+          [
+            [
+              1266,
+              420
+            ],
+            [
+              1277,
+              420
+            ],
+            [
+              1277,
+              482
+            ],
+            [
+              1266,
+              482
+            ]
+          ]
+        ]
+      },
+      "_nota": "COMBO de la hoja: 6 cuadros con estelas, chispas y el rival al final (el 3 sale roto entre los escombros y el 5 trae el destello y la pierna del rival): el combo es tijera (1, 2) → máquina (patada[1], patada[2]) → tijera (4, golpe[2]), con impactos en el 1, el 3 y el 5."
+    },
+    "herramienta1": {
+      "_nota": "botón MÁQUINA = la MÁQUINA de la hoja (el panel GOLPE BÁSICO 2, en «patada»): Leo pega de verdad con la máquina, así que el botón no es un «Remate» del combo como en las otras hojas de 18",
+      "alias": "patada",
+      "usar": [
+        0,
+        1,
+        2,
+        1
+      ],
+      "impactos": [
+        2
+      ]
+    },
+    "herramienta2": {
+      "_nota": "2.ª herramienta = la TIJERA de la hoja (GOLPE BÁSICO 1, en «golpe»)",
+      "alias": "golpe",
+      "usar": [
+        0,
+        1,
+        2,
+        1
+      ],
+      "impactos": [
+        2
+      ]
+    },
+    "especial1": {
+      "inferencia": "ancho",
+      "region": [
+        12,
+        518,
+        1524,
+        640
+      ],
+      "cajas": [
+        [
+          30,
+          518,
+          150,
+          640
+        ],
+        [
+          170,
+          518,
+          290,
+          640
+        ],
+        [
+          305,
+          518,
+          440,
+          640
+        ],
+        [
+          455,
+          518,
+          620,
+          640
+        ]
+      ],
+      "impactos": [
+        3
+      ],
+      "escala": 0.82,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2,
+      "sombra": {
+        "zona": [
+          12,
+          622,
+          1524,
+          640
+        ],
+        "lumMax": 20,
+        "recuperar": 1
+      },
+      "piernas": {
+        "0": [{"de": ["guardia", 0], "forma": [67, 309, 96, 329], "desde": [79, 311], "hasta": [105, 630], "escala": 1.22}],
+        "1": [{"de": ["guardia", 0], "forma": [67, 309, 96, 329], "desde": [79, 311], "hasta": [245, 630], "escala": 1.22}],
+        "2": [{"de": ["guardia", 0], "forma": [67, 309, 96, 329], "desde": [79, 311], "hasta": [382, 632], "escala": 1.22}],
+        "3": [{"de": ["guardia", 0], "forma": [67, 309, 96, 329], "desde": [79, 311], "hasta": [526, 630], "escala": 1.22}]
+      },
+      "_nota": "LANZAMIENTO DE HERRAMIENTAS: en guardia con la mano adelante (0), la tijera en la mano (1, 2), la suelta (3, el impacto: el último cuadro). Las herramientas que vuelan son efectos del atlas («secador», «tijera»). La fila está dibujada 1,12 veces más grande que la de los golpes (escala 0,82) y el borde del panel le corta el pie de adelante: «piernas» le pone la zapatilla derecha de guardia[0].",
+      "excluir": {
+        "0": [
+          [
+            12,
+            637,
+            1524,
+            641
+          ]
+        ],
+        "1": [
+          [
+            12,
+            637,
+            1524,
+            641
+          ]
+        ],
+        "2": [
+          [
+            12,
+            637,
+            1524,
+            641
+          ]
+        ],
+        "3": [
+          [
+            12,
+            637,
+            1524,
+            641
+          ]
+        ]
+      },
+      "incluirLum": {
+        "2": [{"nota": "quinta tanda: la pierna de adelante (el modelo no la tomó en este cuadro)", "zona": [[352, 606], [372, 606], [392, 626], [392, 637], [350, 637]], "lumMin": 18}],
+        "3": [{"zona": [586, 546, 614, 570], "lumMin": 50, "suavizar": 1, "rellenar": false}]
+      },
+      "excluirUltimo": {
+        "0": [[[70, 626], [101, 626], [103, 630], [103, 641], [70, 641]]],
+        "1": [[[211, 627], [241, 627], [243, 630], [243, 641], [211, 641]]]
+      },
+      "apoyoX": {"2": 361.0}
+    },
+    "especial2": {
+      "inferencia": "ancho",
+      "region": [
+        12,
+        675,
+        1524,
+        803
+      ],
+      "cajas": [
+        [
+          14,
+          675,
+          120,
+          803
+        ],
+        [
+          160,
+          675,
+          270,
+          803
+        ],
+        [
+          315,
+          675,
+          440,
+          803
+        ],
+        [
+          485,
+          675,
+          630,
+          803
+        ],
+        [
+          840,
+          675,
+          1010,
+          803
+        ]
+      ],
+      "impactos": [
+        4
+      ],
+      "escala": 0.725,
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "1": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "2": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "3": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "4": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              893,
+              750,
+              906,
+              778
+            ],
+            "lumMax": 40,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ]
+      },
+      "pegados": 2,
+      "sombra": {
+        "zona": [
+          12,
+          785,
+          1524,
+          803
+        ],
+        "lumMax": 20,
+        "recuperar": 1
+      },
+      "piernas": {
+        "0": [
+          {
+            "de": [
+              "guardia",
+              0
+            ],
+            "forma": [
+              67,
+              309,
+              96,
+              329
+            ],
+            "desde": [
+              79,
+              311
+            ],
+            "hasta": [
+              89,
+              792
+            ],
+            "escala": 1.38
+          }
+        ],
+        "1": [
+          {
+            "de": [
+              "guardia",
+              0
+            ],
+            "forma": [
+              67,
+              309,
+              96,
+              329
+            ],
+            "desde": [
+              79,
+              311
+            ],
+            "hasta": [
+              245,
+              792
+            ],
+            "escala": 1.38
+          }
+        ],
+        "2": [
+          {
+            "de": [
+              "guardia",
+              0
+            ],
+            "forma": [
+              67,
+              309,
+              96,
+              329
+            ],
+            "desde": [
+              79,
+              311
+            ],
+            "hasta": [
+              387,
+              792
+            ],
+            "escala": 1.38
+          }
+        ],
+        "3": [
+          {
+            "de": [
+              "guardia",
+              0
+            ],
+            "forma": [
+              67,
+              309,
+              96,
+              329
+            ],
+            "desde": [
+              79,
+              311
+            ],
+            "hasta": [
+              559,
+              792
+            ],
+            "escala": 1.38
+          }
+        ],
+        "4": [
+          {
+            "de": [
+              "guardia",
+              0
+            ],
+            "forma": [
+              67,
+              309,
+              96,
+              329
+            ],
+            "desde": [
+              79,
+              311
+            ],
+            "hasta": [
+              910,
+              792
+            ],
+            "escala": 1.38
+          }
+        ]
+      },
+      "excluir": {
+        "0": [
+          [
+            12,
+            800,
+            1524,
+            804
+          ]
+        ],
+        "1": [
+          [
+            12,
+            800,
+            1524,
+            804
+          ]
+        ],
+        "2": [
+          [
+            12,
+            800,
+            1524,
+            804
+          ]
+        ],
+        "3": [
+          [
+            12,
+            800,
+            1524,
+            804
+          ]
+        ],
+        "4": [
+          [
+            12,
+            800,
+            1524,
+            804
+          ],
+          [
+            [
+              905,
+              752
+            ],
+            [
+              934,
+              752
+            ],
+            [
+              934,
+              792
+            ],
+            [
+              925,
+              789
+            ],
+            [
+              915,
+              781
+            ],
+            [
+              905,
+              775
+            ]
+          ]
+        ]
+      },
+      "_nota": "SPRAY CEGADOR: saca el aerosol (0), lo agita (1, 2), lo apunta (3) y rocía con el brazo estirado (4, el impacto). La nube del spray y los rivales cegados los dibuja el render; la lata va como efecto «aerosol». La fila está dibujada 1,27 veces más grande que la de los golpes (escala 0,725) y el borde del panel le corta el pie de adelante: «piernas» le pone la zapatilla derecha de guardia[0]."
+    },
+    "danio": {
+      "inferencia": "ancho",
+      "region": [
+        12,
+        839,
+        308,
+        989
+      ],
+      "cajas": [
+        [
+          12,
+          839,
+          88,
+          989
+        ],
+        [
+          88,
+          839,
+          170,
+          989
+        ],
+        [
+          170,
+          839,
+          240,
+          989
+        ],
+        [
+          240,
+          839,
+          308,
+          989
+        ]
+      ],
+      "escala": 0.91,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2,
+      "excluir": {
+        "0": [
+          [
+            12,
+            845,
+            29,
+            880
+          ],
+          [
+            12,
+            893,
+            23,
+            932
+          ]
+        ]
+      },
+      "excluirUltimo": {
+        "0": [
+          [
+            [
+              36,
+              850
+            ],
+            [
+              54,
+              850
+            ],
+            [
+              54,
+              868
+            ],
+            [
+              46,
+              874
+            ],
+            [
+              36,
+              878
+            ]
+          ],
+          [
+            [
+              18,
+              906
+            ],
+            [
+              31,
+              906
+            ],
+            [
+              29,
+              930
+            ],
+            [
+              18,
+              932
+            ]
+          ]
+        ]
+      }
+    },
+    "ko": {
+      "inferencia": "ancho",
+      "region": [
+        321,
+        839,
+        615,
+        989
+      ],
+      "cajas": [
+        [
+          321,
+          839,
+          420,
+          989
+        ],
+        [
+          405,
+          839,
+          527,
+          989
+        ],
+        [
+          500,
+          839,
+          615,
+          989
+        ]
+      ],
+      "ancla": "caja",
+      "escala": 0.91,
+      "fondoOscuro": {
+        "0": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        },
+        "1": [
+          {
+            "lumMax": 26,
+            "lisoMax": 3.5,
+            "areaMin": 25,
+            "pelar": 0,
+            "crecer": 10,
+            "lisoCrecer": 9
+          },
+          {
+            "zona": [
+              510,
+              925,
+              516,
+              958
+            ],
+            "lumMax": 30,
+            "suavizar": 1,
+            "areaMin": 6,
+            "pelar": 0,
+            "cabeza": false
+          }
+        ],
+        "2": {
+          "lumMax": 26,
+          "lisoMax": 3.5,
+          "areaMin": 25,
+          "pelar": 0,
+          "crecer": 10,
+          "lisoCrecer": 9
+        }
+      },
+      "pegados": 2,
+      "excluir": {
+        "1": [
+          [
+            [
+              504,
+              958
+            ],
+            [
+              527,
+              956
+            ],
+            [
+              527,
+              986
+            ],
+            [
+              504,
+              986
+            ]
+          ]
+        ]
+      },
+      "_nota": "KO: se sienta (0), cae en cuatro patas (1) y queda tendido boca abajo (2). En el 1 la zapatilla del cuerpo de al lado entraba en la caja: «excluir»",
+      "rellenarUltimo": {
+        "0": 120
+      }
+    },
+    "levantarse": {
+      "inferencia": "ancho",
+      "region": [
+        628,
+        839,
+        895,
+        989
+      ],
+      "cajas": [
+        [
+          628,
+          839,
+          707,
+          989
+        ],
+        [
+          707,
+          839,
+          803,
+          989
+        ],
+        [
+          803,
+          839,
+          895,
+          989
+        ]
+      ],
+      "escala": 0.91,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2
+    },
+    "victoria": {
+      "inferencia": "ancho",
+      "region": [
+        908,
+        839,
+        1181,
+        989
+      ],
+      "cajas": [
+        [
+          908,
+          839,
+          994,
+          989
+        ],
+        [
+          994,
+          839,
+          1070,
+          989
+        ],
+        [
+          1070,
+          839,
+          1181,
+          989
+        ]
+      ],
+      "escala": 0.91,
+      "fondoOscuro": {
+        "lumMax": 26,
+        "lisoMax": 3.5,
+        "areaMin": 25,
+        "pelar": 0,
+        "crecer": 10,
+        "lisoCrecer": 9
+      },
+      "pegados": 2,
+      "apoyoX": {
+        "0": 954.5,
+        "1": 1032.5,
+        "2": 1128.5
+      },
+      "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+    },
+    "burla": {
+      "_nota": "los tres cuadros de la BURLA de la hoja están cortados en las canillas por el borde del panel (sin zapatillas): la burla son los cuadros del quieto que no usa el quieto: mira el celular (quieto[2]), se acomoda el pelo (quieto[4]) y cruza los brazos mirando al frente (quieto[3]; el último, el que queda a la vista hasta «¡A pelear!»)",
+      "usar": [
+        [
+          "quieto",
+          2
+        ],
+        [
+          "quieto",
+          4
+        ],
+        [
+          "quieto",
+          3
+        ]
+      ]
+    }
+  },
+  "retrato": {
+    "anim": "quieto",
+    "cuadro": 0,
+    "alto": 720,
+    "cara": {
+      "anim": "especial2",
+      "cuadro": 0,
+      "lado": 46,
+      "arriba": 3,
+      "filas": 12,
+      "dx": 2
+    },
+    "_nota": "retrato de cuerpo entero del quieto; la cara sale de especial2[0] (la fila del Spray está dibujada 1,38 veces más grande y con la cara iluminada; en el quieto la cara queda en sombra y en la grilla de 43 px no se leía)"
+  },
+  "efectos": {
+    "secador": {
+      "caja": [
+        990,
+        519,
+        1060,
+        555
+      ],
+      "inferencia": "brillo",
+      "lumMin": 40,
+      "dilatar": 1,
+      "escala": 0.82,
+      "limite": [
+        [
+          [
+            999,
+            531
+          ],
+          [
+            1012,
+            527
+          ],
+          [
+            1030,
+            525
+          ],
+          [
+            1046,
+            521
+          ],
+          [
+            1058,
+            527
+          ],
+          [
+            1059,
+            548
+          ],
+          [
+            1046,
+            553
+          ],
+          [
+            1030,
+            550
+          ],
+          [
+            1012,
+            547
+          ],
+          [
+            999,
+            543
+          ],
+          [
+            995,
+            537
+          ]
+        ]
+      ]
+    },
+    "tijera": {
+      "caja": [
+        1070,
+        544,
+        1140,
+        588
+      ],
+      "inferencia": "brillo",
+      "lumMin": 75,
+      "dilatar": 1,
+      "escala": 0.82,
+      "limite": [
+        [
+          [
+            1074,
+            546
+          ],
+          [
+            1100,
+            549
+          ],
+          [
+            1138,
+            557
+          ],
+          [
+            1138,
+            581
+          ],
+          [
+            1100,
+            587
+          ],
+          [
+            1076,
+            587
+          ]
+        ]
+      ]
+    },
+    "aerosol": {
+      "caja": [
+        394,
+        704,
+        418,
+        748
+      ],
+      "inferencia": "brillo",
+      "lumMin": 32,
+      "dilatar": 1,
+      "escala": 0.725,
+      "limite": [
+        [
+          [
+            399,
+            708
+          ],
+          [
+            408,
+            708
+          ],
+          [
+            410,
+            712
+          ],
+          [
+            412,
+            744
+          ],
+          [
+            399,
+            744
+          ],
+          [
+            398,
+            712
+          ]
+        ]
+      ],
+      "quitarColor": [
+        {
+          "nota": "la mano que la agarra",
+          "rMenosBMin": 25,
+          "satMin": 0.22
+        }
+      ],
+      "rellenar": 200
+    }
+  }
+}

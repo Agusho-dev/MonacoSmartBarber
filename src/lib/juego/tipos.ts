@@ -33,6 +33,16 @@ export type IdPersonaje =
   | 'lucas'
   | 'stefano'
   | 'brian'
+  // Quinta tanda (14/nov): los cuatro barberos de Paraná y Pueyrredón…
+  | 'chino'
+  | 'fran'
+  | 'lautaro'
+  | 'leo'
+  // …y los dueños, que sólo eligen los dueños (el pase: ver personajes.ts).
+  | 'nacho'
+  | 'nehuen'
+  | 'nico_m'
+  | 'tony'
 export type IdArena = 'rondeau' | 'caseros' | 'pueyrredon' | 'parana'
 export type Dificultad = 'facil' | 'normal' | 'dificil'
 export type Lado = 0 | 1
@@ -86,9 +96,20 @@ export interface AtlasPersonaje {
 /**
  * Sprites sueltos que se pueden sacar de las hojas de los barberos nuevos (todos opcionales).
  * 'pocion' es la bebida de Fabri, 'vaso' el de Guillermo, 'roca' las piedras del sismo de Brian.
+ *
+ * Quinta tanda (14/nov), los que trae cada atlas.json nuevo: 'carta' (el naipe de las Cartas
+ * Malditas de Chino), 'tijeras' (las tijeras grandes del Corte de Precisión de Fran), 'secador',
+ * 'tijera' y 'aerosol' (lo que tira Leo y la lata del Spray; 'tijera' se llama igual que la de Simón:
+ * el render busca primero en el atlas del dueño), 'laptop' (el Laptopazo de Nacho), 'paleta' y
+ * 'pelotita' (la paleta y la pelota de pádel de Nehuen; no se llama 'pelota' para no mezclarse con la
+ * de fútbol de Nahuel, porque el render también busca en el atlas del rival). Lautaro no trae ninguno.
+ * 'pua' (una púa de las Espinas de Nico M., la punta a la derecha: el render la rota según el vuelo),
+ * 'monopatin' (el de Tony volando, horizontal) y 'despido' (el papel del Despido Final, legible).
  */
 export const EFECTOS_ATLAS = [
   'bombo', 'guante', 'pocion', 'graffiti', 'botella', 'vaso', 'gorro', 'pelota', 'panal', 'mamadera', 'mate', 'roca',
+  'carta', 'tijeras', 'secador', 'tijera', 'aerosol', 'laptop', 'paleta', 'pelotita',
+  'pua', 'monopatin', 'despido',
 ] as const
 export type EfectoAtlas = (typeof EFECTOS_ATLAS)[number]
 
@@ -133,6 +154,39 @@ export type IconoEspecial =
   | 'termo'
   | 'agarre'
   | 'sismo'
+  // Quinta tanda (14/nov), uno por especial nuevo (ninguno se repite con los 26 de antes).
+  /** Chino: Cartas Malditas (tres naipes en abanico). */
+  | 'cartas'
+  /** Chino: All In / Dominio (la contra). */
+  | 'dominio'
+  /** Fran: Lentes Hipnóticos. */
+  | 'lentes'
+  /** Fran: Corte de Precisión (la tijera grande). */
+  | 'corte'
+  /** Lautaro: Gigante. */
+  | 'gigante'
+  /** Lautaro: Lanzamiento Aéreo (el agarre que también agarra en el aire). */
+  | 'lanzamiento'
+  /** Leo: Lanzamiento de Herramientas (secadores y tijeras que apuntan). */
+  | 'herramientas'
+  /** Leo: Spray Cegador. */
+  | 'aerosol'
+  /** Nacho: Agarre y Ejecución (el brazo de código). */
+  | 'ejecucion'
+  /** Nacho: Terremoto de Código (las columnas que avanzan). */
+  | 'codigo'
+  /** Nehuen: Desaparecer. */
+  | 'fantasma'
+  /** Nehuen: Smash de Pádel (la paleta que devuelve los tiros). */
+  | 'padel'
+  /** Nico M.: Orden Final (los anillos dorados que cruzan la pantalla). */
+  | 'orden'
+  /** Nico M.: Espinas (las púas que quedan clavadas en el piso). */
+  | 'espinas'
+  /** Tony: Monopatín (el monopatín eléctrico que acelera). */
+  | 'monopatin'
+  /** Tony: Despido Final (el papel y la patada voladora). */
+  | 'despido'
 export type EfectoEspecial =
   | 'electrocuta'
   | 'multigolpe'
@@ -158,6 +212,24 @@ export type EfectoEspecial =
   | 'agarre'
   /** Va por el piso: imbloqueable de pie, se salta. */
   | 'sismo'
+  /**
+   * Contra (el All In de Chino): mientras arma el dominio, el golpe o el tiro que le iba a pegar se
+   * anula y sale la embestida con todo. En el contacto no hace nada (lo hace su pieza, `contra`).
+   */
+  | 'contra'
+  /** Hipnotizado: camina hacia el que lo hipnotizó sin poder hacer nada (los Lentes de Fran). */
+  | 'hipnotiza'
+  /** Con la punta del golpe, siempre crítico (el Corte de Precisión de Fran; lo hace su pieza, `punta`). */
+  | 'precision'
+  /** Cegado: no puede pegar, tirar especiales ni esquivar, pero camina, salta y se cubre (el Spray de Leo). */
+  | 'ciega'
+  /** Devuelve los tiros del rival (el Smash de Nehuen; lo hace su pieza, `devuelve`). */
+  | 'devuelve'
+  /**
+   * Trampa (las Espinas de Nico M.): lo que no pega queda clavado en el piso y tira al que lo pisa. En
+   * el contacto directo no hace nada propio (lo hace su pieza, `trampa`).
+   */
+  | 'trampa'
 
 export interface FichaEspecial {
   nombre: string
@@ -191,6 +263,18 @@ export interface FichaPersonaje {
    * la UI no lo espeja nunca (`espejarRetrato`, personajes.ts). Sin el campo se espeja como siempre.
    */
   retratoFijo?: boolean
+  /**
+   * Personaje de un dueño o jerárquico (pedido del dueño: «que sean sólo seleccionables por nosotros
+   * 4; la idea es que los clientes jueguen con los barberos»). Lo ve y lo elige sólo el celular que
+   * tiene el pase de dueños (Configuración → «Corte Final» → «Jugar como dueño»; src/lib/juego/pase.ts
+   * y ui/pase-duenos.ts), en el grupo «Dueños» de la selección, fuera del filtro por sucursal. Para
+   * un cliente no existe: ni en la grilla, ni de rival por defecto, ni en «Próximamente». Una pelea
+   * contra la CPU con uno de ellos no se guarda (ni ranking ni estadísticas de los barberos: lo
+   * frenan la pantalla del resultado y `guardarPartidaJuego`); online se puede usar. Sin el campo,
+   * cualquiera lo elige. Ayudantes en personajes.ts (`IDS_PARA_CLIENTES`, `IDS_SOLO_DUENOS`,
+   * `idsVisibles`, `esSoloDuenos`, `peleaConDuenos`).
+   */
+  soloDuenos?: true
   rutas: {
     atlas: string
     retrato: string
@@ -334,6 +418,23 @@ export interface LuchadorEstado {
     lento: number
     /** Se está curando (la Curación de Fabri). */
     curando: number
+    /**
+     * Hipnotizado (los Lentes de Fran): camina hacia el que lo hipnotizó sin poder hacer nada; al
+     * llegar a ≈ 95 px se queda quieto un instante y se despierta. Lo despierta también el primer golpe
+     * limpio. Es un estado de control: cuenta para el tope del encierro. Quinta tanda (14/nov).
+     */
+    hipnotizado: number
+    /**
+     * Cegado (el Spray de Leo): no puede pegar, tirar especiales ni esquivar; camina, salta, se agacha
+     * y se cubre. Se le pasa con el primer golpe limpio. No es encierro (tiene el control).
+     */
+    cegado: number
+    /**
+     * Arma el dominio (el All In de Chino): los ticks que le quedan a la ventana de la contra. Mientras
+     * sea > 0, el que le pegue o le tire algo se come la contra. Vuelve a 0 cuando la contra salta (el
+     * evento 'contra') o se termina la ventana. Lo pone la acción, no un golpe.
+     */
+    dominio: number
   }
   /** Golpes seguidos que ESTE luchador metió sin que el rival se recupere. */
   combo: number
@@ -343,8 +444,11 @@ export interface LuchadorEstado {
  * Tiempos de proyectiles que el render necesita para dibujarlos (ticks de `edad`).
  * graffitiEstalla: el graffiti (Graffiti Slam) aparece pintado y estalla a esa edad; antes no
  * pega. Al estallar, `ancho`/`alto` pasan del mural al área de la explosión.
+ * codigoEstalla: cada columna del Terremoto de Código de Nacho (quinta tanda) sube como código ese
+ * rato y recién ahí revienta el piso y pega (`ancho`/`alto` pasan al estallido, como el graffiti).
+ * Los lee el motor (el kit), el render y el audio: se cambian acá y los tres lo siguen.
  */
-export const TIEMPOS_PROYECTIL = { graffitiEstalla: 30 } as const
+export const TIEMPOS_PROYECTIL = { graffitiEstalla: 30, codigoEstalla: 12 } as const
 
 export type TipoProyectil =
   | 'tornado'
@@ -366,10 +470,34 @@ export type TipoProyectil =
   | 'agua'
   | 'sismo'
   | 'guante'
+  // Quinta tanda (14/nov).
+  /** Un naipe de las Cartas Malditas (Chino): recto, gira con `rot`; salen tres a tres alturas. */
+  | 'carta'
+  /** La mirada de los Lentes Hipnóticos (Fran): anillos a la altura de los ojos que se agrandan (`ancho`). */
+  | 'hipnosis'
+  /** Lo que tira Leo (Lanzamiento de Herramientas): recto, apunta al salir (`vy`); secador o tijera por la paridad del `id`. */
+  | 'secador'
+  /** La nube del Spray Cegador (Leo): un chorro que nace en la lata y crece. */
+  | 'aerosol'
+  /** Una columna del Terremoto de Código (Nacho): área fija que estalla a TIEMPOS_PROYECTIL.codigoEstalla. */
+  | 'codigo'
+  /** La pelota de pádel del Smash (Nehuen): recta y rápida. */
+  | 'pelotita'
+  /**
+   * Una púa de las Espinas (Nico M.): vuela en arco; la que toca el piso sin pegar se clava
+   * (ProyectilEstado.plantado) y queda un rato, quieta, esperando que la pisen.
+   */
+  | 'espina'
+  /** El monopatín eléctrico de Tony: sale lento y acelera (`vx` crece en vuelo hasta un tope). */
+  | 'monopatin'
 
 export interface ProyectilEstado {
   id: number
   tipo: TipoProyectil
+  /**
+   * El que lo tiró. Desde la quinta tanda puede CAMBIAR en vuelo: el Smash de Pádel de Nehuen se lo
+   * devuelve al que lo tiró (evento 'devuelto') y desde ahí es de Nehuen (pega al otro, cuenta para él).
+   */
   duenio: Lado
   x: number
   y: number
@@ -390,6 +518,12 @@ export interface ProyectilEstado {
    */
   ancho: number
   alto: number
+  /**
+   * Clavado en el piso (una púa de las Espinas de Nico M., quinta tanda): quieto, `vx` = `vy` = 0, con
+   * la caja de la trampa; sólo le pega al que lo pisa. `edad` sigue contando: se apaga cuando la trampa
+   * cumple su vida (el render la hace titilar al final). false en todos los demás.
+   */
+  plantado: boolean
 }
 
 export interface EstadisticasLuchador {
@@ -477,6 +611,34 @@ export type Herramienta =
   | 'sismo'
   | 'agarre'
   | 'pesado'
+  // Quinta tanda (14/nov): con qué pega cada especial nuevo (el sonido y el destello del golpe).
+  | 'carta'
+  /** La embestida del All In de Chino. */
+  | 'dominio'
+  | 'hipnosis'
+  /** El Gigante de Lautaro (el aplastón). */
+  | 'gigante'
+  /** El agarre aéreo de Lautaro (también lo llevan sus eventos de golpe del revoleo). */
+  | 'lanzamiento'
+  | 'secador'
+  | 'aerosol'
+  /** El Laptopazo de Nacho (su patada de la cadena de GOLPE y su segunda herramienta). */
+  | 'laptop'
+  /** El agarre de Nacho (los apretones y el tirón también la llevan). */
+  | 'ejecucion'
+  | 'codigo'
+  /** El golpe con el que reaparece Nehuen. */
+  | 'fantasma'
+  /** El paletazo y la pelota del Smash de Nehuen. */
+  | 'paleta'
+  /** Los anillos de la Orden Final de Nico M. */
+  | 'anillos'
+  /** Las púas de Nico M. (en vuelo y la clavada que lo tira). */
+  | 'espinas'
+  /** El revoleo y el monopatín de Tony. */
+  | 'monopatin'
+  /** El papel y la patada voladora del Despido Final de Tony. */
+  | 'despido'
 
 export type EventoJuego =
   | { tipo: 'presentacion' }
@@ -519,6 +681,44 @@ export type EventoJuego =
   | { tipo: 'sismo'; quien: Lado; x: number }
   /** Un tiro de una ráfaga de arma (fogonazo y sonido) en (x, y) del mundo. */
   | { tipo: 'disparo'; quien: Lado; x: number; y: number }
+  // Quinta tanda (14/nov).
+  /**
+   * Saltó la contra del All In (Chino = `quien`): el golpe o el tiro que le iba a pegar se anuló y
+   * sale la embestida con todo («¡ALL IN!»). Sale una vez por especial, en el tick del contacto.
+   */
+  | { tipo: 'contra'; quien: Lado }
+  /** Quedó hipnotizado (`quien` = la víctima): camina hacia el que lo hipnotizó (efectos.hipnotizado). */
+  | { tipo: 'hipnotizado'; quien: Lado }
+  /** Quedó cegado (`quien` = la víctima): no puede pegar un rato (efectos.cegado). */
+  | { tipo: 'cegado'; quien: Lado }
+  /**
+   * El Corte de Precisión de Fran (`quien`) pegó limpio con la punta: crítico seguro («¡PRECISIÓN!»).
+   * Sale justo después del evento 'golpe' de ese contacto, en el punto del contacto.
+   */
+  | { tipo: 'precision'; quien: Lado; x: number; y: number }
+  /**
+   * El tirón del Agarre y Ejecución de Nacho le sacó `cantidad` de carga a la víctima (y él se quedó
+   * con hasta 1). Sale en el tick del tirón, después del 'golpe' del tirón; con la carga en 0, no sale.
+   */
+  | { tipo: 'carga_robada'; atacante: Lado; victima: Lado; cantidad: number }
+  /**
+   * El Smash de Pádel de Nehuen (`quien`) devolvió un tiro del rival en (x, y): desde ese tick el
+   * proyectil es de Nehuen (ProyectilEstado.duenio) y vuelve más rápido contra el que lo tiró.
+   */
+  | { tipo: 'devuelto'; quien: Lado; x: number; y: number; proyectil: TipoProyectil }
+  /**
+   * El papel del Despido Final de Tony (`atacante`) entró limpio: la víctima queda arrodillada
+   * (aturdida) y la patada voladora del final ya existe. Sale en el tick del papel, después de su 'golpe'.
+   */
+  | { tipo: 'despido'; atacante: Lado; victima: Lado }
+  /**
+   * El que le pegó de cerca a Nico M. se pinchó con su pelo (`quien` = el que se pinchó, en (x, y)):
+   * perdió un poco de vida, sin aturdimiento ni bloqueo. Sale con cada golpe cuerpo a cuerpo que recibe,
+   * cubre o aguanta, y con un agarre.
+   */
+  | { tipo: 'pinchazo'; quien: Lado; x: number; y: number }
+  /** Una púa de las Espinas de Nico M. (`quien`) se clavó en el piso en `x` (el proyectil pasa a `plantado`). */
+  | { tipo: 'plantada'; quien: Lado; x: number }
   | { tipo: 'carga'; quien: Lado; nivel: number } // cruzó una unidad entera
   | { tipo: 'sin_carga'; quien: Lado } // apretó un especial sin carga
   | { tipo: 'turbo' }

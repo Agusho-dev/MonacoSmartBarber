@@ -465,6 +465,12 @@ async function principal(): Promise<void> {
   const semillas = Number(arg('semillas') ?? 60)
   const dif = (arg('dif') ?? 'normal') as Dificultad
   const bots = arg('bots')?.split(',') ?? Object.keys(BOTS)
+  // Los rivales son las CPU de los barberos: nadie pelea contra la CPU de un dueño (quinta tanda; la
+  // ficha los marca con `soloDuenos`, que suma el frente de acceso; mientras no esté, la lista del
+  // diseño). Los bots juegan con todos (con un dueño, es lo que juegan los dueños con su pase).
+  const DUENOS_T5: readonly string[] = ['nacho', 'nehuen', 'nico_m', 'tony']
+  const esDueno = (id: IdPersonaje) => (PERSONAJES[id] as { soloDuenos?: boolean }).soloDuenos === true || DUENOS_T5.includes(id)
+  const RIVALES = IDS_PERSONAJES.filter((id) => !esDueno(id))
   const solo = (arg('solo')?.split(',') as IdPersonaje[] | undefined) ?? IDS_PERSONAJES
   const hilos = Math.max(1, Math.min(Number(arg('hilos') ?? 6), availableParallelism()))
   const tope = Number(arg('tope') ?? TOPES[dif][0])
@@ -480,7 +486,7 @@ async function principal(): Promise<void> {
     let base = 1
     for (const bot of bots) {
       if (!BOTS[bot]) throw new Error(`bot desconocido: ${bot}`)
-      for (const yo of solo) for (const rival of IDS_PERSONAJES) for (let s = 0; s < semillas; s++) {
+      for (const yo of solo) for (const rival of RIVALES) for (let s = 0; s < semillas; s++) {
         const b = base++
         // Sin sal, las semillas de siempre; con sal, un hash del contador y de la sal.
         const semilla = sal === null ? (b * 48271) % 2147483647 : 1 + (mezcla32(mezcla32(b + 0x1b873593) ^ mezcla32(Math.imul(sal, 0x9e3779b1) + 47)) % 2147483646)
@@ -543,7 +549,7 @@ async function principal(): Promise<void> {
     const celdas = solo.map((yo) => {
       let nn = 0
       let gg = 0
-      for (const rival of IDS_PERSONAJES) {
+      for (const rival of RIVALES) {
         const x = ac.c[`${bot}|${yo}|${rival}`]
         if (!x) continue
         nn += x[0]

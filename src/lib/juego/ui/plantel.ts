@@ -3,15 +3,25 @@
  * salen por defecto, el orden de la grilla y el filtro por sucursal. Puro (sin React ni DOM): lo
  * usan la raíz, la selección y la elección online, y todo sale del catálogo VIVO (personajes.ts):
  * un barbero nuevo aparece solo, sin listas a mano.
+ *
+ * Los personajes de los dueños (`soloDuenos`) no son parte del plantel de los clientes: la grilla,
+ * el filtro y los «por defecto» son de los barberos (`IDS_PARA_CLIENTES`). Con el pase de dueños
+ * (ui/pase-duenos.ts) aparecen aparte, en su grupo (`IDS_SOLO_DUENOS`), y pueden ser el último
+ * elegido o el barbero del QR; nunca un «por defecto» que salga de la sucursal o del catálogo.
  */
 import { ARENAS, IDS_ARENAS } from '../arenas'
-import { IDS_PERSONAJES, PERSONAJES, PROXIMAMENTE } from '../personajes'
+import { IDS_PARA_CLIENTES, IDS_PERSONAJES, PERSONAJES, PROXIMAMENTE, esSoloDuenos } from '../personajes'
 import type { FichaProximamente, IdPersonaje } from '../tipos'
 
-/** El personaje del barbero que atiende al cliente (staff.id del QR), si es luchador. */
-export function personajeDelBarbero(staffId: string | null | undefined): IdPersonaje | null {
+/**
+ * El personaje del barbero que atiende al cliente (staff.id del QR), si es luchador y este celular
+ * lo puede ver: el de un dueño, sólo con el pase (sin él, el rival por defecto sale de su sucursal).
+ */
+export function personajeDelBarbero(staffId: string | null | undefined, conPase = false): IdPersonaje | null {
   if (!staffId) return null
-  return IDS_PERSONAJES.find((id) => PERSONAJES[id].staffId === staffId) ?? null
+  const id = IDS_PERSONAJES.find((p) => PERSONAJES[p].staffId === staffId) ?? null
+  if (!id || (esSoloDuenos(id) && !conPase)) return null
+  return id
 }
 
 /** «parana» → «Paraná» (el nombre bien escrito de la arena); si no hay arena, con mayúscula. */
@@ -28,10 +38,10 @@ export interface SucursalPlantel {
   cuantos: number
 }
 
-/** Las sucursales que tienen luchadores, en el orden del catálogo (para el filtro). */
+/** Las sucursales que tienen barberos, en el orden del catálogo (para el filtro; sin los dueños). */
 export function sucursalesDelPlantel(): SucursalPlantel[] {
   const lista: SucursalPlantel[] = []
-  for (const id of IDS_PERSONAJES) {
+  for (const id of IDS_PARA_CLIENTES) {
     const slug = PERSONAJES[id].sucursal
     const ya = lista.find((s) => s.slug === slug)
     if (ya) ya.cuantos += 1
@@ -41,11 +51,11 @@ export function sucursalesDelPlantel(): SucursalPlantel[] {
 }
 
 /**
- * El orden de la grilla: el del catálogo (agrupado por sucursal), con la sucursal del cliente
- * primero. Con `filtro`, sólo los de esa sucursal.
+ * El orden de la grilla de los barberos: el del catálogo (agrupado por sucursal), con la sucursal
+ * del cliente primero. Con `filtro`, sólo los de esa sucursal. Los dueños van aparte.
  */
 export function plantelOrdenado(sucursalCliente: string | null, filtro: string | null = null): IdPersonaje[] {
-  const base = filtro ? IDS_PERSONAJES.filter((id) => PERSONAJES[id].sucursal === filtro) : [...IDS_PERSONAJES]
+  const base = filtro ? IDS_PARA_CLIENTES.filter((id) => PERSONAJES[id].sucursal === filtro) : [...IDS_PARA_CLIENTES]
   if (!sucursalCliente || filtro) return base
   const propios = base.filter((id) => PERSONAJES[id].sucursal === sucursalCliente)
   return propios.length > 0 ? [...propios, ...base.filter((id) => PERSONAJES[id].sucursal !== sucursalCliente)] : base
@@ -58,42 +68,59 @@ export function proximamenteOrdenado(sucursalCliente: string | null, filtro: str
   return [...base.filter((p) => p.sucursal === sucursalCliente), ...base.filter((p) => p.sucursal !== sucursalCliente)]
 }
 
+/** Un barbero de esa sucursal (nunca un dueño) que no sea `menos`. */
 function primeroDe(sucursal: string | null | undefined, menos: IdPersonaje | null): IdPersonaje | null {
   if (!sucursal) return null
-  return IDS_PERSONAJES.find((id) => id !== menos && PERSONAJES[id].sucursal === sucursal) ?? null
+  return IDS_PARA_CLIENTES.find((id) => id !== menos && PERSONAJES[id].sucursal === sucursal) ?? null
 }
 
 interface Contexto {
-  /** El personaje del barbero que lo atiende (QR), si es luchador. */
+  /** El personaje del barbero que lo atiende (QR), si es luchador y este celular lo ve. */
   barbero: IdPersonaje | null
   /** La sucursal del cliente (QR o ?s=). */
   sucursal: string | null
+  /** Con el pase de dueños (ui/pase-duenos.ts): el último elegido puede ser un dueño. */
+  conPase?: boolean
+}
+
+/** ¿Este celular puede elegir a ese personaje? (los dueños, sólo con el pase). */
+function visible(id: IdPersonaje | null | undefined, conPase: boolean): id is IdPersonaje {
+  return !!id && !!PERSONAJES[id] && (conPase || !esSoloDuenos(id))
 }
 
 /**
- * Con quién arranca el jugador: el último que eligió (salvo que sea su barbero, que va de
- * rival); si no, uno de su sucursal; si no, el primero del catálogo.
+ * Con quién arranca el jugador: el último que eligió (salvo que sea su barbero, que va de rival, o
+ * un dueño sin el pase); si no, un barbero de su sucursal; si no, el primero del catálogo.
  */
-export function jugadorSugerido(ultimo: IdPersonaje | null, { barbero, sucursal }: Contexto): IdPersonaje {
-  if (ultimo && PERSONAJES[ultimo] && ultimo !== barbero) return ultimo
+export function jugadorSugerido(ultimo: IdPersonaje | null, { barbero, sucursal, conPase = false }: Contexto): IdPersonaje {
+  if (visible(ultimo, conPase) && ultimo !== barbero) return ultimo
   return (
     primeroDe(sucursal, barbero) ??
     primeroDe(barbero ? PERSONAJES[barbero].sucursal : null, barbero) ??
-    IDS_PERSONAJES.find((id) => id !== barbero) ??
-    IDS_PERSONAJES[0]
+    IDS_PARA_CLIENTES.find((id) => id !== barbero) ??
+    IDS_PARA_CLIENTES[0]
   )
 }
 
 /**
- * El rival por defecto: el barbero que lo atiende; si no tiene (o lo eligió para pelear), uno
- * de su sucursal; si no, uno de la sucursal del luchador elegido; si no, el primero que no sea él.
+ * El rival por defecto: el barbero que lo atiende; si no tiene (o lo eligió para pelear, o es un
+ * dueño y el celular no tiene el pase), un barbero de su sucursal; si no, uno de la sucursal del
+ * luchador elegido; si no, el primero que no sea él. Nunca un dueño que no sea su barbero.
  */
 export function rivalSugerido(jugador: IdPersonaje, { barbero, sucursal }: Contexto): IdPersonaje {
   if (barbero && barbero !== jugador) return barbero
   return (
     primeroDe(sucursal, jugador) ??
     primeroDe(PERSONAJES[jugador]?.sucursal, jugador) ??
-    IDS_PERSONAJES.find((id) => id !== jugador) ??
+    IDS_PARA_CLIENTES.find((id) => id !== jugador) ??
     jugador
   )
+}
+
+/**
+ * El personaje con el que arranca la elección online (el que va si se acaba el tiempo): el último
+ * elegido si este celular lo puede elegir; si no, `porDefecto` (el jugador de la selección).
+ */
+export function personajeInicialOnline(ultimo: IdPersonaje | null, porDefecto: IdPersonaje, conPase: boolean): IdPersonaje {
+  return visible(ultimo, conPase) ? ultimo : porDefecto
 }

@@ -21,7 +21,7 @@ import { silbido } from './golpes'
 // ─── Piezas chicas ───────────────────────────────────────────────────────────
 
 /** Un «tic» de ruido filtrado (clics, mazazos chicos, piedritas). */
-function tic(m: Mesa, v: Voz, t: number, tipo: BiquadFilterType, frec: number, q: number, pico: number, caida: number): void {
+export function tic(m: Mesa, v: Voz, t: number, tipo: BiquadFilterType, frec: number, q: number, pico: number, caida: number): void {
   const g = m.ganancia(v, 0, v.salida)
   const f = m.filtro(v, tipo, frec, q, g)
   const fin = envPercusion(g.gain, t, 0.0006, pico, caida)
@@ -29,7 +29,7 @@ function tic(m: Mesa, v: Voz, t: number, tipo: BiquadFilterType, frec: number, q
 }
 
 /** Un «tun» de seno que cae (golpes graves). */
-function tun(m: Mesa, v: Voz, t: number, desde: number, hasta: number, pico: number, caida: number, forma: OscillatorType = 'sine'): void {
+export function tun(m: Mesa, v: Voz, t: number, desde: number, hasta: number, pico: number, caida: number, forma: OscillatorType = 'sine'): void {
   const g = m.ganancia(v, 0, v.salida)
   const fin = envPercusion(g.gain, t, 0.002, pico, caida)
   const o = m.osc(v, forma, desde, t, fin + 0.01, g)
@@ -37,7 +37,7 @@ function tun(m: Mesa, v: Voz, t: number, desde: number, hasta: number, pico: num
 }
 
 /** Chisporroteo: ráfagas cortas al azar de ruido agudo entre t y fin (fuego, vapor, quemado). */
-function crepitar(m: Mesa, v: Voz, t: number, fin: number, frec: number, pico: number, densidad = 1): void {
+export function crepitar(m: Mesa, v: Voz, t: number, fin: number, frec: number, pico: number, densidad = 1): void {
   const g = m.ganancia(v, 0, v.salida)
   const f = m.filtro(v, 'highpass', frec, 0.7, g)
   m.ruido(v, t, fin + 0.02, f)
@@ -350,7 +350,7 @@ function burbujas(m: Mesa, v: Voz, t: number, n: number, desde: number, hasta: n
 }
 
 /** Un «tin» de vidrio. */
-function cristal(m: Mesa, v: Voz, t: number, base: number, amp: number): void {
+export function cristal(m: Mesa, v: Voz, t: number, base: number, amp: number): void {
   for (const [r, a, d] of [
     [1, 1, 0.22],
     [1.5, 0.6, 0.16],

@@ -161,6 +161,8 @@ function elegir(l: LuchadorEstado, li: InternoLuchador): { clave: ClaveAnimacion
   if (li.levantar > 0) return { clave: 'levantarse', sello: 6 }
   if (ef.electrocutado > 0) return { clave: 'danio', sello: 7 }
   if (ef.aturdido > 0 && li.stun === 0) return { clave: 'danio', sello: 18 }
+  // Hipnotizado (quinta tanda): camina hacia el que lo hipnotizó a medio ritmo; quieto, se tambalea.
+  if (ef.hipnotizado > 0 && li.stun === 0) return li.vMov !== 0 ? { clave: 'caminar', sello: 19 } : { clave: 'danio', sello: 20 }
   if (ef.guardiaRota > 0 && li.stun === 0) return { clave: 'danio', sello: 8 }
   if (li.stun > 0) {
     if (li.stunBloqueo) return { clave: li.agachado ? 'agachado' : 'guardia', sello: 9 }
@@ -196,7 +198,7 @@ function cuadroPara(l: LuchadorEstado, li: InternoLuchador, clave: ClaveAnimacio
     case 'quieto':
       return bucle(t, CPS.quieto, n)
     case 'caminar': {
-      const i = bucle(t, CPS.caminar, n)
+      const i = bucle(t, ef.hipnotizado > 0 ? CPS.caminar / 2 : CPS.caminar, n)
       return li.atras ? n - 1 - i : i
     }
     case 'correr':
@@ -223,6 +225,7 @@ function cuadroPara(l: LuchadorEstado, li: InternoLuchador, clave: ClaveAnimacio
       if (ef.congelado > 0) return Math.min(1, n - 1)
       if (ef.electrocutado > 0) return Math.min(n - 1, Math.floor(t / 3) % 2)
       if (ef.aturdido > 0 && li.stun === 0) return vaiven(t, CPS.mareado, n)
+      if (ef.hipnotizado > 0 && li.stun === 0) return vaiven(t, CPS.mareado, n)
       if (ef.guardiaRota > 0 && li.stun === 0) return vaiven(t, CPS.guardiaRota, n)
       return repartido(li.stunTotal - li.stun, li.stunTotal, n)
     case 'ko':

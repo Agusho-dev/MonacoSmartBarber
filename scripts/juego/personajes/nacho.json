@@ -1,0 +1,2986 @@
+{
+ "_nota": "Nacho para «Corte Final» (quinta tanda, 14/nov/2026), hoja de 18 paneles (1536x1024, foto realista). Se procesa con scripts/juego/extraer_nacho.py (motor de extraer_gabriel.py con las extensiones de extraer_chino.py y extraer_lautaro.py). Remera blanca y pantalón caqui: el modelo separa bien la ropa; el código, los hologramas, el rival y las piedras se pintan antes de inferir.",
+ "personaje": "nacho",
+ "hoja": "../../../../juego-fuentes/nacho_anim.jpg",
+ "salida": "../../../public/juego/personajes/nacho",
+ "reglas": {
+  "holo": [
+   {
+    "nota": "código flotante, hologramas, retícula, contorno del rival y brillo de la pantalla: azul o celeste saturado (la remera teñida de celeste no llega a esa saturación)",
+    "bMenosRMin": 45,
+    "satMin": 0.5,
+    "lumMin": 30
+   }
+  ],
+  "violeta": [
+   {
+    "nota": "brillo violeta del rival y del estallido del Laptopazo",
+    "tono": [
+     250,
+     320
+    ],
+    "satMin": 0.45,
+    "lumMin": 35
+   }
+  ],
+  "rojoCodigo": [
+   {
+    "nota": "el código rojo del especial 1 (la piel no llega a esa saturación)",
+    "rMenosGMin": 60,
+    "satMin": 0.55,
+    "lumMin": 40
+   }
+  ],
+  "rival": [
+   {
+    "nota": "interior azul marino del rival y de las piedras (el fondo y el pelo son casi neutros)",
+    "bMenosRMin": 22,
+    "satMin": 0.5,
+    "lumMax": 90
+   }
+  ]
+ },
+ "animaciones": {
+  "quieto": {
+   "_nota": "IDLE de la hoja: 5 poses distintas (termo, manos al costado, mano en el bolsillo, laptop, mano en el mentón). A 8 cuadros/s cambiar de pose se ve nervioso, y las poses 2 y 3 de la hoja tienen la cara y la remera azuladas (la luz del dibujo): hasta la quinta tanda «quieto» alternaba la 1 y la 2 y la cara cambiaba de tono cada 0,4 s. Sprites-fix (quinta tanda): sólo la pose 1, que respira con dos copias de la misma caja apenas más altas («escalaPorCuadro» 1,006 y 1,012: 127, 128 y 129 px de alto) en el orden 1, 5, 6, 6, 5, 1. Los mismos 6 cuadros; quieto[0] sigue siendo la pose 1 (alturaReferencia 127). Si se prefiere quieto del todo: \"usar\" [1, 1, 1, 1, 1, 1].",
+   "inferencia": "ancho&panel",
+   "region": [
+    10,
+    36,
+    352,
+    171
+   ],
+   "cajas": [
+    [
+     18,
+     38,
+     84,
+     171
+    ],
+    [
+     88,
+     38,
+     150,
+     171
+    ],
+    [
+     150,
+     38,
+     212,
+     171
+    ],
+    [
+     212,
+     38,
+     278,
+     171
+    ],
+    [
+     280,
+     38,
+     345,
+     171
+    ],
+    [
+     88,
+     38,
+     150,
+     171
+    ],
+    [
+     88,
+     38,
+     150,
+     171
+    ]
+   ],
+   "usar": [
+    1,
+    5,
+    6,
+    6,
+    5,
+    1
+   ],
+   "pegados": 2,
+   "apoyoX": {
+    "0": 47.0,
+    "1": 119.5,
+    "2": 179.0,
+    "3": 247.5,
+    "4": 311.0,
+    "5": 119.5,
+    "6": 119.5
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina",
+   "escalaPorCuadro": {
+    "5": 1.006,
+    "6": 1.012
+   }
+  },
+  "caminar": {
+   "inferencia": "panel",
+   "region": [
+    360,
+    36,
+    722,
+    171
+   ],
+   "cuadros": 5
+  },
+  "correr": {
+   "inferencia": "panel",
+   "region": [
+    730,
+    36,
+    1108,
+    171
+   ],
+   "cuadros": 4
+  },
+  "dash": {
+   "_nota": "el DASH de la hoja es la carrera con la laptop adelante, envuelta en humo y estelas: se prestan los cuadros de «correr» (mismo rectángulo del atlas)",
+   "usar": [
+    [
+     "correr",
+     1
+    ],
+    [
+     "correr",
+     2
+    ],
+    [
+     "correr",
+     3
+    ]
+   ]
+  },
+  "guardia": {
+   "inferencia": "ancho&panel",
+   "region": [
+    10,
+    204,
+    352,
+    336
+   ],
+   "cajas": [
+    [
+     16,
+     206,
+     106,
+     336
+    ],
+    [
+     106,
+     206,
+     190,
+     336
+    ],
+    [
+     188,
+     206,
+     264,
+     336
+    ],
+    [
+     264,
+     206,
+     352,
+     336
+    ]
+   ],
+   "usar": [
+    0,
+    1
+   ],
+   "pegados": 2,
+   "apoyoX": {
+    "0": 60.5,
+    "1": 148.0,
+    "2": 224.5,
+    "3": 310.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  },
+  "agachado": {
+   "inferencia": "ancho",
+   "region": [
+    360,
+    204,
+    644,
+    336
+   ],
+   "cajas": [
+    [
+     362,
+     238,
+     450,
+     336
+    ],
+    [
+     450,
+     243,
+     538,
+     336
+    ],
+    [
+     536,
+     238,
+     632,
+     336
+    ]
+   ],
+   "pegados": 2
+  },
+  "saltar": {
+   "inferencia": "ancho",
+   "region": [
+    653,
+    178,
+    1012,
+    336
+   ],
+   "cajas": [
+    [
+     655,
+     240,
+     740,
+     336
+    ],
+    [
+     740,
+     186,
+     830,
+     336
+    ],
+    [
+     826,
+     178,
+     924,
+     312
+    ],
+    [
+     914,
+     198,
+     1010,
+     332
+    ]
+   ],
+   "pintar": [
+    {
+     "zona": [
+      653,
+      176,
+      1012,
+      205
+     ],
+     "bMenosRMin": 40,
+     "satMin": 0.45
+    },
+    {
+     "zona": [
+      656,
+      176,
+      748,
+      205
+     ]
+    }
+   ],
+   "quitarColor": [
+    {
+     "zona": [
+      653,
+      176,
+      1012,
+      205
+     ],
+     "bMenosRMin": 40,
+     "satMin": 0.45
+    },
+    {
+     "zona": [
+      656,
+      176,
+      748,
+      205
+     ]
+    }
+   ],
+   "pegados": 2
+  },
+  "caer": {
+   "inferencia": "ancho",
+   "region": [
+    1020,
+    204,
+    1526,
+    336
+   ],
+   "cajas": [
+    [
+     1030,
+     212,
+     1150,
+     336
+    ],
+    [
+     1150,
+     240,
+     1245,
+     336
+    ],
+    [
+     1246,
+     245,
+     1338,
+     336
+    ],
+    [
+     1334,
+     243,
+     1424,
+     336
+    ],
+    [
+     1420,
+     236,
+     1522,
+     336
+    ]
+   ],
+   "usar": [
+    [
+     "saltar",
+     3
+    ],
+    [
+     "saltar",
+     3
+    ],
+    [
+     "saltar",
+     3
+    ],
+    1,
+    3
+   ],
+   "pegados": 2
+  },
+  "golpe": {
+   "inferencia": "ancho",
+   "region": [
+    10,
+    371,
+    452,
+    483
+   ],
+   "cajas": [
+    [
+     14,
+     374,
+     118,
+     483
+    ],
+    [
+     98,
+     374,
+     200,
+     483
+    ],
+    [
+     192,
+     374,
+     312,
+     483
+    ],
+    [
+     310,
+     374,
+     428,
+     483
+    ]
+   ],
+   "impactos": [
+    2
+   ],
+   "pintar": [
+    "holo",
+    "violeta"
+   ],
+   "quitarColor": [
+    "holo",
+    "violeta"
+   ],
+   "pegados": 2,
+   "piernas": {
+    "0": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       31,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       82,
+       478
+      ]
+     }
+    ],
+    "1": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       119,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       168,
+       478
+      ]
+     }
+    ],
+    "2": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       213,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       272,
+       478
+      ]
+     }
+    ],
+    "3": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       331,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       386,
+       478
+      ]
+     }
+    ]
+   },
+   "excluir": [
+    [
+     10,
+     479,
+     452,
+     492
+    ]
+   ],
+   "_notaPies": "el borde de abajo del panel corta las piernas a la altura del ruedo (sin zapatillas): se saca la franja teñida por el borde (desde y=479) y se pegan debajo las zapatillas de caminar[0] con «piernas» (la de atrás ×1,15); «hasta» es el centro de cada pierna medido en la hoja"
+  },
+  "patada": {
+   "inferencia": "ancho",
+   "region": [
+    459,
+    366,
+    951,
+    483
+   ],
+   "cajas": [
+    [
+     461,
+     374,
+     602,
+     483
+    ],
+    [
+     580,
+     372,
+     692,
+     483
+    ],
+    [
+     684,
+     366,
+     792,
+     483
+    ],
+    [
+     794,
+     374,
+     884,
+     483
+    ]
+   ],
+   "impactos": [
+    3
+   ],
+   "pintar": [
+    "holo",
+    "violeta",
+    {
+     "zona": [
+      459,
+      342,
+      951,
+      371
+     ],
+     "rMenosBMin": 40,
+     "satMin": 0.45
+    }
+   ],
+   "quitarColor": [
+    "holo",
+    "violeta",
+    {
+     "zona": [
+      459,
+      342,
+      951,
+      371
+     ],
+     "rMenosBMin": 40,
+     "satMin": 0.45
+    }
+   ],
+   "pegados": 2,
+   "incluirFinal": {
+    "0": [
+     [
+      [
+       539,
+       436
+      ],
+      [
+       566,
+       417
+      ],
+      [
+       598,
+       425
+      ],
+      [
+       575,
+       443
+      ]
+     ]
+    ],
+    "1": [
+     [
+      [
+       589,
+       400
+      ],
+      [
+       598,
+       386
+      ],
+      [
+       608,
+       383
+      ],
+      [
+       630,
+       394
+      ],
+      [
+       617,
+       405
+      ],
+      [
+       605,
+       408
+      ]
+     ],
+     [
+      [
+       647,
+       400
+      ],
+      [
+       671,
+       399
+      ],
+      [
+       664,
+       427
+      ],
+      [
+       647,
+       426
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       692,
+       374
+      ],
+      [
+       722,
+       386
+      ],
+      [
+       718,
+       407
+      ],
+      [
+       687,
+       396
+      ]
+     ]
+    ]
+   },
+   "_nota": "GOLPE BÁSICO 2 de la hoja, el «Laptopazo»: baja la laptop (0), la revolea por detrás de la cabeza (1), la levanta (2) y remata con el puño donde estalla (3, impacto; el estallido y la laptop que se rompe los dibuja el render). La laptop en la mano no la ve el modelo (es oscura con el borde celeste): entra con «incluirFinal» y su contorno medido en la hoja.",
+   "piernas": {
+    "0": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       469,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       533,
+       478
+      ]
+     }
+    ],
+    "1": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       591,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       652,
+       478
+      ]
+     }
+    ],
+    "2": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       695,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       746,
+       478
+      ]
+     }
+    ],
+    "3": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       815,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       876,
+       478
+      ]
+     }
+    ]
+   },
+   "excluir": [
+    [
+     459,
+     479,
+     951,
+     492
+    ]
+   ],
+   "_notaPies": "el borde de abajo del panel corta las piernas a la altura del ruedo (sin zapatillas): se saca la franja teñida por el borde (desde y=479) y se pegan debajo las zapatillas de caminar[0] con «piernas» (la de atrás ×1,15); «hasta» es el centro de cada pierna medido en la hoja"
+  },
+  "combo": {
+   "inferencia": "ancho",
+   "region": [
+    958,
+    371,
+    1526,
+    483
+   ],
+   "cajas": [
+    [
+     960,
+     374,
+     1042,
+     483
+    ],
+    [
+     1040,
+     374,
+     1126,
+     483
+    ],
+    [
+     1120,
+     374,
+     1222,
+     483
+    ],
+    [
+     1228,
+     374,
+     1322,
+     483
+    ],
+    [
+     1345,
+     374,
+     1462,
+     483
+    ]
+   ],
+   "impactos": [
+    1,
+    2,
+    4
+   ],
+   "pintar": [
+    "holo",
+    "violeta"
+   ],
+   "quitarColor": {
+    "0": [
+     "holo",
+     "violeta"
+    ],
+    "1": [
+     "holo",
+     "violeta"
+    ],
+    "2": [
+     "holo",
+     "violeta",
+     {
+      "nota": "sprites-fix: el fondo azul marino encerrado entre el brazo estirado, el torso y el antebrazo de atrás",
+      "zona": [
+       [
+        1181,
+        423
+       ],
+       [
+        1196,
+        423
+       ],
+       [
+        1196,
+        436
+       ],
+       [
+        1186,
+        436
+       ],
+       [
+        1181,
+        432
+       ]
+      ],
+      "lumMax": 70
+     },
+     {
+      "nota": "sprites-fix: la línea celeste del holograma en el mismo hueco",
+      "zona": [
+       [
+        1181,
+        423
+       ],
+       [
+        1196,
+        423
+       ],
+       [
+        1196,
+        436
+       ],
+       [
+        1186,
+        436
+       ],
+       [
+        1181,
+        432
+       ]
+      ],
+      "bMenosRMin": 35
+     }
+    ],
+    "3": [
+     "holo",
+     "violeta",
+     {
+      "nota": "sprites-fix: el trazo celeste del celular a la derecha de la mano de atrás (la mano es piel y queda)",
+      "zona": [
+       [
+        1300,
+        436
+       ],
+       [
+        1325,
+        436
+       ],
+       [
+        1325,
+        449
+       ],
+       [
+        1300,
+        449
+       ]
+      ],
+      "bMenosRMin": 15
+     }
+    ],
+    "4": [
+     "holo",
+     "violeta"
+    ]
+   },
+   "pegados": 2,
+   "piernas": {
+    "0": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       971,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1025,
+       478
+      ]
+     }
+    ],
+    "1": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1055,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1102,
+       478
+      ]
+     }
+    ],
+    "2": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1138,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1193,
+       478
+      ]
+     }
+    ],
+    "3": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1245,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1301,
+       478
+      ]
+     }
+    ],
+    "4": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1363,
+       478
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1416,
+       478
+      ]
+     }
+    ]
+   },
+   "excluir": [
+    [
+     958,
+     479,
+     1526,
+     492
+    ]
+   ],
+   "_notaPies": "el borde de abajo del panel corta las piernas a la altura del ruedo (sin zapatillas): se saca la franja teñida por el borde (desde y=479) y se pegan debajo las zapatillas de caminar[0] con «piernas» (la de atrás ×1,15); «hasta» es el centro de cada pierna medido en la hoja",
+   "_notaFix": "Sprites-fix (quinta tanda): en el 2 sale el fondo azul marino encerrado entre el brazo estirado, el torso y el antebrazo de atrás (se veía como un bloque negro en la cadera); en el 3 (y herramienta1, su alias) el trazo celeste a la derecha de la mano de atrás. «apoyoX» del 2 con el valor de antes (1180,0 px de la hoja): la limpieza corría 1 px el apoyo «torso».",
+   "apoyoX": {
+    "2": 1180.0
+   }
+  },
+  "herramienta1": {
+   "_nota": "«Remate» (botón MÁQUINA): alias del final del combo, la guardia y el directo",
+   "alias": "combo",
+   "usar": [
+    3,
+    4,
+    3
+   ],
+   "impactos": [
+    1
+   ]
+  },
+  "herramienta2": {
+   "_nota": "alias de la patada: el «Laptopazo»",
+   "alias": "patada",
+   "usar": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "impactos": [
+    3
+   ]
+  },
+  "especial1": {
+   "inferencia": "ancho",
+   "region": [
+    10,
+    518,
+    1526,
+    654
+   ],
+   "cajas": [
+    [
+     26,
+     520,
+     136,
+     654
+    ],
+    [
+     205,
+     520,
+     302,
+     654
+    ],
+    [
+     362,
+     520,
+     462,
+     654
+    ],
+    [
+     550,
+     518,
+     656,
+     654
+    ],
+    [
+     772,
+     520,
+     862,
+     654
+    ],
+    [
+     945,
+     520,
+     1042,
+     654
+    ]
+   ],
+   "impactos": [
+    1,
+    4
+   ],
+   "pintar": [
+    "holo",
+    "violeta",
+    "rojoCodigo",
+    "rival"
+   ],
+   "quitarColor": [
+    "holo",
+    "violeta",
+    "rojoCodigo",
+    "rival"
+   ],
+   "pegados": 2,
+   "piernas": {
+    "0": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       45,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       102,
+       648
+      ]
+     }
+    ],
+    "1": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       231,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       272,
+       648
+      ]
+     }
+    ],
+    "2": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       383,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       436,
+       648
+      ]
+     }
+    ],
+    "3": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       569,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       604,
+       648
+      ]
+     }
+    ],
+    "4": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       807,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       846,
+       648
+      ]
+     }
+    ],
+    "5": [
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       963,
+       648
+      ],
+      "escala": 1.15
+     },
+     {
+      "de": [
+       "caminar",
+       0
+      ],
+      "forma": [
+       [
+        416,
+        153
+       ],
+       [
+        431,
+        153
+       ],
+       [
+        437,
+        159
+       ],
+       [
+        441,
+        171
+       ],
+       [
+        413,
+        171
+       ],
+       [
+        414,
+        160
+       ]
+      ],
+      "desde": [
+       424,
+       156
+      ],
+      "hasta": [
+       1023,
+       648
+      ]
+     }
+    ]
+   },
+   "excluir": [
+    [
+     10,
+     649,
+     1526,
+     662
+    ]
+   ],
+   "_notaPies": "el borde de abajo del panel corta las piernas a la altura del ruedo (sin zapatillas): se saca la franja teñida por el borde (desde y=649) y se pegan debajo las zapatillas de caminar[0] con «piernas» (la de atrás ×1,15); «hasta» es el centro de cada pierna medido en la hoja"
+  },
+  "especial2": {
+   "inferencia": "ancho",
+   "region": [
+    10,
+    689,
+    760,
+    808
+   ],
+   "cajas": [
+    [
+     20,
+     698,
+     142,
+     806
+    ],
+    [
+     192,
+     712,
+     334,
+     806
+    ],
+    [
+     398,
+     718,
+     512,
+     806
+    ],
+    [
+     578,
+     712,
+     702,
+     806
+    ]
+   ],
+   "impactos": [
+    2
+   ],
+   "pintar": [
+    "holo",
+    "rival"
+   ],
+   "quitarColor": {
+    "0": [
+     "holo",
+     "rival"
+    ],
+    "1": [
+     "holo",
+     "rival",
+     {
+      "nota": "sprites-fix: la mancha oscura de piso entre los brazos (la piel en sombra tiene r > b y queda)",
+      "zona": [
+       [
+        275,
+        771
+       ],
+       [
+        292,
+        771
+       ],
+       [
+        294,
+        778
+       ],
+       [
+        293,
+        792
+       ],
+       [
+        285,
+        793
+       ],
+       [
+        278,
+        790
+       ],
+       [
+        276,
+        780
+       ]
+      ],
+      "lumMax": 70,
+      "bMenosRMin": -5
+     }
+    ],
+    "2": [
+     "holo",
+     "rival"
+    ],
+    "3": [
+     "holo",
+     "rival"
+    ]
+   },
+   "pegados": 2,
+   "usar": [
+    0,
+    1,
+    3
+   ],
+   "excluir": {
+    "0": [
+     [
+      [
+       104,
+       778
+      ],
+      [
+       142,
+       772
+      ],
+      [
+       142,
+       806
+      ],
+      [
+       104,
+       806
+      ]
+     ],
+     [
+      [
+       12,
+       792
+      ],
+      [
+       72,
+       790
+      ],
+      [
+       72,
+       806
+      ],
+      [
+       12,
+       806
+      ]
+     ]
+    ]
+   },
+   "_nota": "TERREMOTO DE CÓDIGO: se arrodilla con una mano en una tableta holográfica (0), apoya las dos manos en el piso (1 de la hoja) y golpea el piso (3 de la hoja, impacto). El 2 de la hoja (escribe en la laptop apoyada en el piso, con el piso brillante y piedras alrededor) no se usa. La tableta y el piso brillante del 0 salen con «excluir»; las columnas de código, las piedras, el piso que se rompe y el rival volando los dibuja el render. Sprites-fix: en el 1 sale la mancha oscura de piso que quedaba entre los brazos."
+  },
+  "danio": {
+   "inferencia": "ancho",
+   "region": [
+    10,
+    843,
+    262,
+    991
+   ],
+   "cajas": [
+    [
+     12,
+     850,
+     90,
+     991
+    ],
+    [
+     84,
+     850,
+     162,
+     991
+    ],
+    [
+     156,
+     850,
+     260,
+     991
+    ]
+   ],
+   "quitarColor": [
+    {
+     "nota": "sólo las chispas celestes más saturadas de afuera (la remera teñida de celeste es del dibujo: el golpe digital)",
+     "bMenosRMin": 90,
+     "satMin": 0.75,
+     "lumMin": 90
+    }
+   ],
+   "pegados": 2,
+   "rellenar": 400,
+   "_nota": "RECIBIR DAÑO: guardia golpeada (0), la remera se vuelve celeste con cuadritos del golpe digital (1) y retrocede (2). El celeste de la remera es del dibujo y queda; las chispas saturadas de afuera se sacan por color y los huecos se tapan."
+  },
+  "ko": {
+   "inferencia": "ancho",
+   "region": [
+    270,
+    843,
+    582,
+    991
+   ],
+   "ancla": "caja",
+   "cajas": [
+    [
+     272,
+     878,
+     360,
+     991
+    ],
+    [
+     352,
+     905,
+     450,
+     978
+    ],
+    [
+     445,
+     915,
+     580,
+     991
+    ]
+   ],
+   "pintar": [
+    "holo"
+   ],
+   "quitarColor": {
+    "0": [
+     "holo",
+     "rival"
+    ],
+    "1": [
+     "holo",
+     "rival",
+     {
+      "nota": "sprites-fix: la tableta que brilla debajo de la mano (celeste y azul marino)",
+      "zona": [
+       [
+        384,
+        951
+       ],
+       [
+        403,
+        951
+       ],
+       [
+        404,
+        955
+       ],
+       [
+        416,
+        955
+       ],
+       [
+        418,
+        958
+       ],
+       [
+        429,
+        959
+       ],
+       [
+        429,
+        969
+       ],
+       [
+        380,
+        969
+       ],
+       [
+        380,
+        958
+       ]
+      ],
+      "bMenosRMin": 8
+     },
+     {
+      "nota": "sprites-fix: la sombra oscura entre las rodillas y la cara",
+      "zona": [
+       [
+        384,
+        951
+       ],
+       [
+        403,
+        951
+       ],
+       [
+        404,
+        955
+       ],
+       [
+        416,
+        955
+       ],
+       [
+        418,
+        958
+       ],
+       [
+        429,
+        959
+       ],
+       [
+        429,
+        969
+       ],
+       [
+        380,
+        969
+       ],
+       [
+        380,
+        958
+       ]
+      ],
+      "lumMax": 45,
+      "bMenosRMin": -5
+     }
+    ],
+    "2": [
+     "holo",
+     "rival"
+    ]
+   },
+   "pegados": 2,
+   "excluir": {
+    "0": [
+     [
+      [
+       300,
+       967
+      ],
+      [
+       356,
+       964
+      ],
+      [
+       356,
+       992
+      ],
+      [
+       300,
+       992
+      ]
+     ]
+    ]
+   },
+   "_nota": "KO: se arrodilla con las manos en la laptop (0), cae hecho un ovillo (1) y queda tendido boca abajo (2). La laptop brillante del 0 se saca (excluir: las manos quedan apoyadas en el aire, el cuadro dura 8 ticks). Sprites-fix: en el 1 salen la tableta que brilla debajo de la mano y la sombra azul oscura de debajo de la cara (reglas de color en una zona: la mano es piel y queda). La mano y la muñeca del 1 vuelven con «incluirFinal» (se iban con la tableta: el brillo las tiñe de celeste).",
+   "rellenar": 200,
+   "incluirFinal": {
+    "1": [
+     [
+      [
+       403.5,
+       961.5
+      ],
+      [
+       411,
+       960.5
+      ],
+      [
+       416,
+       959.5
+      ],
+      [
+       420,
+       959.5
+      ],
+      [
+       421.5,
+       961
+      ],
+      [
+       418,
+       963.5
+      ],
+      [
+       412.5,
+       965
+      ],
+      [
+       411.5,
+       966.5
+      ],
+      [
+       405,
+       966.5
+      ],
+      [
+       403.5,
+       964.5
+      ]
+     ]
+    ]
+   }
+  },
+  "levantarse": {
+   "inferencia": "ancho",
+   "region": [
+    590,
+    843,
+    855,
+    991
+   ],
+   "cajas": [
+    [
+     592,
+     893,
+     680,
+     991
+    ],
+    [
+     676,
+     885,
+     765,
+     991
+    ],
+    [
+     760,
+     855,
+     853,
+     991
+    ]
+   ],
+   "pegados": 2
+  },
+  "victoria": {
+   "inferencia": "ancho",
+   "region": [
+    863,
+    843,
+    1173,
+    991
+   ],
+   "cajas": [
+    [
+     866,
+     848,
+     948,
+     991
+    ],
+    [
+     934,
+     843,
+     1012,
+     991
+    ],
+    [
+     1014,
+     848,
+     1096,
+     991
+    ],
+    [
+     1094,
+     850,
+     1172,
+     991
+    ]
+   ],
+   "pegados": 2,
+   "apoyoX": {
+    "0": 906.5,
+    "1": 970.5,
+    "2": 1053.5,
+    "3": 1136.5
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  },
+  "burla": {
+   "inferencia": "ancho",
+   "region": [
+    1180,
+    843,
+    1526,
+    991
+   ],
+   "cajas": [
+    [
+     1182,
+     848,
+     1270,
+     991
+    ],
+    [
+     1268,
+     848,
+     1354,
+     991
+    ],
+    [
+     1352,
+     848,
+     1444,
+     991
+    ],
+    [
+     1438,
+     843,
+     1522,
+     991
+    ]
+   ],
+   "usar": [
+    0,
+    1,
+    2
+   ],
+   "pegados": 2,
+   "apoyoX": {
+    "0": 1220.5,
+    "1": 1309.0,
+    "2": 1395.0,
+    "3": 1478.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  }
+ },
+ "retrato": {
+  "anim": "quieto",
+  "cuadro": 0,
+  "alto": 720,
+  "cara": {
+   "anim": "guardia",
+   "cuadro": 0,
+   "lado": 28,
+   "arriba": 2,
+   "filas": 10
+  }
+ },
+ "efectos": {
+  "laptop": {
+   "_nota": "la laptop cerrada y plateada del Laptopazo (2 de la hoja), hasta antes de los dedos (x 713): queda un rectángulo plateado limpio",
+   "caja": [
+    684,
+    370,
+    726,
+    410
+   ],
+   "inferencia": "brillo",
+   "lumMin": 60,
+   "dilatar": 1,
+   "limite": [
+    [
+     [
+      692,
+      374
+     ],
+     [
+      713,
+      382
+     ],
+     [
+      713,
+      403
+     ],
+     [
+      687,
+      396
+     ]
+    ]
+   ]
+  }
+ }
+}

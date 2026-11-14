@@ -2,21 +2,33 @@ import {
   Activity,
   Armchair,
   BicepsFlexed,
+  Binary,
   BottleWine,
   Disc3,
   Drum,
+  EyeOff,
+  FileX,
   Flame,
+  Ghost,
   Glasses,
   HandGrab,
   HeartPulse,
+  LaptopMinimal,
   Martini,
   MicVocal,
   Motorbike,
   Music2,
+  Orbit,
+  ScanEye,
   Scissors,
+  ScissorsLineDashed,
+  Scooter,
   Slice,
   Smartphone,
+  Spade,
   SprayCan,
+  SquareTerminal,
+  Target,
   Zap,
 } from 'lucide-react'
 import type { ReactNode, SVGProps } from 'react'
@@ -45,8 +57,10 @@ function Trazo({ children, ...props }: PropsSvg & { children: ReactNode }) {
 /**
  * El ícono de cada especial: lucide cuando hay uno que lo dice bien, y si no, uno propio con el
  * mismo trazo (guante de box, pistola, graffiti, gorro chino, pelota, chilena, mamadera, pañal,
- * mate y termo). Sin emojis. Se usa en la ficha de la selección, en las cartas de la pelea y en
- * el tutorial.
+ * mate y termo; de la quinta tanda, el puño del Gigante, el Lanzamiento Aéreo, el secador, la
+ * paleta de pádel y las púas). Sin emojis. Se usa en la ficha de la selección, en las cartas de la
+ * pelea y en el tutorial. Los de la quinta tanda (14/nov), verificados en lucide-react 0.577: Spade,
+ * Orbit, ScanEye, ScissorsLineDashed, EyeOff, SquareTerminal, Binary, Ghost, Target, Scooter y FileX.
  */
 export function IconoDeEspecial({ icono, ...props }: { icono: IconoEspecial } & PropsSvg) {
   switch (icono) {
@@ -102,6 +116,39 @@ export function IconoDeEspecial({ icono, ...props }: { icono: IconoEspecial } & 
       return <HandGrab aria-hidden="true" {...props} />
     case 'sismo':
       return <Activity aria-hidden="true" {...props} />
+    // Quinta tanda (14/nov).
+    case 'cartas':
+      return <Spade aria-hidden="true" {...props} />
+    case 'dominio':
+      return <Orbit aria-hidden="true" {...props} />
+    case 'lentes':
+      return <ScanEye aria-hidden="true" {...props} />
+    case 'corte':
+      return <ScissorsLineDashed aria-hidden="true" {...props} />
+    case 'gigante':
+      return <IconoGigante {...props} />
+    case 'lanzamiento':
+      return <IconoLanzamiento {...props} />
+    case 'herramientas':
+      return <IconoSecador {...props} />
+    case 'aerosol':
+      return <EyeOff aria-hidden="true" {...props} />
+    case 'ejecucion':
+      return <SquareTerminal aria-hidden="true" {...props} />
+    case 'codigo':
+      return <Binary aria-hidden="true" {...props} />
+    case 'fantasma':
+      return <Ghost aria-hidden="true" {...props} />
+    case 'padel':
+      return <IconoPaleta {...props} />
+    case 'orden':
+      return <Target aria-hidden="true" {...props} />
+    case 'espinas':
+      return <IconoEspinas {...props} />
+    case 'monopatin':
+      return <Scooter aria-hidden="true" {...props} />
+    case 'despido':
+      return <FileX aria-hidden="true" {...props} />
     default:
       return <Zap aria-hidden="true" {...props} />
   }
@@ -109,7 +156,8 @@ export function IconoDeEspecial({ icono, ...props }: { icono: IconoEspecial } & 
 
 /**
  * El ícono del botón de la herramienta según su etiqueta (`ficha.herramientas[0]`): la máquina,
- * el celular de Fabri o el puño del «Remate» de los barberos sin herramienta propia.
+ * el celular de Fabri, el puño del «Remate» de los barberos sin herramienta propia o la laptop del
+ * «Laptopazo» de Nacho (su segunda herramienta, quinta tanda).
  */
 export function IconoHerramienta({ nombre, ...props }: { nombre: string } & PropsSvg) {
   const clave = nombre
@@ -121,7 +169,84 @@ export function IconoHerramienta({ nombre, ...props }: { nombre: string } & Prop
   if (clave.startsWith('anteojo')) return <Glasses aria-hidden="true" {...props} />
   if (clave.startsWith('remate') || clave.startsWith('golpe')) return <BicepsFlexed aria-hidden="true" {...props} />
   if (clave.startsWith('tijera')) return <Scissors aria-hidden="true" {...props} />
+  if (clave.startsWith('laptop')) return <LaptopMinimal aria-hidden="true" {...props} />
   return <IconoMaquina {...props} />
+}
+
+/**
+ * La espiral del hipnotizado (los Lentes de Fran) para el HUD: distinta de la órbita del mareado.
+ * Semicírculos que crecen, con el trazo de lucide.
+ */
+export function IconoEspiral(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <path d="M12 12a.9.9 0 0 1 1.8 0 2.45 2.45 0 0 1-4.9 0 4 4 0 0 1 8 0 5.55 5.55 0 0 1-11.1 0 7.1 7.1 0 0 1 14.2 0" />
+    </Trazo>
+  )
+}
+
+/** El puño del Gigante contra el piso, con la grieta (Lautaro). */
+function IconoGigante(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <rect x="6" y="2.5" width="12" height="9" rx="2.5" />
+      <path d="M9 2.5V6M12 2.5V6M15 2.5V6" />
+      <path d="M3.5 9 2 8M20.5 9l1.5-1" />
+      <path d="M2 15.5h7.5l1.5 2.5 1.5-2.5 1.5 3 1.5-3H22" />
+      <path d="m8 19.5-1.5 2M16.5 19.5l1.5 2" />
+    </Trazo>
+  )
+}
+
+/** La mano que revolea para arriba (el Lanzamiento Aéreo de Lautaro). */
+function IconoLanzamiento(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <g transform="translate(1.5 9.5) scale(.56)">
+        <path
+          vectorEffect="non-scaling-stroke"
+          d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-6-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"
+        />
+      </g>
+      <path d="M9.5 8C12 4.6 15.8 3.1 20.5 3.6" />
+      <path d="m18 1.5 2.5 2.1-2.1 2.6" />
+    </Trazo>
+  )
+}
+
+/** El secador de pelo (el Lanzamiento de Herramientas de Leo). */
+function IconoSecador(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <circle cx="8" cy="8" r="5" />
+      <circle cx="8" cy="8" r="1.7" />
+      <path d="M8 3l10.5 1.5v7L8 13" />
+      <path d="M7.5 13 6.6 21h3l1.4-8.3" />
+      <path d="M21 6.5h1.5M21 9.5h1.5" />
+    </Trazo>
+  )
+}
+
+/** La paleta de pádel, con sus agujeros, y la pelota (el Smash de Nehuen). */
+function IconoPaleta(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <circle cx="10" cy="10" r="6.5" />
+      <path d="m14.6 14.6 2.2 2.2M16.8 16.8l4 4" />
+      <path d="M8 7.6h.01M11.6 7.6h.01M8 11.4h.01M11.6 11.4h.01M9.8 9.5h.01" strokeWidth={2.6} />
+      <circle cx="19.6" cy="4.4" r="2" />
+    </Trazo>
+  )
+}
+
+/** El abanico de púas doradas (las Espinas de Nico M.). */
+function IconoEspinas(props: PropsSvg) {
+  return (
+    <Trazo {...props}>
+      <path d="M7.4 20a4.6 4.6 0 0 1 9.2 0" />
+      <path d="M7.2 19.5 1.4 15.7l6.8 1.4zM8.3 16.9 4.3 8.6l6.2 6.9zM10.7 15.4 12 4.4l1.3 11zM13.5 15.5l6.2-6.9-4 8.3zM15.8 17.1l6.8-1.4-5.8 3.8z" />
+    </Trazo>
+  )
 }
 
 /** Máquina de cortar pelo, con el trazo de lucide (no existe en la librería). */

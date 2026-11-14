@@ -7,7 +7,7 @@
  * Encierros (tercera tanda, 31/oct): la vara es la práctica de la verificación (encierros.mts:
  * rachas sin control unidas por huecos de ≤ 2 ticks, de punta a punta en PANTALLA) y nada pasa de
  * TOPE_ENCIERRO.tope (4,5 s); en ticks de pelea, de 240 (4 s). Con las víctimas que se cubren,
- * machacan, esquivan o saltan al levantarse, contra los 13, con los guiones de la verificación
+ * machacan, esquivan o saltan al levantarse, contra todo el elenco (21 desde la quinta tanda), con los guiones de la verificación
  * (encierros-casos.json), una búsqueda propia y el agarre de Brian desde un arranque natural.
  *
  *   cd scripts/juego/simulador && node --import ./cargador.mjs cadenas.mts [--partidas=N] [--fuzz=N] [--azar=N] [--mut=N] [--hilos=K]
@@ -457,7 +457,7 @@ for (const id of ['gabriel', 'simon', 'nico_u', 'luciano', 'joaquin'] as IdPerso
   ok(!!golpeAg && !golpeAg.bloqueado && agu.luchadores[1].vida < vidaAntes && ai.stun === 0, 'tope: hasta respirar aguanta los golpes', `golpe ${golpeAg ? golpeAg.danio : 'no'}, aturdimiento ${ai.stun}`)
 }
 
-// ─── Encierros forzados por un JUGADOR después de una guardia rota (los 13) ───
+// ─── Encierros forzados por un JUGADOR después de una guardia rota (todo el elenco) ───
 // Lo que encontró la verificación del 30/oct: con un guion a propósito, Brian dejaba 256 ticks sin
 // moverse (guardia rota → remate → agarre → derribo) y Chipi 298 (guardia rota → máquina → Fijación
 // → golpe → Sillonazo). Acá cada atacante le rompe la guardia al rival (guardia en 5 y un golpe de
@@ -580,7 +580,7 @@ function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: n
   console.log(`     encierros forzados, en pantalla (${FUZZ} guiones al azar y ${Object.keys(planes).length} planes por atacante y víctima): ${lineas.join(' · ')}`)
   ok(
     peorTodo.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA,
-    'encierros forzados después de una guardia rota: nadie pasa de 4,5 s en pantalla ni de 4 s de pelea (los 13)',
+    `encierros forzados después de una guardia rota: nadie pasa de 4,5 s en pantalla ni de 4 s de pelea (los ${IDS_PERSONAJES.length})`,
     `${peorTodo.reloj} ticks de pantalla con ${peorTodo.quien} (${peorTodo.como}); de pelea, ${peorPelea}`,
   )
 }
@@ -625,7 +625,7 @@ const argNum = (n: string, def: number) => Number(ARGS.find((a) => a.startsWith(
   ok(difMotor === 0, 'encierros con los guiones de la verificación: el motor cuenta lo mismo que la prueba', `${difMotor} ticks distintos`)
 }
 
-// ─── Búsqueda propia: guiones al azar y mutaciones de los peores, contra las 13 víctimas ───
+// ─── Búsqueda propia: guiones al azar y mutaciones de los peores, contra todas las víctimas ───
 {
   const azar = argNum('azar', 3)
   const mut = argNum('mut', 60)
@@ -647,7 +647,7 @@ const argNum = (n: string, def: number) => Number(ARGS.find((a) => a.startsWith(
   const dif = res.reduce((s, x) => s + x.difMotor, 0)
   const sueltas = res.reduce((s, x) => s + x.sueltas, 0)
   console.log(`     búsqueda (${sims} guiones; azar ${azar}, ${mut} mutaciones): peor en pantalla por manera de escaparse ${POLITICAS.map((q) => `${q} ${porPolitica[q]}`).join(', ')}; el motor soltó en el tope ${sueltas} veces`)
-  ok(peor.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA && dif === 0, 'encierros buscados (13 atacantes × 13 víctimas × 4 maneras de escaparse): ninguno pasa del tope', `${peor.reloj} ticks de pantalla (${peor.como}); de pelea, ${peorPelea}; reloj distinto ${dif}`)
+  ok(peor.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA && dif === 0, `encierros buscados (${IDS_PERSONAJES.length} atacantes × ${IDS_PERSONAJES.length} víctimas × 4 maneras de escaparse): ninguno pasa del tope`, `${peor.reloj} ticks de pantalla (${peor.como}); de pelea, ${peorPelea}; reloj distinto ${dif}`)
 }
 
 // ─── El agarre de Brian desde un arranque natural (la confirmación de la verificación) ───
@@ -761,7 +761,7 @@ ok(
     const z = corrida(9999 + i)
     if (z.length !== x.length || z.some((v, j) => v !== x[j])) distintosEntreSemillas++
   }
-  ok(iguales, 'determinismo: misma semilla → mismo hash en cada tick (13 cruces)')
+  ok(iguales, `determinismo: misma semilla → mismo hash en cada tick (${ids.length} cruces)`)
   ok(distintosEntreSemillas === ids.length, 'determinismo: otra semilla → otra partida', `${distintosEntreSemillas}/${ids.length}`)
 }
 

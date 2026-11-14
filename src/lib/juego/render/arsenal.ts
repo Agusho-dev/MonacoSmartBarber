@@ -403,9 +403,10 @@ export function estallidoGraffiti(E: Escena, x: number, y: number, w: number, h:
 /**
  * Un objeto centrado en (x, y) de mundo: el sprite `efecto` de la hoja del dueño (o del rival) si
  * existe, encajado en `lado` y sin pasar la escala del atlas; si no, la utilería `util` (un
- * cuadrado de `lado` unidades de mundo). Espeja con `mira` y después gira `rot`.
+ * cuadrado de `lado` unidades de mundo). Espeja con `mira` y después gira `rot`. (Lo usan también los
+ * proyectiles y los especiales de la quinta tanda.)
  */
-function objeto(
+export function objeto(
   E: Escena,
   atlas: readonly (AtlasPreparado | null)[],
   duenio: number,
@@ -441,14 +442,14 @@ function objeto(
 }
 
 /** Sombra en el piso de algo que vuela (más chica y clara cuanto más alto). */
-function sombraEnPiso(E: Escena, x: number, yPantalla: number, ancho: number): void {
+export function sombraEnPiso(E: Escena, x: number, yPantalla: number, ancho: number): void {
   const altura = E.sueloY - yPantalla
   const k = acotar(1 - altura / 380, 0.25, 1)
   spriteMundo(E, E.spr.sombra, x, E.sueloY + 2, ancho * k, ancho * 0.22 * k, 0, 0.42 * k)
 }
 
 /** Estira una estela (Sprites.estela) desde la cola hasta la cabeza, en modo aditivo. */
-function trazarEstela(E: Escena, color: string, xc: number, yc: number, xh: number, yh: number, grosor: number, alfa: number): void {
+export function trazarEstela(E: Escena, color: string, xc: number, yc: number, xh: number, yh: number, grosor: number, alfa: number): void {
   const dx = xh - xc
   const dy = yh - yc
   const largo = Math.hypot(dx, dy)

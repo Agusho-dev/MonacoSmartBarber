@@ -11,11 +11,16 @@
  * `settings.manage` para cambiarla, y sólo las sucursales que el rol alcanza. Existe
  * sólo para la organización del juego (Monaco): los luchadores son sus barberos y en
  * las otras organizaciones de BarberOS no hay nada que prender.
+ *
+ * Además, «Jugar como dueño» (`crearPaseDuenos`): el link al juego con el pase que
+ * deja ver y elegir a los personajes de los dueños (src/lib/juego/pase.ts).
  */
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
+import { getCachedAuthUser } from '@/lib/auth-cache'
 import { isValidUUID } from '@/lib/validation'
-import { orgDelJuego } from '@/lib/juego/servidor'
+import { firmarPaseDuenos } from '@/lib/juego/pase'
+import { orgDelJuego, urlDelJuego } from '@/lib/juego/servidor'
 import { getCurrentOrgId } from './org'
 import { getCurrentUserPermissions } from './permissions-gate'
 import { assertBranchAccess, getScopedBranchIds } from './branch-access'
@@ -142,5 +147,45 @@ export async function actualizarJuegoSucursal(
       name: String(fila.name ?? '').trim(),
       juego_qr_kiosko: fila.juego_qr_kiosko === true,
     },
+  }
+}
+
+/**
+ * «Jugar como dueño»: el link al juego con el pase de dueños (`?d=`, src/lib/juego/pase.ts), que
+ * lleva la organización, quién lo pidió y el vencimiento (90 días). Lo pide quien ve la tarjeta del
+ * juego: `settings.view` y la organización del juego. El juego lo valida en el servidor
+ * (`validarPaseDuenos`, src/lib/actions/juego.ts) y lo guarda en el celular donde se abre; mientras
+ * valga, ese celular ve y elige a los personajes de los dueños (`soloDuenos`). No escribe nada en la
+ * base: cada pedido firma uno nuevo (anularlos todos = subir la versión de la clave en pase.ts).
+ */
+export async function crearPaseDuenos(): Promise<
+  { ok: true; url: string; venceEn: number } | { ok: false; error: string }
+> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { ok: false, error: SESION_VENCIDA }
+
+  const permisos = await getCurrentUserPermissions()
+  if (permisos['settings.view'] !== true) {
+    return { ok: false, error: 'No tenés permiso para ver la configuración.' }
+  }
+
+  const delJuego = await esOrgDelJuego(orgId)
+  if (delJuego === null) return { ok: false, error: 'No pudimos armar el pase. Probá de nuevo.' }
+  if (!delJuego) return { ok: false, error: 'El juego no está disponible para esta organización.' }
+
+  const usuario = await getCachedAuthUser()
+  if (!usuario) return { ok: false, error: SESION_VENCIDA }
+
+  const firmado = firmarPaseDuenos({ orgId, usuarioId: usuario.id })
+  if (!firmado) return { ok: false, error: 'No pudimos armar el pase. Probá de nuevo.' }
+
+  try {
+    const url = await urlDelJuego(`d=${firmado.pase}`)
+    // Queda en el log quién lo pidió (el pase no se guarda en ninguna tabla).
+    console.info('[crearPaseDuenos] pase de dueños', { usuario: usuario.id, vence: new Date(firmado.venceEn * 1000).toISOString() })
+    return { ok: true, url, venceEn: firmado.venceEn }
+  } catch (e) {
+    console.error('[crearPaseDuenos]', e instanceof Error ? e.message : String(e))
+    return { ok: false, error: 'No pudimos armar el pase. Probá de nuevo.' }
   }
 }

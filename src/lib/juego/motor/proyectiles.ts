@@ -4,7 +4,10 @@
  * Corte Relámpago (sólo visual: acompaña a Simón mientras corre, nunca pega) y las piezas del
  * elenco nuevo (ver movimientos.ts): rastreros (bombo, sismo), ráfagas (balas, botellas, mates),
  * bumerán (gorro), chorros (leche, agua), onda (grito), área diferida (graffiti) y la nube del
- * pañal en el piso.
+ * pañal en el piso. Quinta tanda (14/nov): las cartas de Chino (una ráfaga a tres alturas), los
+ * Lentes de Fran, lo que tira Leo (apunta al salir) y su Spray (un chorro), las columnas de código de
+ * Nacho (una ráfaga de áreas diferidas, cada una más lejos), la pelota de pádel de Nehuen y la
+ * DEVOLUCIÓN de su Smash (`devolver`: el tiro del rival cambia de dueño y vuelve).
  *
  * (x, y) de un proyectil es su CENTRO en el mundo (y = altura del centro sobre el piso);
  * `ancho`/`alto` del estado público son su caja actual.
@@ -12,7 +15,7 @@
 import type { EfectoEspecial, Herramienta, Lado, Partida, ProyectilEstado, TipoProyectil } from '../tipos'
 import { HITSTUN, X_MAX, X_MIN } from './constantes'
 import { aplicarImpacto, contarAcierto, danioContinuo, efectoDe, efectoNormalizado, ponerEstado } from './combate'
-import { cajaCuerpo, contraPared, golpeable, inmuneAlControl, interseccion, limitar } from './cuerpo'
+import { altoParado, cajaCuerpo, cajaGolpe, contraPared, golpeable, inmuneAlControl, interseccion, limitar } from './cuerpo'
 import type { EstadoInterno, ProyectilInterno } from './interno'
 import { emitir } from './interno'
 import type { Caja, DefEspecial, DefNube, DefProyectil } from './movimientos'
@@ -39,6 +42,14 @@ const HERRAMIENTA: Record<TipoProyectil, Herramienta> = {
   agua: 'agua',
   sismo: 'sismo',
   guante: 'guante',
+  carta: 'carta',
+  hipnosis: 'hipnosis',
+  secador: 'secador',
+  aerosol: 'aerosol',
+  codigo: 'codigo',
+  pelotita: 'paleta',
+  espina: 'espinas',
+  monopatin: 'monopatin',
 }
 
 /** Distancia (centro a centro) a la que el gorro vuelve a la mano y desaparece. */
@@ -73,6 +84,7 @@ function interno(pub: ProyectilEstado, def: DefProyectil | null, especial: 1 | 2
     pegoVuelta: false,
     estallo: false,
     nube: null,
+    finTrampa: 0,
   }
 }
 
@@ -96,10 +108,20 @@ export function lanzarProyectil(p: Partida, I: EstadoInterno, lado: Lado, esp: D
   let vx = l.mira * d.vx
   let vy = d.vy
   if (d.diferido) {
-    x = l.x + l.mira * d.diferido.distancia
+    // Cada tiro de una ráfaga de áreas puede caer a otra distancia (el Terremoto de Código de Nacho).
+    x = l.x + l.mira * (tiro?.distancia ?? d.diferido.distancia)
     y = d.alto / 2
     vx = 0
     vy = 0
+  } else if (d.apunta) {
+    // Las herramientas de Leo: al salir, la vy que lo lleva al centro del rival en ESTE tick (de pie a
+    // media altura, agachado a 60, en el aire a 75 sobre sus pies), acotada a ±0,8·|vx|. Sólo + − × ÷
+    // y min/max: da lo mismo en todos los motores de JS. No lo sigue después.
+    const r = p.luchadores[(1 - lado) as Lado]
+    const ri = I.luchadores[(1 - lado) as Lado]
+    const yObjetivo = !r.enSuelo ? r.y + 75 : ri.agachado ? 60 : r.y + altoParado(r) * 0.55
+    const tope = Math.abs(d.vx) * 0.8
+    vy = limitar((Math.abs(d.vx) * (yObjetivo - y)) / Math.max(60, Math.abs(r.x - x)), -tope, tope)
   } else if (d.rastrero) {
     y = d.alto / 2
     vy = 0
@@ -124,6 +146,7 @@ export function lanzarProyectil(p: Partida, I: EstadoInterno, lado: Lado, esp: D
     vuelta: false,
     ancho: d.ancho,
     alto: d.alto,
+    plantado: false,
   }
   const pi = interno(pub, d, esp.numero, selloAccion)
   pi.efectoTiro = tiro?.efecto
@@ -153,6 +176,7 @@ export function crearRayo(p: Partida, I: EstadoInterno, lado: Lado, selloAccion:
     vuelta: false,
     ancho: 60,
     alto: 60,
+    plantado: false,
   }
   const pi = interno(pub, null, numero, selloAccion)
   pi.cosmetico = true
@@ -193,6 +217,7 @@ function crearNube(p: Partida, I: EstadoInterno, lado: Lado, x: number, def: Def
     vuelta: false,
     ancho: def.ancho,
     alto: def.alto,
+    plantado: false,
   }
   const pi = interno(pub, null, especial, selloAccion)
   pi.nube = def
@@ -255,6 +280,48 @@ function actualizarNube(p: Partida, I: EstadoInterno, pi: ProyectilInterno, pega
     pi.acerto = true
     contarAcierto(p, I, q.duenio, pi.selloAccion)
   }
+  return true
+}
+
+/**
+ * ¿Se puede devolver? Lo que VUELA: balas, cartas, herramientas, botellas, mates, el trago, el pañal,
+ * las pelotas, el guante, el lente, el tornado y el sillón mientras está en el aire. No: los chorros
+ * (salen de la mano del otro), la onda, las áreas diferidas, la nube, lo que va por el piso, el bumerán
+ * (vuelve solo a su dueño), el rayo del Corte Relámpago (no pega) ni el sillón ya deslizándose.
+ */
+function devolvible(pi: ProyectilInterno, d: DefProyectil): boolean {
+  return !pi.cosmetico && !pi.nube && !pi.pub.plantado && !d.chorro && !d.onda && !d.diferido && !d.rastrero && !d.bumeran && !(d.desliza && pi.enSuelo)
+}
+
+/**
+ * El Smash de Pádel (DefEspecial.devuelve): si el que va a recibir este tiro tiene la paleta en el aire
+ * y el tiro toca su caja, cambia de dueño y vuelve hacia donde mira (vx × `mult`, como mucho `max`),
+ * con su daño y su efecto de siempre: el efecto se resuelve ANTES de cambiar de dueño (si no, el
+ * efecto de la ficha sería el del que lo devolvió). Desde ahí cuenta como un especial de él (el sello y
+ * el número de su acción: un acierto, sus intentos). Devuelve si lo devolvió.
+ */
+function devolver(p: Partida, I: EstadoInterno, pi: ProyectilInterno, d: DefProyectil): boolean {
+  const q = pi.pub
+  const lado = (1 - q.duenio) as Lado
+  const a = I.luchadores[lado].accion
+  const dv = (a?.mov as DefEspecial | undefined)?.devuelve
+  if (!a || !dv || a.t < dv.desde || a.t >= dv.hasta || !devolvible(pi, d)) return false
+  const l = p.luchadores[lado]
+  if (!interseccion(caja(q), cajaGolpe(l, dv.caja))) return false
+  pi.efectoTiro = efectoDelContacto(p, pi, d)
+  q.duenio = lado
+  q.vx = l.mira * Math.min(dv.max, Math.abs(q.vx) * dv.mult)
+  q.mira = l.mira
+  // Vuelve con la vida entera: si no, lo que se devolvía tarde se apagaba antes de llegar (el lente
+  // devuelto cerca de Nehuen no volvía hasta Fran 2 de cada 15 veces).
+  q.edad = 0
+  pi.selloAccion = a.sello
+  pi.especial = a.especial === 0 ? 1 : a.especial
+  pi.acerto = false
+  pi.espera = 0
+  pi.arrastrando = false
+  p.estadisticas[lado].golpesIntentados += q.golpesRestantes
+  emitir(p, { tipo: 'devuelto', quien: lado, x: q.x, y: q.y, proyectil: q.tipo })
   return true
 }
 
@@ -323,7 +390,15 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
         quitar(p, I, i)
         continue
       }
+    } else if (q.plantado) {
+      // La púa clavada (DefProyectil.trampa): quieta hasta que la pisen o se apague.
+      if (q.edad >= pi.finTrampa) {
+        quitar(p, I, i)
+        continue
+      }
     } else {
+      // El monopatín de Tony (DefProyectil.aceleracion): sale lento y acelera hasta su tope.
+      if (d.aceleracion) q.vx = q.mira * Math.min(d.aceleracion.max, Math.abs(q.vx) + d.aceleracion.por)
       // Mientras tiene a alguien aturdido, el tornado frena y lo chupa hacia su frente (así entran
       // los seis cortes); contra la pared se queda moliendo en el lugar.
       if (pi.arrastrando && d.arrastre !== undefined) {
@@ -395,9 +470,22 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
       }
     }
 
-    // Toca el piso: se desliza (sillón), deja la nube (pañal) o desaparece.
+    // Toca el piso: se desliza (sillón), deja la nube (pañal), se clava (las púas) o desaparece.
     const medioAlto = q.alto / 2
-    if (!d.rastrero && !d.diferido && !d.chorro && d.gravedad > 0 && q.y - medioAlto <= 0) {
+    if (!q.plantado && !d.rastrero && !d.diferido && !d.chorro && d.gravedad > 0 && q.y - medioAlto <= 0) {
+      if (d.trampa && q.golpesRestantes > 0 && pegan) {
+        // Las Espinas de Nico M.: la que no pegó se clava, quieta, con la caja de la trampa.
+        q.plantado = true
+        q.vx = 0
+        q.vy = 0
+        q.rot = 0
+        q.ancho = d.trampa.ancho
+        q.alto = d.trampa.alto
+        q.y = d.trampa.alto / 2
+        pi.finTrampa = q.edad + d.trampa.vida
+        emitir(p, { tipo: 'plantada', quien: q.duenio, x: q.x })
+        continue
+      }
       if (d.desliza) {
         q.y = medioAlto
         q.vy = 0
@@ -418,13 +506,15 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
         continue
       }
     }
-    if (q.x < X_MIN - 140 || q.x > X_MAX + 140 || (!d.diferido && !d.chorro && q.edad >= d.vida)) {
+    if (q.x < X_MIN - 140 || q.x > X_MAX + 140 || (!d.diferido && !d.chorro && !q.plantado && q.edad >= d.vida)) {
       quitar(p, I, i)
       continue
     }
 
     // ─── Contactos ───
     if (!pegan || q.golpesRestantes <= 0) continue
+    // La paleta de Nehuen, antes que el contacto: el tiro que la toca no le pega, se da vuelta.
+    if (devolver(p, I, pi, d)) continue
     if (pi.espera > 0) {
       pi.espera--
       continue
@@ -432,7 +522,7 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
     if (d.diferido && !pi.estallo) continue
     if (d.bumeran && (q.vuelta ? pi.pegoVuelta : pi.pegoIda)) continue
     if (!golpeable(v, vi, true)) continue
-    if (d.rastrero && !v.enSuelo) continue
+    if ((d.rastrero || q.plantado) && !v.enSuelo) continue
     // La onda se pasa con la esquiva (todo el dash, no sólo el arranque invulnerable).
     if (d.onda && (vi.dash || pi.arrastrando)) continue
     const cuerpo = cajaCuerpo(v, vi)
@@ -442,7 +532,8 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
 
     const ultimo = q.golpesRestantes === 1
     const multi = d.golpes > 1 && !d.bumeran && !d.onda
-    const efecto = efectoDelContacto(p, pi, d)
+    const tr = q.plantado ? d.trampa : undefined
+    const efecto = tr ? tr.efecto : efectoDelContacto(p, pi, d)
     const fuerza = ultimo ? (d.fuerzaUltimo ?? d.fuerza) : d.fuerza
     const dir: 1 | -1 = d.chorro || d.diferido ? q.mira : q.vx > 0 ? 1 : q.vx < 0 ? -1 : q.mira
     const empujeBase = pi.empujeTiro ?? d.empuje
@@ -450,7 +541,7 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
     const resultado = aplicarImpacto(p, I, {
       atacante: q.duenio,
       victima: victimaLado,
-      danio: d.danio,
+      danio: tr ? tr.danio : d.danio,
       danioGuardia: d.danioGuardia,
       fuerza,
       herramienta: HERRAMIENTA[d.tipo],
@@ -467,12 +558,29 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
       efecto,
       ticksEfecto: d.ticksEfecto ?? 0,
       quema: d.quema ?? null,
-      imbloqueable: !!d.imbloqueable && v.enSuelo,
+      imbloqueable: tr ? tr.imbloqueable : !!d.imbloqueable && v.enSuelo,
       accion: null,
       ventana: -1,
       proyectil: pi,
       rebotePared: false,
     })
+    // Lo anuló la contra del All In de Chino: el tiro se deshace ahí (no arrastra ni deja nube).
+    if (resultado === 'contra') {
+      quitar(p, I, i)
+      continue
+    }
+    // La púa clavada que pisaron: se deshacen todas las de esa tirada (una trampa por tirada). Las otras
+    // se apagan en su próximo paso (sacarlas acá correría los índices del recorrido).
+    if (q.plantado) {
+      for (const o of I.proyectiles) {
+        if (o !== pi && o.pub.plantado && o.pub.duenio === q.duenio && o.selloAccion === pi.selloAccion) {
+          o.pub.golpesRestantes = 0
+          o.finTrampa = 0
+        }
+      }
+      quitar(p, I, i)
+      continue
+    }
     q.golpesRestantes--
     pi.espera = d.intervalo
     if (d.bumeran) {

@@ -5,19 +5,27 @@
  * del juego en la tablet de check-in (`branches.juego_qr_kiosko`, mig 233). Mismo esquema
  * que la asesoría en la entrada: cambio optimista que se confirma con el dato que quedó
  * en la base, y si falla el interruptor vuelve solo. Ver ../.claude/rules/juego.md.
+ *
+ * «Jugar como dueño»: abre el juego con el pase que deja ver y elegir a los personajes de los
+ * dueños (`crearPaseDuenos`; el pase, en src/lib/juego/pase.ts). Lo ve quien ve la tarjeta.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, ExternalLink, Gamepad2, Info, Loader2, QrCode, RefreshCw } from 'lucide-react'
+import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
+import { QRCodeSVG } from 'qrcode.react'
+import { AlertTriangle, Copy, Crown, ExternalLink, Gamepad2, Info, Loader2, QrCode, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import {
   actualizarJuegoSucursal,
+  crearPaseDuenos,
   obtenerJuegoSucursales,
   type SucursalJuego,
 } from '@/lib/actions/juego-config'
+import { esAppInstalada } from '@/lib/app-instalable'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +60,9 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
   /** Valor que se muestra mientras el servidor confirma (se descarta al volver la respuesta). */
   const [optimista, setOptimista] = useState<Record<string, boolean>>({})
   const [guardando, setGuardando] = useState<Record<string, true>>({})
+  /** El último pase de dueños que se pidió (para abrirlo, copiarlo o escanearlo desde otro celular). */
+  const [pase, setPase] = useState<{ url: string; venceEn: number } | null>(null)
+  const [pidiendoPase, setPidiendoPase] = useState(false)
 
   async function recargar() {
     setRecargando(true)
@@ -103,6 +114,43 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
   const prendidas = sucursales.filter(prendida)
   // «Probar el juego» abre la arena de la primera sucursal que lo tenga prendido (o la primera).
   const slugPrueba = (prendidas[0] ?? sucursales[0])?.slug ?? 'rondeau'
+
+  async function jugarComoDueno() {
+    if (pidiendoPase) return
+    // La pestaña se abre YA, dentro del toque: después de esperar al servidor, Safari del iPhone la
+    // bloquearía. En la app instalada window.open no dice si abrió (y abre la hoja de Safari): ahí no
+    // se abre nada solo y queda el enlace de abajo, como en «Pedir reseña» de Clientes.
+    const ventana = esAppInstalada() ? null : window.open('', '_blank')
+    setPidiendoPase(true)
+    try {
+      const r = await crearPaseDuenos()
+      if (!r.ok) {
+        ventana?.close()
+        toast.error('No pudimos abrir el juego', { description: r.error })
+        return
+      }
+      setPase({ url: r.url, venceEn: r.venceEn })
+      if (ventana) {
+        ventana.opener = null
+        ventana.location.href = r.url
+      }
+    } catch {
+      ventana?.close()
+      toast.error('No pudimos abrir el juego', { description: SIN_CONEXION })
+    } finally {
+      setPidiendoPase(false)
+    }
+  }
+
+  async function copiarPase() {
+    if (!pase) return
+    try {
+      await navigator.clipboard.writeText(pase.url)
+      toast.success('Enlace copiado', { description: 'Pegalo en el navegador del celular donde vas a jugar.' })
+    } catch {
+      toast.error('No se pudo copiar', { description: 'Mantené apretado «Abrir el juego» y copiá el enlace.' })
+    }
+  }
 
   async function alternar(s: SucursalJuego, activo: boolean) {
     if (!puedeEditar || guardando[s.id]) return
@@ -268,20 +316,72 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
             )}
           </section>
 
-          {/* ── Probarlo antes de prenderlo ── */}
-          <aside className="space-y-3 rounded-lg border bg-muted/20 p-4">
-            <p className="text-sm font-medium">Probalo antes de prenderlo</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              El juego se abre en cualquier celular con el link, aunque el QR esté apagado. Los clientes sólo llegan por
-              el QR de la tablet.
-            </p>
-            <Button asChild variant="outline" size="sm" className="w-full">
-              <a href={`/juego?s=${encodeURIComponent(slugPrueba)}`} target="_blank" rel="noopener noreferrer">
-                <ExternalLink />
-                Probar el juego
-              </a>
-            </Button>
-          </aside>
+          <div className="min-w-0 space-y-3">
+            {/* ── Probarlo antes de prenderlo ── */}
+            <aside className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <p className="text-sm font-medium">Probalo antes de prenderlo</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                El juego se abre en cualquier celular con el link, aunque el QR esté apagado. Los clientes sólo llegan
+                por el QR de la tablet.
+              </p>
+              <Button asChild variant="outline" size="sm" className="w-full">
+                <a href={`/juego?s=${encodeURIComponent(slugPrueba)}`} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink />
+                  Probar el juego
+                </a>
+              </Button>
+            </aside>
+
+            {/* ── Los personajes de los dueños: sólo con el pase ── */}
+            <aside className="space-y-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-4" aria-labelledby="juego-duenos">
+              <p id="juego-duenos" className="flex items-center gap-2 text-sm font-medium">
+                <Crown className="size-4 text-amber-400" aria-hidden="true" />
+                Jugar como dueño
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Los personajes de los dueños no los ve ningún cliente: aparecen sólo en el navegador donde abras este
+                pase, durante 90 días. Esas peleas no van al ranking.
+              </p>
+              <Button variant="outline" size="sm" className="w-full" onClick={() => void jugarComoDueno()} disabled={pidiendoPase}>
+                {pidiendoPase ? <Loader2 className="animate-spin" /> : <Crown />}
+                Jugar como dueño
+              </Button>
+              {pase && (
+                <div className="space-y-2.5 border-t border-amber-500/20 pt-3">
+                  <div className="mx-auto w-fit rounded-xl bg-white p-2.5">
+                    <QRCodeSVG
+                      value={pase.url}
+                      size={184}
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                      level="M"
+                      marginSize={1}
+                      title="Pase de dueños de Corte Final"
+                    />
+                  </div>
+                  <p className="text-center text-xs text-muted-foreground">
+                    Para jugar en otro celular, escanealo con la cámara.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button asChild variant="outline" size="sm">
+                      <a href={pase.url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink />
+                        Abrir el juego
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => void copiarPase()}>
+                      <Copy />
+                      Copiar enlace
+                    </Button>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Vale hasta el {format(new Date(pase.venceEn * 1000), "d 'de' MMMM 'de' yyyy", { locale: es })}. Con
+                    este enlace cualquiera ve a los dueños: no lo compartas con clientes.
+                  </p>
+                </div>
+              )}
+            </aside>
+          </div>
         </div>
 
         <p className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">

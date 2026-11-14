@@ -165,7 +165,18 @@ export const EFECTO = {
   /** Velocidad de caminar con LENTO (la nube) y MAREADO (el trago). */
   multLento: 0.55,
   multMareado: 0.65,
+  /** Si el kit no dice cuánto (quinta tanda): hipnotizado (los Lentes de Fran) y cegado (el Spray de Leo). */
+  hipnotizado: 45,
+  cegado: 75,
 } as const
+
+/**
+ * El caminar forzado del hipnotizado (los Lentes Hipnóticos de Fran, quinta tanda): `paso` px por tick
+ * hacia el que lo hipnotizó, igual para todos (ni el LENTO, ni el mareo, ni la Presencia de Tony lo
+ * cambian); a `llega` px de centro a centro se queda quieto, atontado, `quieto` ticks más (si le
+ * quedaban más) y se despierta. Mientras dura el aturdimiento del golpe del lente no camina.
+ */
+export const HIPNOSIS = { paso: 3, llega: 95, quieto: 12 } as const
 
 /**
  * Inmunidad (ticks) a un estado de control después de salir de él: los estados no se encadenan
@@ -177,6 +188,10 @@ export const INMUNIDAD = {
   quemado: 60,
   congelado: 60,
   electrocutado: 60,
+  // Quinta tanda: los dos estados que dejan indefenso se cortan con el primer golpe limpio y, al
+  // terminar por lo que sea, no vuelven a entrar en 2 s.
+  hipnotizado: 120,
+  cegado: 120,
 } as const
 
 // ─── Fases (ticks simulados) ─────────────────────────────────────────────────

@@ -1,6 +1,7 @@
-import { Flame, HeartPulse, Orbit, ShieldOff, Snail, Snowflake, Star, Zap } from 'lucide-react'
+import { EyeOff, Flame, HeartPulse, Orbit, ShieldOff, Snail, Snowflake, Star, Zap } from 'lucide-react'
 import type { Lado } from '@/lib/juego/tipos'
 import { ESTADOS_HUD, type EstadoHud } from '@/lib/juego/ui/hud'
+import { IconoEspiral } from './iconos'
 
 function IconoEstado({ estado }: { estado: EstadoHud }) {
   switch (estado) {
@@ -14,6 +15,10 @@ function IconoEstado({ estado }: { estado: EstadoHud }) {
       return <Star />
     case 'mareado':
       return <Orbit />
+    case 'hipnotizado':
+      return <IconoEspiral />
+    case 'cegado':
+      return <EyeOff />
     case 'quemado':
       return <Flame />
     case 'lento':
@@ -25,8 +30,8 @@ function IconoEstado({ estado }: { estado: EstadoHud }) {
 
 /**
  * Los íconos de estado al lado del nombre en el HUD (congelado, electrocutado, guardia rota,
- * aturdido, mareado, quemado, lento, curándose). Los prende y apaga hud.ts por `data-on`. Lo usan
- * los dos HUD (contra la CPU y online), así no se desfasan.
+ * aturdido, mareado, hipnotizado, cegado, quemado, lento, curándose). Los prende y apaga hud.ts por
+ * `data-on`. Lo usan los dos HUD (contra la CPU y online), así no se desfasan.
  */
 export function EstadosHud({ lado }: { lado: Lado }) {
   return (

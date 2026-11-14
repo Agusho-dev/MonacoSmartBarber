@@ -14,10 +14,10 @@
  * vez, lo que sale jugando, los rounds que vienen, «PERFECTO» y «¡TIEMPO!»; ver previosDeLaPelea).
  * Sólo un round fuera de lo común se pinta en el festejo del anterior.
  */
-import type { Lado, Partida } from '../tipos'
+import type { IdPersonaje, Lado, Partida } from '../tipos'
 import type { Escena } from './escena'
 import { contexto, crearLienzo, liberarLienzo } from './lienzo'
-import { acotar, entradaCuadratica, salidaConRebote, salidaCubica, salidaElastica, suavizar } from './util'
+import { acotar, entradaCuadratica, ruido, salidaConRebote, salidaCubica, salidaElastica, suavizar } from './util'
 
 export interface EstiloTexto {
   tam: number
@@ -52,6 +52,8 @@ const HIELO = ['#FFFFFF', '#E8FCFF', '#92E8FF', '#35B4FF', '#123F9C']
 const CROMO = ['#FFFFFF', '#F2F5F9', '#BCC5D0', '#7A8594', '#2F3742']
 const ELECTRICO = ['#FFFFFF', '#FFFCD8', '#FFF06B', '#FFC400', '#B86E00']
 const VIOLETA = ['#FFFFFF', '#F5E8FF', '#D7A8FF', '#A855F7', '#4C1D95']
+const CELESTE = ['#FFFFFF', '#E0F2FE', '#7DD3FC', '#38BDF8', '#0C4A6E']
+const LIMA = ['#FFFFFF', '#F7FEE7', '#D9F99D', '#C8F542', '#3F6212']
 
 function estilo(tam: number, colores: readonly string[], exterior: string, extra: Partial<EstiloTexto> = {}): EstiloTexto {
   return {
@@ -101,7 +103,23 @@ const ANUNCIOS: Record<ClaveAnuncio, DefAnuncio> = {
   turbo: { estilo: estilo(94, ELECTRICO, '#4A2A00', { espaciado: 0.06 }), dur: 1250, entrada: 'deslizar' },
 }
 
-export type ClaveImpacto = 'critico' | 'guardia' | 'congelado' | 'electrocutado' | 'aturdido' | 'mareado' | 'quemado'
+export type ClaveImpacto =
+  | 'critico'
+  | 'guardia'
+  | 'congelado'
+  | 'electrocutado'
+  | 'aturdido'
+  | 'mareado'
+  | 'quemado'
+  // Quinta tanda (14/nov).
+  | 'allin'
+  | 'precision'
+  | 'devuelta'
+  | 'despido'
+  | 'hipnotizado'
+  | 'cegado'
+  /** La ventana «ERROR — Rival.exe no responde…» del Agarre y Ejecución de Nacho (ver pintarVentanaError). */
+  | 'error'
 
 const IMPACTOS: Record<ClaveImpacto, { texto: string; estilo: EstiloTexto }> = {
   critico: { texto: '¡CRÍTICO!', estilo: estilo(46, ORO, '#4A2200') },
@@ -111,6 +129,116 @@ const IMPACTOS: Record<ClaveImpacto, { texto: string; estilo: EstiloTexto }> = {
   aturdido: { texto: '¡ATURDIDO!', estilo: estilo(40, ORO, '#4A2200') },
   mareado: { texto: '¡MAREADO!', estilo: estilo(40, VIOLETA, '#2E0A4F') },
   quemado: { texto: '¡QUEMADO!', estilo: estilo(40, FUEGO, '#4A0E00') },
+  allin: { texto: '¡ALL IN!', estilo: estilo(58, VIOLETA, '#2E0A4F', { espaciado: 0.04 }) },
+  precision: { texto: '¡PRECISIÓN!', estilo: estilo(46, CELESTE, '#082F49') },
+  devuelta: { texto: '¡DEVUELTA!', estilo: estilo(32, LIMA, '#1A2E05') },
+  despido: { texto: 'DESPIDO', estilo: estilo(66, ROJO, '#2A0000', { espaciado: 0.07 }) },
+  hipnotizado: { texto: '¡HIPNOTIZADO!', estilo: estilo(38, VIOLETA, '#2E0A4F') },
+  cegado: { texto: '¡CEGADO!', estilo: estilo(40, CROMO, '#0B2440') },
+  error: { texto: 'ERROR — Rival.exe no responde…', estilo: estilo(22, ROJO, '#2A0000') },
+}
+
+/** Los impactos de siempre: se precalientan en todas las peleas. */
+const IMPACTOS_BASE: readonly ClaveImpacto[] = ['critico', 'guardia', 'congelado', 'electrocutado', 'aturdido', 'mareado', 'quemado']
+
+/**
+ * Los textos de la quinta tanda que sólo salen si pelea uno de estos (se precalientan nada más en esas
+ * peleas: cada uno es un cuadro largo de la presentación en un celular lento).
+ */
+const IMPACTOS_DE: Partial<Record<IdPersonaje, readonly ClaveImpacto[]>> = {
+  chino: ['allin'],
+  fran: ['precision', 'hipnotizado'],
+  leo: ['cegado'],
+  nacho: ['error'],
+  nehuen: ['devuelta'],
+  tony: ['despido'],
+}
+
+/**
+ * Los de la quinta tanda se pintan ENCIMA del super flash (su oscurecido y su banda): salen en el
+ * golpe del especial, cuando la banda todavía tapa la cabeza del rival (ver dibujarMundo).
+ */
+const ENCIMA_DEL_FLASH: ReadonlySet<ClaveImpacto> = new Set<ClaveImpacto>(['allin', 'precision', 'devuelta', 'despido', 'hipnotizado', 'cegado', 'error'])
+
+/** El que pisa a otro que salió en el mismo golpe: «¡PRECISIÓN!» es el crítico del Corte de Precisión. */
+const PISA: Partial<Record<ClaveImpacto, ClaveImpacto>> = { precision: 'critico' }
+
+/** Cuánto vive cada impacto en pantalla (ms). */
+function vidaImpacto(clave: ClaveImpacto): number {
+  switch (clave) {
+    case 'guardia':
+      return 1100
+    case 'error':
+      return 1350
+    case 'despido':
+    case 'allin':
+      return 1050
+    default:
+      return 900
+  }
+}
+
+/** Ancho y alto de la ventana del «ERROR» en unidades (de mundo). */
+const VENTANA_ERROR = { w: 300, h: 72 } as const
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
+/**
+ * La ventana de error del Agarre y Ejecución de Nacho: un cuadro de sistema oscuro con la barra roja
+ * (#FF3B5C) «ERROR» y adentro «Rival.exe no responde…». Con la fuente monoespaciada del sistema (no
+ * hay que esperar ninguna fuente). Se pinta una vez y se reusa, como los demás textos.
+ */
+function pintarVentanaError(escala: number): TextoPintado {
+  const { w, h } = VENTANA_ERROR
+  const lienzo = crearLienzo(Math.ceil((w + 8) * escala), Math.ceil((h + 8) * escala))
+  const g = contexto(lienzo)
+  g.setTransform(escala, 0, 0, escala, 4 * escala, 4 * escala)
+  const r = 6
+  const camino = (x: number, y: number, ww: number, hh: number, rr: number) => {
+    g.beginPath()
+    g.moveTo(x + rr, y)
+    g.arcTo(x + ww, y, x + ww, y + hh, rr)
+    g.arcTo(x + ww, y + hh, x, y + hh, rr)
+    g.arcTo(x, y + hh, x, y, rr)
+    g.arcTo(x, y, x + ww, y, rr)
+    g.closePath()
+  }
+  // sombra dura
+  g.fillStyle = 'rgba(0,0,0,0.55)'
+  camino(4, 4, w, h, r)
+  g.fill()
+  g.fillStyle = 'rgba(9,12,18,0.95)'
+  camino(0, 0, w, h, r)
+  g.fill()
+  // la barra del título
+  g.save()
+  camino(0, 0, w, h, r)
+  g.clip()
+  g.fillStyle = '#FF3B5C'
+  g.fillRect(0, 0, w, 21)
+  g.restore()
+  g.lineWidth = 2
+  g.strokeStyle = '#FF3B5C'
+  camino(0, 0, w, h, r)
+  g.stroke()
+  g.textBaseline = 'middle'
+  g.textAlign = 'left'
+  g.fillStyle = '#FFFFFF'
+  g.font = `800 14px ${MONO}`
+  g.fillText('ERROR', 10, 11)
+  // la «x» de cerrar
+  g.strokeStyle = '#FFFFFF'
+  g.lineWidth = 2
+  g.beginPath()
+  g.moveTo(w - 18, 6)
+  g.lineTo(w - 9, 15)
+  g.moveTo(w - 9, 6)
+  g.lineTo(w - 18, 15)
+  g.stroke()
+  // el mensaje
+  g.fillStyle = '#FFD5DC'
+  g.font = `700 17px ${MONO}`
+  g.fillText('Rival.exe no responde…', 14, 21 + (h - 21) / 2)
+  return { lienzo, escala }
 }
 
 const NUM_NORMAL = estilo(31, ['#FFFFFF', '#FFFFFF', '#FFE6A6'], '#1A0F00', {
@@ -160,7 +288,7 @@ function previoAnuncio(clave: ClaveAnuncio, texto: string): Previo {
  * sigue pintando en el festejo del anterior (ver precalentar).
  */
 function previosDeLaPelea(): Previo[] {
-  const impactos = (Object.keys(IMPACTOS) as ClaveImpacto[]).map((k): Previo => [k, IMPACTOS[k].texto, IMPACTOS[k].estilo, 0])
+  const impactos = IMPACTOS_BASE.map((k): Previo => [k, IMPACTOS[k].texto, IMPACTOS[k].estilo, 0])
   return [
     previoAnuncio('round', 'ROUND 1'),
     previoAnuncio('pelea', '¡A PELEAR!'),
@@ -387,6 +515,8 @@ export class Textos {
   numerosVisibles = true
   /** Los textos que faltan precalentar (ver el encabezado). */
   private previos: Previo[] = previosDeLaPelea()
+  /** Los de la quinta tanda que puede mostrar ESTA pelea (paraPelea). */
+  private extras: Previo[] = []
   private cuadrosSinFuentes = 0
   /** E.ms del último cambio de resolución. */
   private invalidadoMs = 0
@@ -421,16 +551,27 @@ export class Textos {
     }
     let t = this.cache.get(clave)
     if (!t) {
-      t = pintarTexto(null, texto, est, this.E.familias, escala, anchoMax)
+      t = clave === 'error' ? pintarVentanaError(escala) : pintarTexto(null, texto, est, this.E.familias, escala, anchoMax)
       this.cache.set(clave, t)
     }
     return t
   }
 
+  /**
+   * Los textos de la quinta tanda que puede mostrar esta pelea (por los dos luchadores): se suman a lo
+   * que se precalienta al arrancar. Lo llama el renderizador con cada partida nueva.
+   */
+  paraPelea(ids: readonly IdPersonaje[]): void {
+    const claves = new Set<ClaveImpacto>()
+    for (const id of ids) for (const k of IMPACTOS_DE[id] ?? []) claves.add(k)
+    this.extras = [...claves].map((k): Previo => [k, IMPACTOS[k].texto, IMPACTOS[k].estilo, 0])
+    for (const x of this.extras) if (!this.cache.has(x[0]) && !this.previos.some((p) => p[0] === x[0])) this.previos.push(x)
+  }
+
   /** Tras redimensionar: los pintados se rehacen a la nueva resolución (y se vuelven a precalentar). */
   invalidar(): void {
     this.escalaCache = 0
-    this.previos = previosDeLaPelea()
+    this.previos = [...previosDeLaPelea(), ...this.extras]
     this.cuadrosSinFuentes = 0
     this.invalidadoMs = this.E.ms
     this.proximoRound = ''
@@ -593,12 +734,21 @@ export class Textos {
         break
       }
     }
+    // del mismo golpe (los eventos llegan en el mismo cuadro): el que manda ocupa el lugar del otro
+    for (const c of this.impactos) {
+      if (!c.activo || c.edad > 120) continue
+      if (PISA[c.clave] === clave) return
+      if (PISA[clave] === c.clave) {
+        n = c
+        break
+      }
+    }
     n.activo = true
     n.clave = clave
     n.x = x
     n.y = y
     n.edad = 0
-    n.vida = clave === 'guardia' ? 1100 : 900
+    n.vida = vidaImpacto(clave)
   }
 
   anuncio(clave: ClaveAnuncio, texto: string, demoraMs = 0, persistente = false): void {
@@ -700,13 +850,30 @@ export class Textos {
     }
   }
 
-  dibujarMundo(): void {
+  /**
+   * Los números y los impactos, en el mundo. `pasada`: 0 todos (sin super flash); 1 todos menos los de
+   * la quinta tanda (con super flash, debajo del oscurecido); 2 sólo esos (después de la banda), y
+   * corridos debajo de `techo(x)` (el borde de la banda: encima tapaban el nombre del especial).
+   */
+  dibujarMundo(pasada: 0 | 1 | 2 = 0, techo?: (x: number) => number): void {
     const E = this.E
     const ctx = E.ctx
     const unidad = E.cam.esc
     const ox = E.cam.tx
     const oy = E.cam.ty
     ctx.imageSmoothingEnabled = true
+    if (pasada !== 2) this.dibujarNumeros(ox, oy, unidad)
+    for (const i of this.impactos) {
+      if (!i.activo) continue
+      if (pasada !== 0 && ENCIMA_DEL_FLASH.has(i.clave) !== (pasada === 2)) continue
+      this.dibujarImpacto(i, ox, oy, unidad, pasada === 2 ? techo : undefined)
+    }
+    ctx.globalAlpha = 1
+  }
+
+  private dibujarNumeros(ox: number, oy: number, unidad: number): void {
+    const E = this.E
+    const ctx = E.ctx
     for (const n of this.numeros) {
       if (!n.activo || !n.pintado) continue
       const t = n.edad / n.vida
@@ -716,23 +883,41 @@ export class Textos {
       // pintado con escalaTextos de resolución: se dibuja agrandado lo mismo
       dibujarCentrado(ctx, n.pintado, ox, oy, unidad, n.x, n.y, pop * E.escalaTextos, n.tipo === 1 ? -0.08 : 0, alfa)
     }
-    for (const i of this.impactos) {
-      if (!i.activo) continue
-      const def = IMPACTOS[i.clave]
-      const p = this.cacheado(i.clave, def.texto, def.estilo)
-      const t = i.edad / i.vida
-      const escala = (0.45 + 0.55 * salidaElastica(Math.min(1, i.edad / 420))) * E.escalaTextos
-      const subida = i.edad * 0.03
-      const alfa = t > 0.75 ? 1 - (t - 0.75) / 0.25 : 1
-      let x = i.x
-      if (i.clave === 'electrocutado') x += (Math.random() - 0.5) * 3
-      if (i.clave === 'guardia' && i.edad > 260) {
-        this.dibujarPartido(p, ox, oy, unidad, x, i.y - subida, escala, alfa, (i.edad - 260) / (i.vida - 260))
-      } else {
-        dibujarCentrado(ctx, p, ox, oy, unidad, x, i.y - subida, escala, -0.06, alfa)
-      }
+  }
+
+  private dibujarImpacto(i: Impacto, ox: number, oy: number, unidad: number, techo?: (x: number) => number): void {
+    const E = this.E
+    const ctx = E.ctx
+    const def = IMPACTOS[i.clave]
+    const p = this.cacheado(i.clave, def.texto, def.estilo)
+    const t = i.edad / i.vida
+    const escala = (0.45 + 0.55 * salidaElastica(Math.min(1, i.edad / 420))) * E.escalaTextos
+    const subida = i.edad * 0.03
+    const alfa = t > 0.75 ? 1 - (t - 0.75) / 0.25 : 1
+    let x = i.x
+    if (i.clave === 'electrocutado') x += (Math.random() - 0.5) * 3
+    let y = i.clave === 'error' ? i.y : i.clave === 'despido' ? i.y - subida * 0.3 : i.y - subida
+    // debajo de la banda (con la mitad del alto del texto ya plantado, no el del rebote: no salta)
+    if (techo) y = Math.max(y, techo(x) + (p.lienzo.height * E.escalaTextos) / p.escala / 2 + 4)
+    if (i.clave === 'error') {
+      // la ventana aparece de golpe y tiembla con saltos (el glitch), sin subir
+      const salto = i.edad < 420 ? (ruido(Math.floor(i.edad / 55) + 7) - 0.5) * 10 : 0
+      const entra = i.edad < 90 ? 0.85 + 0.15 * (i.edad / 90) : 1
+      const parpadea = i.edad < 300 && Math.floor(i.edad / 60) % 3 === 1 ? 0.55 : 1
+      dibujarCentrado(ctx, p, ox, oy, unidad, x + salto, y, entra * E.escalaTextos * 0.92, 0, alfa * parpadea)
+      return
     }
-    ctx.globalAlpha = 1
+    if (i.clave === 'despido') {
+      // un sello: entra grande y torcido y se planta
+      const sello = i.edad < 160 ? 1.6 - 0.6 * salidaCubica(i.edad / 160) : 1
+      dibujarCentrado(ctx, p, ox, oy, unidad, x, y, sello * E.escalaTextos, -0.16, alfa)
+      return
+    }
+    if (i.clave === 'guardia' && i.edad > 260) {
+      this.dibujarPartido(p, ox, oy, unidad, x, y, escala, alfa, (i.edad - 260) / (i.vida - 260))
+    } else {
+      dibujarCentrado(ctx, p, ox, oy, unidad, x, y, escala, -0.06, alfa)
+    }
   }
 
   /** «¡GUARDIA ROTA!» se parte como un vidrio: dos mitades que se separan y caen. */

@@ -36,6 +36,36 @@
  *  - Efectos con duración (`ticksEfecto`): aturde (no se mueve), marea (no se cubre, camina lento),
  *    quema (`quema`: daño cada `cada` ticks). El efecto 'critico' de la ficha = siempre crítico.
  *  - Pasivas (KitPersonaje.pasiva): perillas que el motor mira en cada lugar (ver PasivaKit).
+ *
+ * Piezas de la quinta tanda (14/nov, los 8 de Paraná, Pueyrredón y los dueños):
+ *  - Contra (DefEspecial.contra, el All In de Chino): mientras arma el dominio, el primer golpe o tiro
+ *    que le iba a pegar se anula (combate.ts, arriba de todo en aplicarImpacto; el agarre le gana) y
+ *    la acción salta a la embestida con el `bono`. Si nadie le pega, la embestida sale igual, floja.
+ *  - Hipnotiza (efecto 'hipnotiza', los Lentes de Fran): un estado de control que lo hace caminar hacia
+ *    el que lo tiró (HIPNOSIS en constantes.ts); lo corta el primer golpe limpio.
+ *  - Punta (VentanaGolpe.punta, el Corte de Precisión de Fran): con el rival a `desde` px o más de centro
+ *    a centro, el contacto es crítico seguro (evento 'precision').
+ *  - Cuerpo (DefMovimiento.cuerpo, el Gigante de Lautaro): mientras dura, la caja de daño es más ancha
+ *    y más alta (el sprite crece en el atlas; la caja de empuje no cambia).
+ *  - Agarre en el aire (DefAgarre.aire) y revoleo (`tiron.vy`): el Lanzamiento Aéreo de Lautaro.
+ *  - Apunta (DefProyectil.apunta, las herramientas de Leo): al salir, cada tiro sube o baja hacia
+ *    donde está el rival en ese tick (sólo + − × ÷, min y max); después no lo sigue.
+ *  - Ciega (efecto 'ciega', el Spray de Leo): no pega, no tira especiales ni esquiva, pero tiene el
+ *    control; lo corta el primer golpe limpio. No es encierro.
+ *  - Roba (DefAgarre.roba, el Agarre y Ejecución de Nacho): el tirón le saca carga a la víctima.
+ *  - Distancia por tiro (TiroRafaga.distancia): una ráfaga de áreas diferidas, cada una más lejos (el
+ *    Terremoto de Código de Nacho).
+ *  - Hasta el rival (DefEmbestida.hastaRival, Desaparecer de Nehuen): la embestida frena sola a esa
+ *    distancia delante del rival y no lo atraviesa.
+ *  - Devuelve (DefEspecial.devuelve, el Smash de Pádel de Nehuen): mientras la paleta está en el aire,
+ *    lo que el rival le tira y toca su caja cambia de dueño y vuelve más rápido (proyectiles.ts).
+ *  - Trampa (DefProyectil.trampa, las Espinas de Nico M.): lo que no pega se clava en el piso
+ *    (ProyectilEstado.plantado) y tira al que lo pisa; una trampa por tirada.
+ *  - Aceleración (DefProyectil.aceleracion, el monopatín de Tony): sale lento y acelera hasta un tope.
+ *  - Si pega (DefEspecial.siPega, el Despido Final de Tony): el golpe que entra limpio estira la acción
+ *    y aturde; recién entonces existe lo que sigue (la patada voladora).
+ *  - Pasivas nuevas: cargaPorEspecialRival (Chino), criticoTrasBloqueo (Fran), multDerribo (Leo),
+ *    velocidadConCarga (Nacho), multAereo (Nehuen), pincha (Nico M.) y presencia (Tony).
  */
 import type { ClaveAnimacion, Dificultad, EfectoEspecial, FuerzaGolpe, Herramienta, IdPersonaje, TipoProyectil } from '../tipos'
 import { TIEMPOS_PROYECTIL } from '../tipos'
@@ -74,6 +104,11 @@ export interface VentanaGolpe {
   golpes?: number
   cada?: number
   ultimo?: { danio: number; empuje: number; hitstun?: number; fuerza?: FuerzaGolpe; efecto?: EfectoEspecial | null }
+  /**
+   * Punta (el Corte de Precisión de Fran): si al pegar el centro de la víctima está a `desde` px o más
+   * del suyo, el contacto es crítico seguro y sale el evento 'precision'; más cerca pega el base.
+   */
+  punta?: { desde: number }
 }
 
 export type BotonAtaque = 'golpe' | 'herramienta'
@@ -100,6 +135,12 @@ export interface DefMovimiento {
   aterrizaje?: number
   /** La animación corre pareja todo el movimiento (sin sincronizar con las ventanas): multigolpes largos. */
   animLineal?: boolean
+  /**
+   * Cuerpo propio (el Gigante de Lautaro): entre `desde` y `hasta` la caja de DAÑO mide `ancho` y el alto
+   * parado × `altoMult` (el atlas ya lo dibuja así de grande). Ser más grande es parte del costo: le
+   * entran los tiros altos. La caja de empuje no cambia.
+   */
+  cuerpo?: { desde: number; hasta: number; ancho: number; altoMult: number }
 }
 
 /** Especial que se tira hacia adelante (Corte Relámpago, Moto, Break Dance, Paso de Cuarteto…). */
@@ -118,6 +159,12 @@ export interface DefEmbestida {
   sigue?: boolean
   /** Por el aire: en `desde` salta con esta vy y cae con esta gravedad; termina al aterrizar. */
   salto?: { vy: number; gravedad: number }
+  /**
+   * Frena sola cuando le quedan `hastaRival` px hasta el rival (medidos hacia donde mira) y no corre
+   * más (Accion.llego): Desaparecer de Nehuen cruza intocable y reaparece DELANTE del rival, no lo
+   * atraviesa. Si el rival ya estaba más cerca (o detrás), no se mueve.
+   */
+  hastaRival?: number
 }
 
 /** La nube que deja un proyectil (el pañal). */
@@ -179,6 +226,20 @@ export interface DefProyectil {
   onda?: { danioPared: number; ticksAturdePared: number }
   diferido?: { distancia: number; espera: number; activo: number; ancho: number; alto: number }
   nube?: DefNube
+  /**
+   * Apunta al salir (las herramientas de Leo): la `vy` del tiro la pone el motor para ir al centro del
+   * rival en ese tick, acotada a ±0,8·|vx|. No lo persigue después.
+   */
+  apunta?: boolean
+  /**
+   * Trampa (las Espinas de Nico M.): el tiro con gravedad que toca el piso sin haber pegado se clava
+   * (ProyectilEstado.plantado: quieto, con esta caja) y queda `vida` ticks; si el rival lo pisa (en el
+   * piso), le pega con `danio` y `efecto` (con `imbloqueable`, no se cubre) y se deshacen todas las
+   * clavadas de esa tirada (una trampa por tirada). En el aire no hace nada.
+   */
+  trampa?: { vida: number; ancho: number; alto: number; danio: number; efecto: EfectoEspecial | null; imbloqueable: boolean }
+  /** Acelera en vuelo (el monopatín de Tony): cada tick, |vx| + `por`, como mucho `max`. */
+  aceleracion?: { por: number; max: number }
 }
 
 /** Lo que cambia un tiro de una ráfaga respecto del proyectil base. */
@@ -189,6 +250,8 @@ export interface TiroRafaga {
   salidaY?: number
   efecto?: EfectoEspecial | null
   empuje?: number
+  /** Área diferida: a cuánto delante aparece ESTE tiro (si falta, `diferido.distancia`). */
+  distancia?: number
 }
 
 /** Agarre: lo levanta, lo aprieta y lo tira al piso. */
@@ -197,13 +260,20 @@ export interface DefAgarre {
   sostener: number
   /** Cada `cada` ticks lo aprieta con `danio` (sin bloqueo). */
   apretones: { cada: number; danio: number }
-  /** El tirón al piso del final. */
-  tiron: { danio: number; empuje: number }
+  /** El tirón al piso del final; `vy` es con cuánto lo revolea para arriba (si falta, 5). */
+  tiron: { danio: number; empuje: number; vy?: number }
   /** Dónde lo sostiene: `adelante` px delante de su centro y `alto` px sobre el piso. */
   adelante: number
   alto: number
   /** Ticks que tarda en recuperarse después de tirarlo. */
   recuperacion: number
+  /** Agarra también al que está en el aire (el Lanzamiento Aéreo de Lautaro). Sin esto, sólo en el piso. */
+  aire?: boolean
+  /**
+   * En el tirón le saca a la víctima hasta `carga` de carga y el que agarra se queda con hasta `gana`
+   * (el Agarre y Ejecución de Nacho; evento 'carga_robada').
+   */
+  roba?: { carga: number; gana: number }
 }
 
 export interface DefEspecial extends DefMovimiento {
@@ -219,6 +289,29 @@ export interface DefEspecial extends DefMovimiento {
    * ni gasta carga (ver intentarEspecial en acciones.ts).
    */
   cura?: { desde: number; ticks: number; cada: number; fraccion: number; soloBajo?: number }
+  /**
+   * Contra (el All In de Chino): entre `desde` y `hasta` el primer contacto que le iba a pegar (golpe,
+   * herramienta, especial cuerpo a cuerpo o proyectil; no el agarre, que le gana, ni el daño de a poco)
+   * se anula, sale el evento 'contra' y la acción salta a `salto` (la embestida) con el `bono`: más
+   * daño, su efecto, su aturdimiento e intocable `intocable` ticks desde que saltó. El que pegó no
+   * cuenta el contacto (no encadena ni cancela en especial).
+   */
+  contra?: { desde: number; hasta: number; salto: number; bono: { danio: number; efecto: EfectoEspecial | null; hitstun: number; intocable: number } }
+  /**
+   * Devuelve (el Smash de Pádel de Nehuen): entre `desde` y `hasta`, cada tiro del rival que vuela y toca
+   * `caja` (relativa a él, como una ventana) cambia de dueño y vuelve con vx × `mult` (como mucho `max`
+   * px por tick), con su daño y su efecto de siempre. No se devuelven los chorros, la onda, las áreas
+   * diferidas, la nube, lo que va por el piso ni el bumerán.
+   */
+  devuelve?: { desde: number; hasta: number; caja: Caja; mult: number; max: number }
+  /**
+   * Si pega limpio (el Despido Final de Tony): cuando la ventana número `ventana` entra limpia (no
+   * bloqueada, ni contra una armadura), la acción pasa a durar `total` y la víctima queda `aturde`
+   * ticks aturdida (con el escalado del combo y el piso del que ya está inmune al control; evento
+   * 'despido'). Lo que viene después en la acción (la patada) sólo existe si el total se estiró: si el
+   * papel se cubre o sale al aire, la acción termina antes y queda regalado.
+   */
+  siPega?: { ventana: number; total: number; aturde: number }
 }
 
 /** Cómo juega la CPU con este barbero (preferencias, no reglas). */
@@ -286,6 +379,27 @@ export interface PasivaKit {
   cargaPorEspecial?: number
   /** Super armadura en todos sus ataques (arranque y activo) contra estas fuerzas. */
   armaduraAtaques?: readonly FuerzaGolpe[]
+  /** Carga que le da cada especial que tira el RIVAL (La casa siempre gana, Chino). */
+  cargaPorEspecialRival?: number
+  /**
+   * Después de cubrir un golpe, el próximo golpe normal que arranque dentro del blockstun + estos ticks
+   * es crítico seguro (Pulso fino, Fran; InternoLuchador.critListo).
+   */
+  criticoTrasBloqueo?: number
+  /** Multiplica los ticks que queda tirado en el piso después de un derribo (Pibe de goma, Leo). */
+  multDerribo?: number
+  /** Con la carga en `desde` o más, camina y corre `mult` veces más rápido (Overclock, Nacho). El salto no. */
+  velocidadConCarga?: { desde: number; mult: number }
+  /** Multiplica el daño de sus golpes aéreos (Volea, Nehuen); no el aturdimiento ni el empuje. */
+  multAereo?: number
+  /**
+   * El que le pega de cerca se pincha (Pelo de punta, Nico M.): con cada golpe cuerpo a cuerpo que
+   * recibe, cubre o aguanta (y con un agarre), el que pegó pierde `danio` de vida, sin aturdimiento ni
+   * bloqueo (como la quemadura; evento 'pinchazo'). No dispara la contra del All In.
+   */
+  pincha?: { danio: number }
+  /** Cerca de él (a `distancia` px o menos), el RIVAL camina y corre `mult` veces (Presencia de jefe, Tony). */
+  presencia?: { distancia: number; mult: number }
 }
 
 export interface KitPersonaje {
@@ -774,8 +888,8 @@ const CHIPI: KitPersonaje = {
     especialDeCombo: 0,
     preferencia: [1.2, 0.8],
     pericia: { facil: 0.205, normal: 0.625, dificil: 1.092 },
-    periciaHumano: { normal: 0.336 },
-    asistencia: { normal: 0.077, dificil: -0.16 },
+    periciaHumano: { normal: 0.325 },
+    asistencia: { normal: 0.068, dificil: -0.16 },
   },
 }
 
@@ -975,7 +1089,7 @@ const NICO_U: KitPersonaje = {
     ],
     especialDeCombo: 2,
     preferencia: [1, 0.6],
-    pericia: { facil: 0.133, normal: 0.11, dificil: 0.404 },
+    pericia: { facil: 0.137, normal: 0.104, dificil: 0.389 },
     periciaHumano: { normal: 0.126 },
     asistencia: { normal: -0.022, dificil: -0.06 },
   },
@@ -1068,10 +1182,12 @@ const FABRI: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [1, 0.8],
-    pericia: { facil: -0.393, normal: -0.287, dificil: -1.107 },
+    pericia: { facil: -0.356, normal: -0.264, dificil: -1.089 },
     // Difícil contra una persona: la pericia de difícil (−1,1) es la que empareja a la CPU de Fabri con
-    // las otras CPU; contra una persona dejaba ganar 55 % (tercera tanda, 31/oct).
-    periciaHumano: { normal: 0.031, dificil: 0.1 },
+    // las otras CPU; contra una persona dejaba ganar 55 % (tercera tanda, 31/oct). 0,1 → 0,02 en difícil
+    // (balance fino de la quinta tanda): contra el simple casi no se curaba (la Curación, 18,6 % de sus
+    // especiales; meta D ≥ 20).
+    periciaHumano: { normal: 0.031, dificil: 0.02 },
     asistencia: { normal: -0.018 },
   },
 }
@@ -1271,10 +1387,12 @@ const GABRIEL: KitPersonaje = {
     especialDeCombo: 1,
     preferencia: [1, 1],
     pericia: { facil: 0.046, normal: -0.058, dificil: 0.061 },
-    periciaHumano: { normal: 0.06 },
+    periciaHumano: { normal: 0.068 },
     // −0,09 (tercera tanda): con el graffiti que ahora pega de cerca, el que aprieta los especiales
-    // apenas se encienden le ganaba 64 % a la CPU normal con Gabriel (tope 65); queda en 59.
-    asistencia: { normal: -0.09, dificil: -0.22 },
+    // apenas se encienden le ganaba 64 % a la CPU normal con Gabriel (tope 65); quedaba en 59. −0,056
+    // (balance fino de la quinta tanda): contra las 17 CPU el novato con Gabriel ganaba 23 % (meta 25); con
+    // −0,056, 23,9. −0,03.
+    asistencia: { normal: -0.03, dificil: -0.22 },
   },
 }
 
@@ -1383,7 +1501,7 @@ const GUILLERMO: KitPersonaje = {
     ],
     especialDeCombo: 0,
     preferencia: [0.9, 0.9],
-    pericia: { facil: -0.062, normal: -0.041, dificil: 0.161 },
+    pericia: { facil: -0.035, normal: -0.023, dificil: 0.195 },
     periciaHumano: { normal: 0.201 },
     asistencia: { normal: 0.1 },
   },
@@ -1474,6 +1592,9 @@ const RODRIGO: KitPersonaje = {
     preferencia: [1.4, 1.4],
     pericia: { facil: -0.078, normal: -0.081, dificil: -0.293 },
     periciaHumano: { normal: 0.044 },
+    // Sigue en 0,122 (balance fino de la quinta tanda): con 0,07 el bot que repite el Grito (e2 de
+    // adversario.mts) bajaba de 68,8 %, pero el simple con Rodrigo caía de 33,6 a 19,9. Lo del Grito es
+    // de las CPU que no lo esquivan (ver el informe de la quinta tanda).
     asistencia: { normal: 0.122 },
   },
 }
@@ -1999,6 +2120,837 @@ const BRIAN: KitPersonaje = {
   },
 }
 
+// ─── Quinta tanda (14/nov): Chino, Fran, Lautaro, Leo y los dueños ────────────
+//
+// Los números son los del diseño de la tanda (T5/salidas/diseno/diseno.json), sacados comparando con
+// los 13 y con cuentas de ticks; los factores de DANIO_KIT, la pericia y la asistencia los afina el
+// balance. Los dueños (Nacho, Nehuen) sólo los eligen los dueños: se miden entre ellos (meta E) y
+// contra las CPU de los barberos, no en las tablas de los barberos.
+
+/**
+ * Los normales con otro empuje en el puño, la patada y el último golpe del combo (quinta tanda, segunda
+ * parte: Lautaro). El empuje no se dibuja: corre al que recibe.
+ */
+function conEmpuje(m: Record<string, DefMovimiento>, e: { puno: number; patada: number; combo: number }): Record<string, DefMovimiento> {
+  const una = (id: string, i: number, empuje: number) => {
+    const mov = m[id]
+    m[id] = { ...mov, ventanas: mov.ventanas.map((v, j) => (j === i ? { ...v, empuje } : v)) }
+  }
+  una('puno', 0, e.puno)
+  una('patada', 0, e.patada)
+  una('combo', 1, e.combo)
+  return m
+}
+
+/** Los normales de siempre con otra herramienta en algún golpe (cómo suena y qué destello lleva). */
+function normalesCon(o: { ritmo: number; danio: number; alcance: number }, herramientas: Partial<Record<'puno' | 'patada' | 'combo' | 'voladora', Herramienta>>): Record<string, DefMovimiento> {
+  const m = normales(o)
+  for (const [id, h] of Object.entries(herramientas)) if (h && m[id]) m[id] = { ...m[id], herramienta: h }
+  return m
+}
+
+// ─── Chino «El Tahúr»: cartas a tres alturas y una contra (el All In) ──────────
+
+const CHINO: KitPersonaje = {
+  caminar: 3.9,
+  caminarAtras: 3.2,
+  correr: 6.2,
+  saltoVx: 4.3,
+  dash: { adelante: 150, atras: 120, ticks: 15 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // La casa siempre gana: cada especial del rival le suma media carga.
+  pasiva: { cargaPorEspecialRival: 0.5 },
+  movimientos: {
+    ...normales({ ritmo: 1, danio: 1, alcance: 2 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 29,
+      danio: 76,
+      guardia: 28,
+      caja: [24, 126, 60, 178],
+      empuje: 9,
+      siguiente: 'golpe_pesado',
+      avance: { desde: 4, hasta: 12, vel: 1.8 },
+    }),
+    golpe_pesado: pesado('golpe_pesado', 'herramienta2', 'pesado', { desde: 12, total: 29, danio: 66, guardia: 24, caja: [24, 134, 70, 180], empuje: 9 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // Tres naipes rectos, uno cada 3 ticks y cada uno a otra altura: la alta sube en diagonal (le
+      // pega al que salta cerca), la del medio pasa por arriba del agachado y la rasante por debajo
+      // del que salta. Ni saltar ni agacharse alcanza: hay que cubrirse (o esquivar).
+      id: 'cartas_malditas',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'carta',
+      armadura: { hasta: 14, contra: TODO },
+      total: 40,
+      ventanas: [],
+      lanzamiento: { desde: 14, ticks: 10 },
+      rafaga: { cantidad: 3, cada: 3, tiros: [{ salidaY: 165, vy: 2.4 }, { salidaY: 135, vy: 0 }, { salidaY: 16, vy: 0, empuje: 5 }] },
+      proyectil: {
+        tipo: 'carta',
+        // A 40 (y no más adelante): a quemarropa no nace detrás del rival, la trampa de la Pistola.
+        salidaX: 40,
+        salidaY: 135,
+        vx: 10,
+        vy: 0,
+        gravedad: 0,
+        giro: 0.6,
+        ancho: 34,
+        alto: 26,
+        vida: 48,
+        golpes: 1,
+        intervalo: 0,
+        danio: 28,
+        danioGuardia: 12,
+        fuerza: 'medio',
+        // 14 (era 18; balance fino de la quinta tanda): contra el que nunca se cubre (casual2) las tres
+        // cartas dejaban entrar la cadena entera y Chino ganaba 71 % entre personas.
+        hitstun: 14,
+        hitstop: 5,
+        empuje: 3,
+      },
+    },
+    {
+      // La única contra del elenco: hasta el tick 28 el que le pegue o le tire algo se come la
+      // embestida con el bono (170, derriba, intocable 6 ticks). Si nadie le pega, a los 34 sale igual
+      // la embestida floja (100, empuja): rasante, se salta o se cubre (bloqueada queda −11).
+      id: 'all_in',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'dominio',
+      total: 70,
+      contra: { desde: 0, hasta: 28, salto: 34, bono: { danio: 170, efecto: 'derriba', hitstun: 30, intocable: 6 } },
+      embestida: { desde: 34, ticks: 12, distancia: 240, recuperacionGolpe: 16, recuperacionBloqueo: 26, atraviesa: true },
+      ventanas: [ventana(35, 11, 100, 24, 'especial', [-10, 90, 0, 120], 9, 4, { hitstun: 26, efecto: null })],
+    },
+  ],
+  cpu: {
+    herramienta: 0.3,
+    distancia: 175,
+    rangoEspecial: [
+      [80, 480],
+      [0, 260],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Balance fino de la quinta tanda (afinar-balanzas --balanza=cpu, dos sales): con las cartas más cortas
+    // y los normales a 1,10 su CPU ganaba 55–56 % en las tres.
+    pericia: { facil: -0.069, normal: -0.08, dificil: -0.15 },
+    // Contra una persona (pasada gruesa, ruidosa: ±10 por columna): con −0,06 el novato le ganaba 61 % a la
+    // CPU y con 0,05 el simple, 16 %.
+    periciaHumano: { normal: -0.02 },
+  },
+}
+
+// ─── Fran «El Hipnótico»: una mirada que te trae y una estocada que premia la distancia ──
+
+const FRAN: KitPersonaje = {
+  caminar: 3.8,
+  caminarAtras: 3.2,
+  correr: 6.0,
+  saltoVx: 4.3,
+  dash: { adelante: 150, atras: 120, ticks: 15 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Pulso fino: después de cubrir un golpe, el próximo que arranca enseguida es crítico. 12 ticks (eran 20;
+  // balance fino de la quinta tanda): la CPU de Fran se cubre del que aprieta la MÁQUINA y los especiales
+  // (el novato) y le devolvía un crítico casi siempre (le ganaba 78 %). Entre dos personas da lo mismo.
+  pasiva: { criticoTrasBloqueo: 12 },
+  movimientos: {
+    ...normales({ ritmo: 0.98, danio: 0.97, alcance: 4 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 29,
+      danio: 74,
+      guardia: 27,
+      caja: [24, 124, 60, 178],
+      empuje: 9,
+      siguiente: 'patada_fuerte',
+      avance: { desde: 4, hasta: 12, vel: 1.8 },
+    }),
+    patada_fuerte: pesado('patada_fuerte', 'herramienta2', 'patada', { desde: 10, total: 27, danio: 62, guardia: 22, caja: [24, 140, 50, 150], empuje: 8 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // A la altura de los ojos (148–202): pasa por arriba del agachado; saltar no sirve. Si pega en
+      // el piso, hipnotiza (HIPNOSIS, constantes.ts): camina hacia Fran hasta 95 px. Lo corta el primer
+      // golpe limpio. De cerca no deja combo gratis; de lejos (≈ 200 px) entra una cadena.
+      id: 'lentes_hipnoticos',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'hipnosis',
+      armadura: { hasta: 14, contra: TODO },
+      total: 36,
+      ventanas: [],
+      lanzamiento: { desde: 14, ticks: 10 },
+      proyectil: {
+        tipo: 'hipnosis',
+        salidaX: 45,
+        salidaY: 175,
+        vx: 9,
+        vy: 0,
+        gravedad: 0,
+        giro: 0,
+        ancho: 36,
+        alto: 54,
+        anchoFinal: 64,
+        altoFinal: 54,
+        vida: 52,
+        golpes: 1,
+        intervalo: 0,
+        danio: 30,
+        danioGuardia: 10,
+        fuerza: 'especial',
+        hitstun: 18,
+        hitstop: 8,
+        empuje: 0,
+        efecto: 'hipnotiza',
+        ticksEfecto: 45,
+      },
+    },
+    {
+      // Plantado (sin avance) y largo: llega a 212 de centro a centro y con la punta (150 px o más)
+      // es crítico seguro. No repite el Navajazo (corto, con avance, siempre crítico).
+      id: 'corte_de_precision',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'tijera',
+      armadura: { hasta: 10, contra: TODO },
+      total: 38,
+      ventanas: [ventana(18, 4, 115, 30, 'especial', [30, 180, 70, 172], 7, 4, { hitstun: 28, punta: { desde: 150 } })],
+    },
+  ],
+  cpu: {
+    herramienta: 0.3,
+    distancia: 185,
+    rangoEspecial: [
+      [170, 460],
+      [150, 205],
+    ],
+    especialDeCombo: 2,
+    preferencia: [1, 1],
+    // Pasada gruesa: su CPU ganaba 74 % en normal y 65 en difícil (Pulso fino contra la CPU que se cubre).
+    // Balance fino (con el daño nuevo): 54–56 % en las tres; ahora también en fácil.
+    pericia: { facil: -0.034, normal: -0.139, dificil: -0.455 },
+    // Contra una persona (pasada gruesa): con su pericia de normal, el humano simple le ganaba 91 % a la CPU
+    // (con 0,45, 2 %: interpolado en logit). Balance fino: 0,08 → 0,041 con el Pulso fino nuevo (el novato
+    // le ganaba 20 % y el simple 45; con 0,041, 23,7 y 56,6: lo que los separa no lo achica este número).
+    periciaHumano: { normal: 0.05 },
+    asistencia: { normal: -0.051 },
+  },
+}
+
+// ─── Lautaro «El Gigante»: brazos largos, un aplastón blindado y un agarre que levanta al que salta ──
+
+const LAUTARO: KitPersonaje = {
+  caminar: 3.5,
+  caminarAtras: 2.8,
+  correr: 5.6,
+  saltoVx: 3.9,
+  dash: { adelante: 145, atras: 115, ticks: 17 },
+  criticoBase: 0.07,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Brazos largos: no es perilla, es el kit (normales con 8 px más de alcance), como la Gambeta de Nahuel.
+  // Con menos empuje (balance fino de la quinta tanda): puño 2,5, patada 3,5 y el final del combo 11
+  // (eran los de todos: 3,5, 4,5 y 13). Con su alcance, el empuje de siempre dejaba al otro justo fuera
+  // de SU alcance y dentro del de Lautaro: entre dos personas que machacan con la demora del online
+  // (casual2, D 17) ganaba 72 % y sin demora perdía (el novato, 33 %). Con menos alcance en vez de esto,
+  // es un borde: con 3 px menos seguía en 70 % y con 4 menos caía a 25 % (el combo lo deja a ≈ 144,5 px).
+  movimientos: {
+    ...conEmpuje(normales({ ritmo: 1.05, danio: 0.92, alcance: 8 }), { puno: 2.5, patada: 3.5, combo: 11 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 30,
+      danio: 78,
+      guardia: 28,
+      caja: [24, 138, 60, 182],
+      empuje: 9,
+      siguiente: 'patada_fuerte',
+      avance: { desde: 4, hasta: 12, vel: 1.6 },
+    }),
+    patada_fuerte: pesado('patada_fuerte', 'herramienta2', 'patada', { desde: 11, total: 28, danio: 64, guardia: 22, caja: [24, 158, 50, 160], empuje: 8 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // Crece (la caja de daño sigue al sprite: 92 de ancho y 1,46 de alto), da un paso enorme (66 px) y
+      // aplasta. La armadura aguanta los leves y los medios (no los fuertes, los especiales ni el agarre)
+      // y, más grande, le entran los tiros altos. Bloqueado gasta mucha guardia y queda −14.
+      id: 'gigante',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'gigante',
+      armadura: { hasta: 36, contra: ['leve', 'medio'] },
+      total: 66,
+      cuerpo: { desde: 15, hasta: 52, ancho: 92, altoMult: 1.46 },
+      avance: { desde: 24, hasta: 30, vel: 11 },
+      ventanas: [ventana(34, 6, 160, 60, 'especial', [50, 245, 0, 230], 9, 6, { hitstun: 30 })],
+    },
+    {
+      // El agarre que también agarra en el aire (antiaéreo) y no al agachado (la mano va del cuello para
+      // arriba): sin apretones, lo revolea alto (vy 15) y cae a ≈ 200 px, derribado. Al aire queda
+      // regalado 16 ticks.
+      id: 'lanzamiento_aereo',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'lanzamiento',
+      total: 34,
+      avance: { desde: 0, hasta: 10, vel: 3 },
+      ventanas: [ventana(12, 6, 0, 0, 'especial', [20, 106, 122, 240], 0, 0)],
+      agarre: { sostener: 22, apretones: { cada: 99, danio: 0 }, tiron: { danio: 135, empuje: 6, vy: 15 }, adelante: 70, alto: 100, recuperacion: 22, aire: true },
+    },
+  ],
+  cpu: {
+    herramienta: 0.35,
+    distancia: 180,
+    rangoEspecial: [
+      [150, 330],
+      [0, 150],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Pasada gruesa de la quinta tanda.
+    pericia: { facil: -0.04, normal: -0.04 },
+    // Contra una persona (pasada gruesa): el humano simple le ganaba 82 % a la CPU (con 0,35, 24 %).
+    // Balance fino (afinar-balanzas --balanza=persona-cpu): 0,22 → 0,236.
+    periciaHumano: { normal: 0.236 },
+    // Con Lautaro, el novato ganaba 21 % contra la CPU (pasada gruesa). Balance fino: 0,06 → 0,045 (con el
+    // empuje nuevo, el simple con Lautaro ganaba 55,5).
+    asistencia: { normal: 0.045 },
+  },
+}
+
+// ─── Leo «El Filoso»: herramientas que apuntan adonde estás y un spray que te deja sin pegar ──
+
+const LEO: KitPersonaje = {
+  caminar: 4.0,
+  caminarAtras: 3.3,
+  correr: 6.4,
+  saltoVx: 4.5,
+  dash: { adelante: 150, atras: 120, ticks: 14 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Pibe de goma: tirado queda ≈ 28 ticks en vez de 50.
+  pasiva: { multDerribo: 0.55 },
+  movimientos: {
+    // Su GOLPE es con la tijera y su patada con la máquina (como los dibuja la hoja).
+    ...normalesCon({ ritmo: 0.97, danio: 0.95, alcance: 4 }, { puno: 'tijera', patada: 'maquina' }),
+    maquina: pesado('maquina', 'herramienta1', 'maquina', {
+      desde: 12,
+      total: 30,
+      danio: 76,
+      guardia: 30,
+      caja: [24, 128, 60, 178],
+      empuje: 7,
+      siguiente: 'tijera',
+      avance: { desde: 6, hasta: 14, vel: 1.8 },
+    }),
+    tijera: pesado('tijera', 'herramienta2', 'tijera', { desde: 10, total: 27, danio: 62, guardia: 24, caja: [28, 136, 70, 178], empuje: 9 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'maquina', aereo: 'voladora' },
+  especiales: [
+    {
+      // Tres tiros rectos que APUNTAN al salir (DefProyectil.apunta): le ganan al que salta para
+      // acercarse. Se cubren enteros o se esquivan; saltar o agacharse no sirve.
+      id: 'lanzamiento_de_herramientas',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'secador',
+      armadura: { hasta: 14, contra: TODO },
+      total: 46,
+      ventanas: [],
+      lanzamiento: { desde: 14, ticks: 20 },
+      rafaga: { cantidad: 3, cada: 8, tiros: [{}, {}, { empuje: 7 }] },
+      proyectil: {
+        tipo: 'secador',
+        salidaX: 40,
+        salidaY: 120,
+        vx: 11,
+        vy: 0,
+        gravedad: 0,
+        giro: 0.35,
+        ancho: 40,
+        alto: 30,
+        vida: 55,
+        golpes: 1,
+        intervalo: 0,
+        danio: 30,
+        danioGuardia: 12,
+        fuerza: 'medio',
+        hitstun: 20,
+        hitstop: 5,
+        empuje: 3.5,
+        apunta: true,
+      },
+    },
+    {
+      // Un chorro ancho que nace en la lata y crece (≈ 287 px de centro a centro): si pega limpio, deja
+      // cegado 75 ticks (sin pegar, con control). Cubierto no ciega; se corta si a Leo le pegan.
+      id: 'spray_cegador',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'aerosol',
+      armadura: { hasta: 16, contra: TODO },
+      total: 40,
+      ventanas: [],
+      lanzamiento: { desde: 16, ticks: 14 },
+      proyectil: {
+        tipo: 'aerosol',
+        salidaX: 45,
+        salidaY: 125,
+        vx: 0,
+        vy: 0,
+        gravedad: 0,
+        giro: 0,
+        ancho: 40,
+        alto: 70,
+        anchoFinal: 210,
+        altoFinal: 150,
+        vida: 20,
+        golpes: 1,
+        intervalo: 0,
+        danio: 36,
+        danioGuardia: 14,
+        fuerza: 'especial',
+        hitstun: 18,
+        hitstop: 8,
+        empuje: 2,
+        chorro: { crece: 10 },
+        efecto: 'ciega',
+        ticksEfecto: 75,
+      },
+    },
+  ],
+  cpu: {
+    herramienta: 0.35,
+    distancia: 175,
+    rangoEspecial: [
+      [130, 560],
+      [70, 250],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Pasada gruesa: su CPU ganaba ≈ 30 % en las tres dificultades. Balance fino (con los kits nuevos de
+    // Chino, Fran y Lautaro): 53,9 en normal y 45,5 en difícil.
+    pericia: { facil: 0.18, normal: 0.307, dificil: 0.44 },
+    // Contra una persona (pasada gruesa): con la pericia de normal, el humano simple le ganaba 12 % a la CPU
+    // (con 0, 64 %).
+    periciaHumano: { normal: 0.12 },
+  },
+}
+
+// ─── Nacho «El Admin» (dueño): un agarre de media distancia que roba carga y columnas de código ──
+
+const NACHO: KitPersonaje = {
+  caminar: 3.8,
+  caminarAtras: 3.1,
+  correr: 6.0,
+  saltoVx: 4.2,
+  dash: { adelante: 150, atras: 120, ticks: 15 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Overclock: con la carga en 8 o más, camina y corre 12 % más rápido.
+  pasiva: { velocidadConCarga: { desde: 8, mult: 1.12 } },
+  movimientos: {
+    // El GOLPE BÁSICO 2 de la hoja es el Laptopazo: la patada de su cadena de GOLPE pega con la laptop.
+    ...normalesCon({ ritmo: 1, danio: 1, alcance: 2 }, { patada: 'laptop' }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 29,
+      danio: 76,
+      guardia: 28,
+      caja: [24, 126, 60, 178],
+      empuje: 9,
+      siguiente: 'laptopazo',
+      avance: { desde: 4, hasta: 12, vel: 1.8 },
+    }),
+    laptopazo: pesado('laptopazo', 'herramienta2', 'laptop', { desde: 11, total: 28, danio: 66, guardia: 26, caja: [26, 140, 60, 176], empuje: 9 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // El tercer agarre del elenco: de MEDIA distancia (la mano agarra con el centro del rival entre
+      // ≈ 93 y 247 px; pegado no alcanza), también al agachado y nunca en el aire. Dos apretones y el
+      // tirón, que derriba y le roba hasta 2,5 de carga (se queda con 1). Armadura sólo contra leves.
+      // La mano llega a 215 (235 en el diseño; pasada gruesa: entre personas que no saltan, de 235 ganaba
+      // 8 de cada 10).
+      id: 'agarre_y_ejecucion',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'ejecucion',
+      armadura: { hasta: 12, contra: ['leve'] },
+      total: 44,
+      ventanas: [ventana(12, 6, 0, 0, 'especial', [125, 215, 20, 200], 0, 0)],
+      agarre: { sostener: 40, apretones: { cada: 14, danio: 16 }, tiron: { danio: 90, empuje: 6 }, adelante: 72, alto: 40, recuperacion: 18, roba: { carga: 2.5, gana: 1 } },
+    },
+    {
+      // Cuatro columnas de código, una cada 6 ticks y cada una 90 px más lejos: cada una avisa 12 ticks
+      // y estalla 6. La que te agarra te tira (y tirado, las otras no te tocan). Altas: no se saltan;
+      // se cubren, se cruzan con la esquiva hacia Nacho (queda arrodillado hasta el 52) o se esperan.
+      id: 'terremoto_de_codigo',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'codigo',
+      armadura: { hasta: 14, contra: TODO },
+      total: 52,
+      ventanas: [],
+      lanzamiento: { desde: 14, ticks: 24 },
+      rafaga: { cantidad: 4, cada: 6, tiros: [{ distancia: 105 }, { distancia: 195 }, { distancia: 285 }, { distancia: 375 }] },
+      proyectil: {
+        tipo: 'codigo',
+        salidaX: 0,
+        salidaY: 0,
+        vx: 0,
+        vy: 0,
+        gravedad: 0,
+        giro: 0,
+        ancho: 40,
+        alto: 240,
+        vida: 40,
+        golpes: 1,
+        intervalo: 0,
+        danio: 95,
+        danioGuardia: 24,
+        fuerza: 'especial',
+        hitstun: 30,
+        hitstop: 10,
+        empuje: 4,
+        efecto: 'derriba',
+        diferido: { distancia: 105, espera: TIEMPOS_PROYECTIL.codigoEstalla, activo: 6, ancho: 76, alto: 250 },
+      },
+    },
+  ],
+  cpu: {
+    herramienta: 0.3,
+    distancia: 180,
+    rangoEspecial: [
+      [105, 255],
+      [120, 420],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Balance fino de la quinta tanda (CPU contra CPU entre los dueños, con el daño nuevo).
+    pericia: { facil: -0.106, normal: -0.039, dificil: 0.073 },
+    // Con el pase, contra las CPU de los barberos (balance fino de la quinta tanda, elenco «cruce»).
+    asistencia: { normal: -0.083 },
+    // Contra una persona (con el pase, contra la CPU de un dueño): sin esto usaba su pericia y el simple le
+    // ganaba de 4 % (Tony) a 70 % (Nacho, Nico M.). Balance fino de la quinta tanda.
+    periciaHumano: { normal: 0.097 },
+  },
+}
+
+// ─── Nehuen «El Fantasma» (dueño): cruza intocable y devuelve lo que le tiran ──
+
+const NEHUEN: KitPersonaje = {
+  caminar: 4.2,
+  caminarAtras: 3.5,
+  correr: 6.8,
+  saltoVx: 4.8,
+  dash: { adelante: 150, atras: 125, ticks: 14 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Volea: sus golpes en el aire pegan 25 % más.
+  pasiva: { multAereo: 1.25 },
+  movimientos: {
+    ...normales({ ritmo: 0.97, danio: 0.95, alcance: 0 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 29,
+      danio: 74,
+      guardia: 26,
+      caja: [24, 124, 60, 178],
+      empuje: 9,
+      siguiente: 'patada_fuerte',
+      avance: { desde: 4, hasta: 12, vel: 2 },
+    }),
+    patada_fuerte: pesado('patada_fuerte', 'herramienta2', 'patada', { desde: 9, total: 26, danio: 60, guardia: 22, caja: [24, 140, 50, 150], empuje: 8 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // Intocable del 0 al 17 (golpes, tiros y agarres lo atraviesan): cruza a ≈ 33 px/tick hasta quedar
+      // a 92 px del rival (DefEmbestida.hastaRival) y a los 22 pega UNA vez, parado, con la pelota.
+      // No pega viajando. En el golpe queda +11; bloqueado −7.
+      id: 'desaparecer',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'fantasma',
+      total: 48,
+      embestida: { desde: 4, ticks: 14, distancia: 460, recuperacionGolpe: 14, recuperacionBloqueo: 22, invulnerableHasta: 18, atraviesa: true, hastaRival: 92 },
+      ventanas: [ventana(22, 5, 100, 22, 'especial', [10, 135, 50, 195], 9, 5, { hitstun: 26 })],
+    },
+    {
+      // El paletazo de cerca (14), la pelota recta (18) y, mientras la paleta está en el aire (6 a 22),
+      // devuelve lo que el rival le tira (DefEspecial.devuelve): cambia de dueño y vuelve ×1,25.
+      id: 'smash_de_padel',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'paleta',
+      armadura: { hasta: 10, contra: TODO },
+      total: 44,
+      ventanas: [ventana(14, 5, 55, 16, 'especial', [20, 140, 70, 230], 7, 4, { hitstun: 22, efecto: null })],
+      lanzamiento: { desde: 18, ticks: 8 },
+      proyectil: {
+        tipo: 'pelotita',
+        salidaX: 70,
+        salidaY: 120,
+        vx: 15,
+        vy: 0,
+        gravedad: 0,
+        giro: 0.6,
+        ancho: 32,
+        alto: 32,
+        vida: 48,
+        golpes: 1,
+        intervalo: 0,
+        danio: 80,
+        danioGuardia: 18,
+        fuerza: 'especial',
+        hitstun: 24,
+        hitstop: 8,
+        empuje: 10,
+        efecto: null,
+      },
+      devuelve: { desde: 6, hasta: 22, caja: { x0: 0, x1: 160, y0: 40, y1: 240 }, mult: 1.25, max: 22 },
+    },
+  ],
+  cpu: {
+    herramienta: 0.25,
+    distancia: 190,
+    rangoEspecial: [
+      [200, 540],
+      [140, 600],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Balance fino de la quinta tanda (CPU contra CPU entre los dueños, con el daño nuevo).
+    pericia: { facil: 0.035, normal: 0.318, dificil: 0.542 },
+    // Con el pase, contra las CPU de los barberos (balance fino de la quinta tanda, elenco «cruce»).
+    asistencia: { normal: -0.065 },
+    // Contra una persona (con el pase, contra la CPU de un dueño): sin esto usaba su pericia y el simple le
+    // ganaba de 4 % (Tony) a 70 % (Nacho, Nico M.). Balance fino de la quinta tanda.
+    periciaHumano: { normal: 0.033 },
+  },
+}
+
+// ─── Nico M. «El Dorado» (dueño): el zoner; anillos que cruzan la pantalla y púas que esperan en el piso ──
+
+const NICO_M: KitPersonaje = {
+  caminar: 3.6,
+  caminarAtras: 3.0,
+  correr: 5.8,
+  saltoVx: 4.0,
+  dash: { adelante: 150, atras: 120, ticks: 16 },
+  criticoBase: 0.07,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Pelo de punta: el que le pega de cerca se pincha (7 de vida por golpe, sin aturdir; eran 5: balance fino
+  // de la quinta tanda, entre los dueños perdía las peleas de cerca).
+  pasiva: { pincha: { danio: 7 } },
+  movimientos: {
+    ...normales({ ritmo: 1.02, danio: 1, alcance: 2 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 29,
+      danio: 76,
+      guardia: 28,
+      caja: [24, 126, 60, 178],
+      empuje: 9,
+      siguiente: 'patada_fuerte',
+      avance: { desde: 4, hasta: 12, vel: 1.8 },
+    }),
+    patada_fuerte: pesado('patada_fuerte', 'herramienta2', 'patada', { desde: 10, total: 27, danio: 62, guardia: 22, caja: [24, 140, 50, 150], empuje: 8 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // Sin piezas nuevas: tres ventanas escalonadas, cada una más larga (los anillos). Llegan a 272, 482 y
+      // 692 de centro a centro: de cerca pegan las tres (140), de lejos una (60). De 80 a 200 de alto: no
+      // se salta ni se pasa agachado; se cubre. No es un proyectil: no se devuelve. De cerca queda −8.
+      id: 'orden_final',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'anillos',
+      armadura: { hasta: 14, contra: TODO },
+      total: 46,
+      ventanas: [
+        ventana(16, 3, 40, 10, 'especial', [40, 240, 80, 200], 2, 2, { hitstun: 18, hitstop: 5 }),
+        ventana(19, 3, 40, 10, 'especial', [40, 450, 80, 200], 2, 2, { hitstun: 18, hitstop: 5 }),
+        ventana(22, 4, 60, 14, 'especial', [40, 660, 80, 200], 9, 5, { hitstun: 26, hitstop: 9 }),
+      ],
+    },
+    {
+      // Tres púas en arco (≈ 42 ticks en caer, a ≈ 220, 325 y 430 px). La que pega es un golpe medio común;
+      // las que no, se clavan (DefProyectil.trampa) 2,5 s y tiran al que las pisa (imbloqueable); una
+      // trampa por tirada. Se saltan, se cruzan con la esquiva o se espera a que se apaguen.
+      id: 'espinas',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'espinas',
+      armadura: { hasta: 18, contra: TODO },
+      total: 46,
+      ventanas: [],
+      lanzamiento: { desde: 18, ticks: 12 },
+      rafaga: { cantidad: 3, cada: 4, tiros: [{ vx: 4.5 }, { vx: 7 }, { vx: 9.5 }] },
+      proyectil: {
+        tipo: 'espina',
+        salidaX: 30,
+        salidaY: 175,
+        vx: 7,
+        vy: 6,
+        gravedad: 0.45,
+        giro: 0,
+        ancho: 28,
+        alto: 34,
+        vida: 70,
+        golpes: 1,
+        intervalo: 0,
+        danio: 36,
+        danioGuardia: 14,
+        fuerza: 'medio',
+        hitstun: 22,
+        hitstop: 6,
+        empuje: 4,
+        efecto: null,
+        trampa: { vida: 150, ancho: 46, alto: 40, danio: 50, efecto: 'derriba', imbloqueable: true },
+      },
+    },
+  ],
+  cpu: {
+    herramienta: 0.3,
+    distancia: 210,
+    rangoEspecial: [
+      [180, 660],
+      [140, 420],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Pasada gruesa (CPU contra CPU entre los dueños): su CPU ganaba 73 % en normal y 86 en difícil. Balance
+    // fino, con el daño nuevo: en fácil también.
+    pericia: { facil: 0.039, normal: -0.078, dificil: -0.508 },
+    // Contra una persona (con el pase, contra la CPU de un dueño): sin esto usaba su pericia y el simple le
+    // ganaba de 4 % (Tony) a 70 % (Nacho, Nico M.). Balance fino de la quinta tanda.
+    periciaHumano: { normal: -0.01 },
+  },
+}
+
+// ─── Tony «El Jefe» (dueño): presión de cerca; un monopatín que acelera y el papel del despido ──
+
+const TONY: KitPersonaje = {
+  caminar: 3.9,
+  caminarAtras: 2.9,
+  correr: 6.2,
+  saltoVx: 4.1,
+  dash: { adelante: 145, atras: 115, ticks: 16 },
+  criticoBase: 0.08,
+  cargaPorCritico: 0,
+  reduccionDanio: 0,
+  // Presencia de jefe: cerca de él (170 px), el rival camina y corre 5 % más lento (era 12 %: balance fino de
+  // la quinta tanda; entre dos personas que machacan con la demora del online lo dejaba siempre a tiro).
+  pasiva: { presencia: { distancia: 170, mult: 0.95 } },
+  movimientos: {
+    // El último golpe del combo empuja 15 (13 en todos): con 13 y 14 el otro quedaba a ≈ 136 px, a tiro de
+    // su puño (142), y entre dos personas que machacan con la demora del online (casual2, D 17–20) Tony lo
+    // volvía a enganchar siempre: ganaba 71–76 % contra los barberos. Con 16 se da vuelta (31–35): es un borde.
+    ...conEmpuje(normales({ ritmo: 1.02, danio: 1.06, alcance: 2 }), { puno: 3.5, patada: 4.5, combo: 15 }),
+    remate: pesado('remate', 'herramienta1', 'pesado', {
+      desde: 12,
+      total: 30,
+      danio: 82,
+      guardia: 30,
+      caja: [24, 128, 60, 180],
+      empuje: 9,
+      siguiente: 'patada_fuerte',
+      avance: { desde: 4, hasta: 12, vel: 1.8 },
+    }),
+    patada_fuerte: pesado('patada_fuerte', 'herramienta2', 'patada', { desde: 10, total: 28, danio: 66, guardia: 24, caja: [24, 144, 50, 150], empuje: 8 }),
+  },
+  inicio: { golpe: 'puno', herramienta: 'remate', aereo: 'voladora' },
+  especiales: [
+    {
+      // El revoleo de cerca (pega también un poco atrás) y el monopatín tirado, que sale a 4 px/tick y
+      // acelera 0,6 por tick hasta 17 (DefProyectil.aceleracion): cerca es lento (se salta si cubriste el
+      // revoleo), a media pantalla ya va rápido. De cerca entran los dos (45 + 110 y al piso).
+      id: 'monopatin',
+      numero: 1,
+      anim: 'especial1',
+      herramienta: 'monopatin',
+      armadura: { hasta: 16, contra: TODO },
+      total: 50,
+      ventanas: [ventana(14, 6, 45, 14, 'medio', [-40, 150, 20, 210], 6, 4, { hitstun: 30, efecto: null })],
+      lanzamiento: { desde: 24, ticks: 8 },
+      proyectil: {
+        tipo: 'monopatin',
+        salidaX: 60,
+        salidaY: 95,
+        vx: 4,
+        vy: 0,
+        gravedad: 0,
+        giro: 0,
+        ancho: 112,
+        alto: 60,
+        vida: 64,
+        golpes: 1,
+        intervalo: 0,
+        danio: 110,
+        danioGuardia: 26,
+        fuerza: 'especial',
+        hitstun: 30,
+        hitstop: 11,
+        empuje: 8,
+        efecto: 'derriba',
+        aceleracion: { por: 0.6, max: 17 },
+      },
+    },
+    {
+      // El papel (22, cubrible, no empuja) y, sólo si entró limpio (DefEspecial.siPega), la acción se
+      // estira a 92, la víctima queda arrodillada 44 ticks y a los 50 sale la patada voladora (derriba).
+      // Cubierto o al aire, la acción termina en el 48: Tony queda regalado (−18).
+      id: 'despido_final',
+      numero: 2,
+      anim: 'especial2',
+      herramienta: 'despido',
+      armadura: { hasta: 22, contra: ['leve', 'medio'] },
+      total: 48,
+      ventanas: [
+        // El papel llega a 182 de centro a centro (165 en el diseño; pasada gruesa de la quinta tanda).
+        ventana(22, 6, 12, 8, 'medio', [30, 150, 50, 220], 0, 2, { hitstun: 14, efecto: null }),
+        ventana(52, 12, 150, 30, 'especial', [-10, 120, -20, 160], 9, 4, { hitstun: 30, efecto: 'derriba' }),
+      ],
+      siPega: { ventana: 0, total: 92, aturde: 44 },
+      embestida: { desde: 50, ticks: 14, distancia: 110, recuperacionGolpe: 18, recuperacionBloqueo: 26, salto: { vy: 7, gravedad: 0.7 } },
+    },
+  ],
+  cpu: {
+    herramienta: 0.35,
+    distancia: 170,
+    rangoEspecial: [
+      [0, 560],
+      [60, 175],
+    ],
+    especialDeCombo: 0,
+    preferencia: [1, 1],
+    // Pasada gruesa (CPU contra CPU entre los dueños): su CPU ganaba ≈ 30 %. Balance fino con el kit nuevo.
+    pericia: { facil: 0.203, normal: 0.278, dificil: 0.294 },
+    // Con el pase, contra las CPU de los barberos (balance fino de la quinta tanda, elenco «cruce»).
+    asistencia: { normal: -0.029 },
+    // Contra una persona (con el pase, contra la CPU de un dueño): sin esto usaba su pericia y el simple le
+    // ganaba de 4 % (Tony) a 70 % (Nacho, Nico M.). Balance fino de la quinta tanda.
+    periciaHumano: { normal: -0.025 },
+  },
+}
+
 // ─── Balance ──────────────────────────────────────────────────────────────────
 
 /**
@@ -2040,6 +2992,7 @@ export function conDanio(kit: KitPersonaje, fn: number, fe: number, fg = 1, fge 
           quema: e.proyectil.quema ? { ...e.proyectil.quema, danio: r(e.proyectil.quema.danio) } : undefined,
           nube: e.proyectil.nube ? { ...e.proyectil.nube, danio: r(e.proyectil.nube.danio) } : undefined,
           onda: e.proyectil.onda ? { ...e.proyectil.onda, danioPared: r(e.proyectil.onda.danioPared) } : undefined,
+          trampa: e.proyectil.trampa ? { ...e.proyectil.trampa, danio: r(e.proyectil.trampa.danio) } : undefined,
         }
       : undefined,
     agarre: e.agarre
@@ -2049,6 +3002,8 @@ export function conDanio(kit: KitPersonaje, fn: number, fe: number, fg = 1, fge 
           tiron: { ...e.agarre.tiron, danio: r(e.agarre.tiron.danio) },
         }
       : undefined,
+    // El bono de la contra (el All In de Chino) es el golpe de la embestida cuando la contra saltó.
+    contra: e.contra ? { ...e.contra, bono: { ...e.contra.bono, danio: r(e.contra.bono.danio) } } : undefined,
   })
   const movimientos: Record<string, DefMovimiento> = {}
   for (const [id, m] of Object.entries(kit.movimientos)) movimientos[id] = mov(m)
@@ -2086,6 +3041,20 @@ export const DANIO_KIT: Readonly<Record<IdPersonaje, readonly [number, number, n
   lucas: [0.889, 1.32, 1.062, 1.062],
   stefano: [1.02, 1.193, 0.864, 1.328],
   brian: [0.649, 0.679, 0.838, 1.29],
+  // Quinta tanda (14/nov): los de arranque del diseño y, con E (balance fino, segunda parte), Chino
+  // 1,05 → 1,10 en los normales (con las cartas más cortas), Fran 1,05/1,1 → 1,08/1,2 (con «apunta» y la
+  // demora del online perdía 72 %: el Corte de Precisión sale tarde) y Lautaro 1,08 → 1,04 (con el
+  // empuje nuevo de sus normales).
+  chino: [1.1, 1, 1, 1],
+  fran: [1.08, 1.2, 1, 1],
+  lautaro: [1.04, 1.04, 1, 1],
+  leo: [1, 1, 1.1, 1.1],
+  // Los dueños, con E entre ellos y contra los barberos (balance fino de la quinta tanda): contra los
+  // barberos perdían todos (39–44 % entre personas); entre ellos, Tony ganaba 70 % con los que machacan.
+  nacho: [1.15, 1.15, 1, 1],
+  nehuen: [1.25, 1.25, 1, 1],
+  nico_m: [1.05, 1.05, 1, 1],
+  tony: [0.97, 0.935, 1, 1],
 }
 
 /** Los kits con los números de diseño, antes del factor de daño (los usa el simulador para afinar). */
@@ -2103,6 +3072,14 @@ export const KITS_DISENIO: Readonly<Record<IdPersonaje, KitPersonaje>> = {
   lucas: LUCAS,
   stefano: STEFANO,
   brian: BRIAN,
+  chino: CHINO,
+  fran: FRAN,
+  lautaro: LAUTARO,
+  leo: LEO,
+  nacho: NACHO,
+  nehuen: NEHUEN,
+  nico_m: NICO_M,
+  tony: TONY,
 }
 
 export const MOVIMIENTOS = Object.fromEntries(

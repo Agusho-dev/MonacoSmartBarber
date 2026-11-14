@@ -2,7 +2,7 @@
 
 import '@/app/juego/sala.css'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { guardarPartidaJuego, obtenerEstadisticasPersonajes } from '@/lib/actions/juego'
+import { guardarPartidaJuego, obtenerEstadisticasPersonajes, validarPaseDuenos } from '@/lib/actions/juego'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
 import { Duelo, type EstadoDuelo } from '@/lib/juego/online/duelo'
 import { sanearNombre, versionJuego, type EstadoJugador } from '@/lib/juego/online/protocolo'
@@ -11,7 +11,7 @@ import type { Emparejamiento } from '@/lib/juego/online/sala'
 import { textoCierre } from '@/lib/juego/online/textos'
 import { abrirTransportePelea } from '@/lib/juego/online/transporte'
 import { reintentarPendientes } from '@/lib/juego/pendientes'
-import { PERSONAJES } from '@/lib/juego/personajes'
+import { IDS_SOLO_DUENOS, PERSONAJES, peleaConDuenos } from '@/lib/juego/personajes'
 import { createClient } from '@/lib/supabase/client'
 import type {
   DatosEntradaJuego,
@@ -26,7 +26,8 @@ import type {
 import { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { esPantallaTactil, prefiereMenosMovimiento, useConsultaMedia, usePestanaVisible } from '@/lib/juego/ui/media'
 import { pedirPantallaCompleta } from '@/lib/juego/ui/pantalla-completa'
-import { jugadorSugerido, personajeDelBarbero, rivalSugerido } from '@/lib/juego/ui/plantel'
+import { revisarPase, usePaseDuenos } from '@/lib/juego/ui/pase-duenos'
+import { jugadorSugerido, personajeDelBarbero, personajeInicialOnline, rivalSugerido } from '@/lib/juego/ui/plantel'
 import { cancelarPrecarga, estadoPrecarga, precargar, usePrecarga } from '@/lib/juego/ui/precarga'
 import { guardarPreferencias, registrarPelea, usePreferencias } from '@/lib/juego/ui/preferencias'
 import type { PeleaDePrueba } from '@/lib/juego/ui/prueba'
@@ -76,6 +77,9 @@ const PANTALLAS_CON_PELEA: readonly PantallaRaiz[] = ['vs', 'carga', 'pelea', 'r
 
 /** Dónde se avisa que llegó alguien a la sala (en la pelea contra la CPU, sólo el chip chico). */
 const CON_AVISO_DE_SALA: readonly PantallaRaiz[] = ['inicio', 'seleccion', 'resultado']
+
+/** Sin el pase de dueños, el grupo «Dueños» no tiene a nadie (el mismo arreglo en cada render). */
+const SIN_DUENOS: readonly IdPersonaje[] = []
 
 function sinTildes(texto: string): string {
   return texto
@@ -149,6 +153,8 @@ export function JuegoRaiz({
   const visible = usePestanaVisible()
   const tactil = useConsultaMedia('(any-pointer: coarse)')
   const registroOnline = useRegistroOnline()
+  /** El pase de dueños (ui/pase-duenos.ts): con él, este celular ve y elige a los dueños. */
+  const conPase = usePaseDuenos()
   const [audio] = useState(() => new AudioSeguro())
 
   const [pantalla, setPantalla] = useState<PantallaRaiz>(() => (prueba ? 'carga' : 'inicio'))
@@ -198,8 +204,11 @@ export function JuegoRaiz({
 
   // La elección se DERIVA: las preferencias llegan después de hidratar y el barbero del QR manda.
   // Lo que el jugador tocó gana; lo que no tocó sale de su barbero y de su sucursal (plantel.ts).
-  const barbero = personajeDelBarbero(datos.barberoAsignado)
-  const contextoPlantel = { barbero, sucursal: datos.sucursal?.slug ?? null }
+  // Sin el pase de dueños, nada de eso es un dueño: si lo atiende uno, el rival es otro barbero de
+  // su sucursal; con el pase, los dueños van además en su grupo de la selección.
+  const barbero = personajeDelBarbero(datos.barberoAsignado, conPase)
+  const contextoPlantel = { barbero, sucursal: datos.sucursal?.slug ?? null, conPase }
+  const duenos = conPase ? IDS_SOLO_DUENOS : SIN_DUENOS
   const jugador = eleccionUsuario.jugador ?? jugadorSugerido(prefs.ultimoPersonaje, contextoPlantel)
   const rival = eleccionUsuario.rival ?? rivalSugerido(jugador, contextoPlantel)
   const arena = arenaJugable(eleccionUsuario.arena ?? datos.arenaInicial)
@@ -252,6 +261,20 @@ export function JuegoRaiz({
   // llama al servidor), y nunca manda dos veces: si hay una vuelta en marcha, devuelve ésa.
   useEffect(() => {
     if (pantalla === 'inicio') void reintentarPendientes(guardarPartidaJuego)
+  }, [pantalla])
+
+  // El pase de dueños (ui/pase-duenos.ts): saca el ?d= de la dirección, lo valida en el servidor y,
+  // si vale, este celular ve a los dueños. Un instante después del montaje: los efectos de los hijos
+  // corren antes que los del router de Next, que recién ahí parcha history.replaceState, y sin el
+  // parche el router no se entera de la dirección nueva y la vuelve a escribir con el ?d=.
+  useEffect(() => {
+    const t = window.setTimeout(() => void revisarPase(validarPaseDuenos), 0)
+    return () => window.clearTimeout(t)
+  }, [])
+  // Si el servidor no contestó al abrir, se pregunta de nuevo al ir a elegir (sin pase guardado ni
+  // en la dirección no llama a nadie; ya confirmado, tampoco).
+  useEffect(() => {
+    if (pantalla === 'seleccion' || pantalla === 'online-eleccion') void revisarPase(validarPaseDuenos)
   }, [pantalla])
 
   // Mientras el juego está montado: sin rebote de scroll ni pull-to-refresh ni zoom con gesto.
@@ -522,7 +545,8 @@ export function JuegoRaiz({
       yo: { id: yo.id, nombre: miNombre },
       rival: e.rival,
       arena: arenaOnline,
-      personajeInicial: prefs.ultimoPersonaje ?? jugador,
+      // El último elegido, si este celular lo puede elegir (un dueño, sólo con el pase).
+      personajeInicial: personajeInicialOnline(prefs.ultimoPersonaje, jugador, conPase),
       version: versionJuego(),
       transporte,
       marcador: marcadorCon(rivalId),
@@ -613,7 +637,11 @@ export function JuegoRaiz({
   }
 
   const terminarPelea = (r: ResultadoPelea) => {
-    const mejorAnterior = registrarPelea(r.eleccion.jugador, r.gano, r.desglose.total)
+    // Una pelea con un dueño no suma a los récords de este celular (ni al ranking ni a las
+    // estadísticas de los barberos: el resultado no la guarda).
+    const mejorAnterior = peleaConDuenos(r.eleccion.jugador, r.eleccion.rival)
+      ? prefs.mejorPuntaje
+      : registrarPelea(r.eleccion.jugador, r.gano, r.desglose.total)
     irA('resultado', () => setResultado({ ...r, mejorAnterior }))
   }
 
@@ -714,6 +742,7 @@ export function JuegoRaiz({
             eleccion={eleccion}
             datos={datos}
             barbero={barbero}
+            duenos={duenos}
             stats={stats}
             prefs={prefs}
             turno={turno}
@@ -844,6 +873,7 @@ export function JuegoRaiz({
           <EleccionOnline
             estado={estadoDuelo}
             sucursal={datos.sucursal?.slug ?? null}
+            duenos={duenos}
             onTocar={() => audio.ui('tocar')}
             onElegir={(id) => {
               audio.ui('elegir')

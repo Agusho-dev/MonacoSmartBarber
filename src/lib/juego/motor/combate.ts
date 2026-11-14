@@ -4,7 +4,7 @@
  * derribar, aturdir, marear, quemar, agarrar), combos, carga de la máquina, pasivas,
  * estadísticas y eventos.
  */
-import type { EfectoEspecial, FuerzaGolpe, Herramienta, Lado, Partida } from '../tipos'
+import type { EfectoEspecial, FuerzaGolpe, Herramienta, Lado, LuchadorEstado, Partida } from '../tipos'
 import { CARGA_MAX } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import { chance } from './azar'
@@ -32,6 +32,7 @@ import {
   bloquea,
   cajaCuerpo,
   cajaGolpe,
+  contraArmada,
   contraPared,
   enCombo,
   finVentanas,
@@ -41,7 +42,7 @@ import {
   interseccion,
   limitar,
 } from './cuerpo'
-import type { Accion, EstadoControl, EstadoInterno, ProyectilInterno } from './interno'
+import type { Accion, EstadoControl, EstadoInterno, InternoLuchador, ProyectilInterno } from './interno'
 import { emitir } from './interno'
 import type { DefAgarre, DefEspecial, KitPersonaje } from './movimientos'
 
@@ -78,6 +79,8 @@ export interface Impacto {
   proyectil: ProyectilInterno | null
   /** Si la víctima está contra la pared, el que pega sale para atrás. */
   rebotePared: boolean
+  /** El Corte de Precisión pegó con la punta (VentanaGolpe.punta): si entra limpio, sale el evento 'precision'. */
+  punta?: boolean
 }
 
 /** Suma carga y avisa cada vez que se completa una unidad entera. */
@@ -147,11 +150,21 @@ export function ponerEstado(
   // quemadura. Sin esto, con carga, se encadenaba sin fin. LENTO (la nube) sí se renueva.
   if (estado !== 'lento' && (vi.inmune[estado] > 0 || v.efectos[estado] > 0)) return false
   // Los que lo dejan sin moverse no entran si ya lleva demasiado encerrado (TOPE_ENCIERRO). El
-  // mareo, la quemadura y la lentitud no le sacan el control: entran igual.
-  if ((estado === 'aturdido' || estado === 'electrocutado' || estado === 'congelado') && inmuneAlControl(vi)) return false
+  // mareo, la quemadura, la lentitud y el cegado no le sacan el control: entran igual.
+  if ((estado === 'aturdido' || estado === 'electrocutado' || estado === 'congelado' || estado === 'hipnotizado') && inmuneAlControl(vi)) return false
   const t = duracion(I.kits[victima], ticks)
   v.efectos[estado] = Math.max(v.efectos[estado], t)
   return true
+}
+
+/**
+ * Se termina el hipnotizado (los Lentes de Fran): por tiempo, por el primer golpe limpio o en el tope
+ * del encierro. Siempre deja la inmunidad, así no se encadena.
+ */
+export function despertar(l: LuchadorEstado, li: InternoLuchador): void {
+  if (l.efectos.hipnotizado > 0) l.efectos.hipnotizado = 0
+  li.inmune.hipnotizado = INMUNIDAD.hipnotizado
+  li.hipnotizadoPor = null
 }
 
 /** Deja duro al luchador (Fijación Extrema). Pegarle lo rompe con ×1,3. */
@@ -168,10 +181,15 @@ export function congelar(p: Partida, I: EstadoInterno, victima: Lado, atacante: 
   emitir(p, { tipo: 'congelado', quien: victima })
 }
 
-/** La embestida frena al chocar y se queda para recuperarse (salvo las que siguen de largo). */
+/**
+ * La embestida frena al chocar y se queda para recuperarse (salvo las que siguen de largo). Sólo con
+ * la embestida ya en marcha (quinta tanda): un golpe del mismo especial ANTES de que arranque (el
+ * papel del Despido de Tony) no la frena antes de que exista. Los 13 y los de la cuarta tanda tienen
+ * todas sus ventanas dentro o después de su embestida: para ellos no cambia nada.
+ */
 function frenarEmbestida(I: EstadoInterno, lado: Lado, a: Accion, bloqueado: boolean): void {
   const esp = a.mov as DefEspecial
-  if (!esp.embestida || a.detenido || esp.embestida.sigue) return
+  if (!esp.embestida || a.detenido || esp.embestida.sigue || a.t < esp.embestida.desde) return
   a.detenido = true
   a.total = a.t + 1 + (bloqueado ? esp.embestida.recuperacionBloqueo : esp.embestida.recuperacionGolpe)
   const v0 = a.ventanasAnim[0]
@@ -209,6 +227,20 @@ function tieneArmadura(kit: KitPersonaje, accion: Accion | null, fuerza: FuerzaG
   if (!pas || accion.mov.aereo || !pas.includes(fuerza)) return false
   const pesado = accion.especial !== 0 || accion.mov.boton === 'herramienta'
   return pesado && accion.t < finVentanas(accion.mov)
+}
+
+/**
+ * Pelo de punta (Nico M., PasivaKit.pincha): el que le pega de cerca (golpe, bloqueo, armadura o
+ * agarre) se pincha: pierde un poco de vida, sin aturdimiento ni bloqueo (como la quemadura). Los
+ * tiros no (imp.accion es null).
+ */
+function pinchar(p: Partida, I: EstadoInterno, imp: Impacto): void {
+  const pc = I.kits[imp.victima].pasiva?.pincha
+  if (!pc || !imp.accion) return
+  const quien = p.luchadores[imp.atacante]
+  if (quien.vida <= 0) return
+  danioContinuo(p, I, imp.victima, imp.atacante, pc.danio)
+  emitir(p, { tipo: 'pinchazo', quien: imp.atacante, x: imp.x, y: imp.y })
 }
 
 /** Furia: con poca vida pega más (La 12 no para). */
@@ -274,6 +306,9 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
   vic.enSuelo = false
   vi.vMov = 0
   vi.vEmpuje = 0
+  // Los golpes del agarre llevan la herramienta del especial (el apretón de Brian, la ejecución de
+  // Nacho, el revoleo de Lautaro): el sonido y el destello de cada uno.
+  const herramienta = a.mov.herramienta
   if (g.t < def.sostener && g.t % def.apretones.cada === 0) {
     const real = hacerDanio(p, I, lado, g.victima, Math.round(def.apretones.danio * multFuria(p, I, lado) * (1 - I.kits[g.victima].reduccionDanio)))
     vic.destello = DESTELLO
@@ -291,7 +326,7 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
       critico: false,
       bloqueado: false,
       fuerza: 'leve',
-      herramienta: 'agarre',
+      herramienta,
     })
     if (atk.combo >= 2) emitir(p, { tipo: 'combo', quien: lado, golpes: atk.combo })
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, HITSTOP.leve)
@@ -301,7 +336,8 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
     // Si ya lleva demasiado encerrado (TOPE_ENCIERRO), el tirón le pega pero no lo deja tirado: cae parado.
     const derriba = !inmuneAlControl(vi)
     vi.agarradoPor = null
-    vic.vy = 5
+    // El revoleo de Lautaro (`tiron.vy`) lo manda alto: cae lejos.
+    vic.vy = def.tiron.vy ?? 5
     vi.vEmpuje = atk.mira * def.tiron.empuje
     vi.caidaDerribo = derriba ? EFECTO.derribo : 0
     vi.selloStun++
@@ -319,18 +355,31 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
       critico: false,
       bloqueado: false,
       fuerza: 'especial',
-      herramienta: 'agarre',
+      herramienta,
     })
     emitir(p, { tipo: 'combo', quien: lado, golpes: atk.combo })
     if (derriba) emitir(p, { tipo: 'derribo', quien: g.victima })
+    // La ejecución de Nacho (`roba`): después de la carga de siempre del tirón, la víctima pierde hasta
+    // `carga` y él se queda con hasta `gana` («Rival.exe no responde»).
+    if (def.roba) {
+      const r = Math.min(def.roba.carga, vic.carga)
+      if (r > 0) {
+        sumarCarga(p, g.victima, -r)
+        sumarCarga(p, lado, Math.min(def.roba.gana, r))
+        emitir(p, { tipo: 'carga_robada', atacante: lado, victima: g.victima, cantidad: r })
+      }
+    }
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, HITSTOP.especial)
     a.agarre = null
     a.total = a.t + 1 + def.recuperacion
   }
 }
 
-/** Aplica un contacto. Devuelve cómo salió. */
-export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'golpe' | 'bloqueo' | 'armadura' {
+/**
+ * Aplica un contacto. Devuelve cómo salió. 'contra' = lo anuló la contra del All In de Chino: no hizo
+ * nada (el que tiró un proyectil lo saca de la pantalla).
+ */
+export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'golpe' | 'bloqueo' | 'armadura' | 'contra' {
   const atk = p.luchadores[imp.atacante]
   const vic = p.luchadores[imp.victima]
   const ai = I.luchadores[imp.atacante]
@@ -343,6 +392,21 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   const ef = imp.efecto
   const sello = a ? a.sello : (imp.proyectil?.selloAccion ?? 0)
   const furia = multFuria(p, I, imp.atacante)
+
+  // ─── La contra (el All In de Chino) ───
+  // Arriba de todo, antes de marcar el contacto del que pega: si no, el golpe contrarrestado le abría
+  // la cadena y la cancelación en especial. El agarre le gana (se resuelve abajo, como siempre).
+  const va = vi.accion
+  if (ef !== 'agarre' && va && contraArmada(va)) {
+    const ct = (va.mov as DefEspecial).contra as NonNullable<DefEspecial['contra']>
+    va.contraOk = true
+    // Salta a la embestida: cerrarTickAccion la deja en `salto` y el próximo tick arranca a correr.
+    va.t = ct.salto - 1
+    vic.efectos.dominio = 0
+    emitir(p, { tipo: 'contra', quien: imp.victima })
+    p.congelamientoGolpe = Math.max(p.congelamientoGolpe, HITSTOP.fuerte)
+    return 'contra'
+  }
 
   if (a) {
     a.contacto = true
@@ -359,6 +423,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     // después tirada gratis, y el especial contaba como acertado (dependía del lado).
     if (ai.accion !== a) return 'golpe'
     agarrar(p, I, imp, a, esp.agarre)
+    pinchar(p, I, imp)
     return 'golpe'
   }
   const inmune = inmuneAlControl(vi)
@@ -399,10 +464,14 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
       vi.selloStun++
       vi.vEmpuje = imp.dir * imp.empujeBloqueo
       if (imp.rebotePared && contraPared(vic, imp.dir)) ai.vEmpuje = -imp.dir * imp.empujeBloqueo * 0.8
+      // Pulso fino (Fran): el próximo golpe normal que arranque enseguida es crítico seguro.
+      const ctb = kitV.pasiva?.criticoTrasBloqueo
+      if (ctb) vi.critListo = Math.max(vi.critListo, vi.stun + ctb)
     }
     if (imp.efecto === 'congela') congelar(p, I, imp.victima, imp.atacante, EFECTO.congeladoBloqueo)
     if (a) frenarEmbestida(I, imp.atacante, a, true)
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, imp.hitstop)
+    pinchar(p, I, imp)
     return 'bloqueo'
   }
 
@@ -430,6 +499,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
       herramienta: imp.herramienta,
     })
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, HITSTOP.leve)
+    pinchar(p, I, imp)
     return 'armadura'
   }
 
@@ -438,6 +508,13 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   const critico = imp.probCritico > 0 && (imp.probCritico >= 1 || chance(I.azar, imp.probCritico))
   if (critico) mult *= CRITICO.mult
   const estabaEnCombo = enCombo(vic, vi)
+  // Los dos estados que dejan indefenso (quinta tanda) se cortan con el primer golpe limpio, ANTES de
+  // poner el efecto de este golpe (que, con la inmunidad recién puesta, ya no los renueva).
+  if (vic.efectos.hipnotizado > 0) despertar(vic, vi)
+  if (vic.efectos.cegado > 0) {
+    vic.efectos.cegado = 0
+    vi.inmune.cegado = INMUNIDAD.cegado
+  }
   if (vic.efectos.congelado > 0) {
     mult *= EFECTO.rompeCongelado
     vic.efectos.congelado = 0
@@ -500,6 +577,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     fuerza: imp.fuerza,
     herramienta: imp.herramienta,
   })
+  if (imp.punta && critico) emitir(p, { tipo: 'precision', quien: imp.atacante, x: imp.x, y: imp.y })
   if (vic.vida > 0) {
     // La duración del electrocutado y del congelado también la puede decir el especial (ticksEfecto).
     if (ef === 'electrocuta' && ponerEstado(p, I, imp.victima, 'electrocutado', imp.ticksEfecto || EFECTO.electrocutado)) {
@@ -515,6 +593,14 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     if (ef === 'quema' && imp.quema && ponerEstado(p, I, imp.victima, 'quemado', imp.ticksEfecto || EFECTO.quemado)) {
       vi.quema = { cada: imp.quema.cada, danio: imp.quema.danio, de: imp.atacante, t: 0 }
       emitir(p, { tipo: 'quemado', quien: imp.victima })
+    }
+    // Los Lentes de Fran: sólo hipnotizan al que está en el piso (en el aire pega y lo tira, nada más).
+    if (ef === 'hipnotiza' && vic.enSuelo && ponerEstado(p, I, imp.victima, 'hipnotizado', imp.ticksEfecto || EFECTO.hipnotizado)) {
+      vi.hipnotizadoPor = imp.atacante
+      emitir(p, { tipo: 'hipnotizado', quien: imp.victima })
+    }
+    if (ef === 'ciega' && ponerEstado(p, I, imp.victima, 'cegado', imp.ticksEfecto || EFECTO.cegado)) {
+      emitir(p, { tipo: 'cegado', quien: imp.victima })
     }
   }
   if (atk.combo >= 2) emitir(p, { tipo: 'combo', quien: imp.atacante, golpes: atk.combo })
@@ -533,6 +619,16 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     imp.proyectil.acerto = true
     contarAcierto(p, I, imp.atacante, sello)
   }
+  // El Despido Final de Tony (DefEspecial.siPega): el papel entró limpio, la víctima se arrodilla
+  // (aturdida, con el escalado del combo) y la acción se estira: recién ahora existe la patada.
+  const sp = (a?.mov as DefEspecial | undefined)?.siPega
+  if (a && sp && imp.ventana === sp.ventana && vic.enSuelo && vic.vida > 0 && !derriba) {
+    a.total = Math.max(a.total, sp.total)
+    vi.stun = Math.max(vi.stun, Math.max(1, Math.round(sp.aturde * (inmune ? ESCALADO_STUN.minimo : multiplicadorStun(atk.combo)))))
+    vi.stunTotal = vi.stun
+    emitir(p, { tipo: 'despido', atacante: imp.atacante, victima: imp.victima })
+  }
+  pinchar(p, I, imp)
   return 'golpe'
 }
 
@@ -553,9 +649,13 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
     if (!cuerpo) continue
     const kit = I.kits[lado]
     const efEspecial = a.especial ? efectoDe(p, lado, a.especial) : null
-    // El agarre no agarra en el aire (la ventana sigue buscando por si aterriza) ni al que ya lleva
-    // demasiado encerrado (TOPE_ENCIERRO): si no vuelve a moverse a tiempo, el agarre sale al aire.
-    if (efEspecial === 'agarre' && (!v.enSuelo || inmuneAlControl(vi))) continue
+    const esp = a.mov as DefEspecial
+    // El agarre no agarra en el aire (la ventana sigue buscando por si aterriza; el Lanzamiento Aéreo
+    // de Lautaro sí, `agarre.aire`) ni al que ya lleva demasiado encerrado (TOPE_ENCIERRO): si no
+    // vuelve a moverse a tiempo, el agarre sale al aire.
+    if (efEspecial === 'agarre' && ((!v.enSuelo && !esp.agarre?.aire) || inmuneAlControl(vi))) continue
+    // La contra que saltó (el All In): la embestida pega con el bono.
+    const bono = a.contraOk ? esp.contra?.bono : undefined
     for (let i = 0; i < a.mov.ventanas.length; i++) {
       if (a.resueltas[i] || a.esperaVentana[i] > 0) continue
       const w = a.mov.ventanas[i]
@@ -571,15 +671,19 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
       const rem = ultimo && total > 1 ? w.ultimo : undefined
       const fuerza = rem?.fuerza ?? w.fuerza
       const efVentana = rem && rem.efecto !== undefined ? rem.efecto : w.efecto
-      const efecto = a.especial ? (efVentana !== undefined ? efVentana : efectoNormalizado(efEspecial)) : null
+      const efecto = bono ? bono.efecto : a.especial ? (efVentana !== undefined ? efVentana : efectoNormalizado(efEspecial)) : null
+      // La punta del Corte de Precisión (Fran): con el rival lejos, crítico seguro.
+      const punta = !!w.punta && Math.abs(v.x - l.x) >= w.punta.desde
+      // La Volea de Nehuen: sus golpes aéreos pegan más (no aturden ni empujan más).
+      const multAereo = a.mov.aereo ? (kit.pasiva?.multAereo ?? 1) : 1
       ;(efecto === 'agarre' ? agarres : lista).push({
         atacante: lado,
         victima: otro,
-        danio: rem ? rem.danio : w.danio,
+        danio: (bono ? bono.danio : rem ? rem.danio : w.danio) * multAereo,
         danioGuardia: w.danioGuardia,
         fuerza,
         herramienta: a.mov.herramienta,
-        hitstun: rem?.hitstun ?? w.hitstun ?? HITSTUN[fuerza],
+        hitstun: bono ? bono.hitstun : (rem?.hitstun ?? w.hitstun ?? HITSTUN[fuerza]),
         hitstop: w.hitstop ?? HITSTOP[fuerza],
         empuje: rem ? rem.empuje : w.empuje,
         empujeBloqueo: w.empujeBloqueo,
@@ -590,9 +694,11 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
         probCritico:
           a.especial === 0
             ? a.mov.critico !== undefined
-              ? kit.criticoBase + a.mov.critico
+              ? a.critSeguro
+                ? 1
+                : kit.criticoBase + a.mov.critico
               : 0
-            : efEspecial === 'critico'
+            : efEspecial === 'critico' || punta
               ? 1
               : 0,
         especial: a.especial,
@@ -604,6 +710,7 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
         ventana: i,
         proyectil: null,
         rebotePared: a.especial === 0,
+        punta,
       })
       break
     }
@@ -619,9 +726,13 @@ export function efectoDe(p: Partida, lado: Lado, numero: 1 | 2): EfectoEspecial 
   return PERSONAJES[p.luchadores[lado].id].especiales[numero - 1].efecto
 }
 
-/** Los efectos que no hacen nada en el contacto (multigolpe, crítico, cura, nube) pasan a null. */
+/**
+ * Los efectos que no hacen nada en el contacto (multigolpe, crítico, cura, nube) pasan a null. Los de
+ * la quinta tanda que hace su pieza, también: la contra, la precisión (la punta) y la devolución.
+ */
 export function efectoNormalizado(ef: EfectoEspecial | null): EfectoEspecial | null {
   if (ef === 'multigolpe' || ef === 'critico' || ef === 'cura' || ef === 'nube') return null
+  if (ef === 'contra' || ef === 'precision' || ef === 'devuelve' || ef === 'trampa') return null
   return ef
 }
 

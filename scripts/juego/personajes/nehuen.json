@@ -1,0 +1,3388 @@
+{
+ "_nota": "Nehuen para «Corte Final» (quinta tanda, 14/nov/2026), hoja de 18 paneles (1600x900, foto realista). Se procesa con scripts/juego/extraer_nehuen.py (atajo de extraer_nacho.py). Buzo negro sobre un fondo casi del mismo negro: «fondoOscuro» (el de Leo) NO sirve: el buzo tiene zonas lisas tan oscuras como el fondo y las agujereaba; el fondo pegado se pela sólo desde el borde con «pelarFondo» (lumMax 22, desvío 2,5, 6 pasos). Casi todos los paneles traen humo abajo. El humo gris del piso se pela desde el borde con «humo» del motor en la franja de abajo de cada panel.",
+ "personaje": "nehuen",
+ "hoja": "../../../../juego-fuentes/nehuen_anim.jpg",
+ "salida": "../../../public/juego/personajes/nehuen",
+ "reglas": {
+  "aura": [
+   {
+    "nota": "aura, remolinos y rayos azules muy saturados (el short celeste no pasa de b - r 72)",
+    "bMenosRMin": 75,
+    "satMin": 0.55,
+    "lumMin": 40
+   }
+  ],
+  "rojo": [
+   {
+    "nota": "destellos y estelas rojas o magenta (la gorra naranja y la piel tienen tono de 5 a 35 grados)",
+    "tono": [
+     300,
+     6
+    ],
+    "satMin": 0.45,
+    "lumMin": 35
+   }
+  ]
+ },
+ "animaciones": {
+  "quieto": {
+   "inferencia": "ancho",
+   "region": [
+    6,
+    31,
+    361,
+    153
+   ],
+   "cajas": [
+    [
+     12,
+     33,
+     77,
+     153
+    ],
+    [
+     77,
+     33,
+     141,
+     153
+    ],
+    [
+     141,
+     33,
+     205,
+     153
+    ],
+    [
+     205,
+     33,
+     272,
+     153
+    ],
+    [
+     272,
+     33,
+     352,
+     153
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     140,
+     361,
+     154
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "apoyoX": {
+    "0": 43.5,
+    "1": 106.5,
+    "2": 171.0,
+    "3": 237.5,
+    "4": 308.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  },
+  "caminar": {
+   "inferencia": "ancho&panel",
+   "region": [
+    368,
+    31,
+    725,
+    153
+   ],
+   "cajas": [
+    [
+     370,
+     35,
+     450,
+     153
+    ],
+    [
+     447,
+     35,
+     523,
+     153
+    ],
+    [
+     521,
+     35,
+     590,
+     153
+    ],
+    [
+     585,
+     35,
+     650,
+     153
+    ],
+    [
+     645,
+     35,
+     722,
+     153
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     368,
+     140,
+     725,
+     154
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "excluirFinal": {
+    "0": [
+     [
+      [
+       399,
+       123
+      ],
+      [
+       406,
+       123
+      ],
+      [
+       414,
+       128
+      ],
+      [
+       421,
+       136
+      ],
+      [
+       424,
+       143
+      ],
+      [
+       423,
+       151
+      ],
+      [
+       396,
+       151
+      ],
+      [
+       389,
+       142
+      ],
+      [
+       392,
+       133
+      ]
+     ]
+    ],
+    "4": [
+     [
+      [
+       672,
+       124
+      ],
+      [
+       680,
+       124
+      ],
+      [
+       690,
+       130
+      ],
+      [
+       698,
+       138
+      ],
+      [
+       697,
+       151
+      ],
+      [
+       668,
+       151
+      ],
+      [
+       661,
+       141
+      ],
+      [
+       666,
+       132
+      ]
+     ]
+    ]
+   },
+   "_nota": "CAMINAR de la hoja (5 cuadros). En el 0 y el 4 el modelo se traga el fondo oscuro entre las piernas: «excluirFinal» con el triángulo medido en la hoja."
+  },
+  "correr": {
+   "inferencia": "ancho&panel",
+   "region": [
+    732,
+    31,
+    1100,
+    153
+   ],
+   "cajas": [
+    [
+     740,
+     38,
+     862,
+     153
+    ],
+    [
+     848,
+     38,
+     968,
+     153
+    ],
+    [
+     955,
+     38,
+     1092,
+     153
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     735,
+     112,
+     1095,
+     154
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 8
+   },
+   "excluirFinal": {
+    "0": [
+     [
+      [
+       785,
+       118
+      ],
+      [
+       796,
+       113
+      ],
+      [
+       805,
+       118
+      ],
+      [
+       802,
+       128
+      ],
+      [
+       806,
+       140
+      ],
+      [
+       800,
+       148
+      ],
+      [
+       779,
+       148
+      ],
+      [
+       777,
+       139
+      ],
+      [
+       781,
+       128
+      ]
+     ],
+     [
+      [
+       832,
+       110
+      ],
+      [
+       840,
+       108
+      ],
+      [
+       843,
+       120
+      ],
+      [
+       842,
+       140
+      ],
+      [
+       831,
+       146
+      ],
+      [
+       826,
+       140
+      ],
+      [
+       828,
+       124
+      ]
+     ]
+    ]
+   },
+   "_nota": "CORRER de la hoja: 3 cuadros (no 4). En el 0, el fondo oscuro entre las piernas y debajo de la rodilla sale con «excluirFinal»; el humo del piso, con «humo»."
+  },
+  "dash": {
+   "_nota": "el DASH de la hoja es la carrera envuelta en estelas y humo (y el segundo cuadro es transparente): se prestan los cuadros de «correr»",
+   "usar": [
+    [
+     "correr",
+     0
+    ],
+    [
+     "correr",
+     1
+    ],
+    [
+     "correr",
+     2
+    ]
+   ]
+  },
+  "guardia": {
+   "inferencia": "ancho&panel",
+   "region": [
+    6,
+    185,
+    360,
+    296
+   ],
+   "cajas": [
+    [
+     8,
+     187,
+     86,
+     296
+    ],
+    [
+     86,
+     187,
+     172,
+     296
+    ],
+    [
+     170,
+     187,
+     256,
+     296
+    ],
+    [
+     254,
+     187,
+     352,
+     296
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     275,
+     360,
+     297
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "apoyoX": {
+    "0": 44.5,
+    "1": 131.5,
+    "2": 210.0,
+    "3": 303.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  },
+  "agachado": {
+   "inferencia": "ancho&panel",
+   "region": [
+    367,
+    185,
+    713,
+    296
+   ],
+   "cajas": [
+    [
+     370,
+     215,
+     462,
+     296
+    ],
+    [
+     462,
+     222,
+     577,
+     296
+    ],
+    [
+     575,
+     215,
+     708,
+     296
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     367,
+     270,
+     713,
+     297
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 5
+   },
+   "excluirFinal": {
+    "0": [
+     [
+      [
+       393,
+       280
+      ],
+      [
+       429,
+       278
+      ],
+      [
+       430,
+       284
+      ],
+      [
+       427,
+       294
+      ],
+      [
+       392,
+       294
+      ]
+     ]
+    ]
+   }
+  },
+  "saltar": {
+   "inferencia": "ancho",
+   "region": [
+    720,
+    158,
+    1162,
+    297
+   ],
+   "cajas": [
+    [
+     722,
+     215,
+     808,
+     297
+    ],
+    [
+     800,
+     178,
+     892,
+     282
+    ],
+    [
+     890,
+     160,
+     982,
+     297
+    ],
+    [
+     972,
+     158,
+     1066,
+     282
+    ],
+    [
+     1044,
+     190,
+     1160,
+     297
+    ]
+   ],
+   "pintar": [
+    {
+     "zona": [
+      720,
+      158,
+      1165,
+      186
+     ],
+     "bMenosRMin": 40,
+     "satMin": 0.45
+    },
+    {
+     "zona": [
+      722,
+      158,
+      800,
+      186
+     ]
+    }
+   ],
+   "quitarColor": [
+    {
+     "zona": [
+      720,
+      158,
+      1165,
+      186
+     ],
+     "bMenosRMin": 40,
+     "satMin": 0.45
+    },
+    {
+     "zona": [
+      722,
+      158,
+      800,
+      186
+     ]
+    }
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     720,
+     255,
+     1162,
+     297
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 8
+   }
+  },
+  "caer": {
+   "inferencia": "ancho&panel",
+   "region": [
+    1169,
+    185,
+    1593,
+    296
+   ],
+   "cajas": [
+    [
+     1172,
+     186,
+     1292,
+     296
+    ],
+    [
+     1290,
+     212,
+     1396,
+     296
+    ],
+    [
+     1392,
+     212,
+     1496,
+     296
+    ],
+    [
+     1490,
+     203,
+     1592,
+     296
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     1170,
+     250,
+     1593,
+     297
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 8
+   },
+   "usar": [
+    [
+     "saltar",
+     3
+    ],
+    [
+     "saltar",
+     4
+    ],
+    [
+     "saltar",
+     4
+    ],
+    1,
+    1
+   ],
+   "_nota": "CAER: el primer cuadro de la hoja (en el aire) viene metido en el humo: la caída son los dos últimos de SALTAR (3 y 4, la bajada con los brazos abiertos) y el aterrizaje, el 1 de la hoja (agachado, el más limpio)."
+  },
+  "golpe": {
+   "inferencia": "ancho",
+   "region": [
+    6,
+    331,
+    463,
+    441
+   ],
+   "cajas": [
+    [
+     10,
+     333,
+     86,
+     441
+    ],
+    [
+     88,
+     333,
+     172,
+     441
+    ],
+    [
+     170,
+     333,
+     294,
+     441
+    ],
+    [
+     262,
+     333,
+     380,
+     441
+    ],
+    [
+     350,
+     333,
+     462,
+     441
+    ]
+   ],
+   "impactos": [
+    2
+   ],
+   "pintar": [
+    "rojo"
+   ],
+   "quitarColor": {
+    "0": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       434,
+       463,
+       443
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "1": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       434,
+       463,
+       443
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "2": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       434,
+       463,
+       443
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "3": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       434,
+       463,
+       443
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "lumMax": 80,
+      "bMenosRMin": -10,
+      "zona": [
+       [
+        300,
+        409
+       ],
+       [
+        305,
+        404
+       ],
+       [
+        312,
+        402
+       ],
+       [
+        320,
+        402
+       ],
+       [
+        327,
+        403
+       ],
+       [
+        331,
+        408
+       ],
+       [
+        334,
+        416
+       ],
+       [
+        336,
+        424
+       ],
+       [
+        337,
+        431
+       ],
+       [
+        336,
+        440
+       ],
+       [
+        288,
+        440
+       ],
+       [
+        287,
+        432
+       ],
+       [
+        289,
+        424
+       ],
+       [
+        293,
+        417
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas del impacto"
+     },
+     {
+      "satMax": 0.22,
+      "lumMax": 175,
+      "zona": [
+       [
+        300,
+        409
+       ],
+       [
+        305,
+        404
+       ],
+       [
+        312,
+        402
+       ],
+       [
+        320,
+        402
+       ],
+       [
+        327,
+        403
+       ],
+       [
+        331,
+        408
+       ],
+       [
+        334,
+        416
+       ],
+       [
+        336,
+        424
+       ],
+       [
+        337,
+        431
+       ],
+       [
+        336,
+        440
+       ],
+       [
+        288,
+        440
+       ],
+       [
+        287,
+        432
+       ],
+       [
+        289,
+        424
+       ],
+       [
+        293,
+        417
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas del impacto (gris claro)"
+     },
+     {
+      "lumMax": 80,
+      "bMenosRMin": -10,
+      "zona": [
+       [
+        337,
+        399
+       ],
+       [
+        358,
+        399
+       ],
+       [
+        358,
+        428
+       ],
+       [
+        346,
+        428
+       ],
+       [
+        340,
+        418
+       ],
+       [
+        338,
+        408
+       ]
+      ],
+      "nota": "sprites-fix: la franja de humo a la derecha de la pierna de adelante"
+     },
+     {
+      "satMax": 0.22,
+      "lumMax": 175,
+      "zona": [
+       [
+        337,
+        399
+       ],
+       [
+        358,
+        399
+       ],
+       [
+        358,
+        428
+       ],
+       [
+        346,
+        428
+       ],
+       [
+        340,
+        418
+       ],
+       [
+        338,
+        408
+       ]
+      ],
+      "nota": "sprites-fix: la franja de humo a la derecha de la pierna de adelante (gris claro)"
+     }
+    ],
+    "4": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       434,
+       463,
+       443
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ]
+   },
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     420,
+     463,
+     442
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 5
+   },
+   "excluirFinal": {
+    "3": [
+     [
+      [
+       331,
+       370
+      ],
+      [
+       375,
+       366
+      ],
+      [
+       386,
+       370
+      ],
+      [
+       386,
+       442
+      ],
+      [
+       356,
+       442
+      ],
+      [
+       353,
+       428
+      ],
+      [
+       346,
+       415
+      ],
+      [
+       337,
+       399
+      ],
+      [
+       331,
+       388
+      ]
+     ]
+    ],
+    "2": [
+     [
+      [
+       262,
+       392
+      ],
+      [
+       294,
+       392
+      ],
+      [
+       294,
+       442
+      ],
+      [
+       262,
+       442
+      ]
+     ]
+    ]
+   },
+   "usar": [
+    0,
+    2,
+    3,
+    2
+   ],
+   "_nota": "GOLPE BÁSICO 1 de la hoja: guardia (0), directo (2 de la hoja) y el puño estirado (3 de la hoja, impacto). El 4 de la hoja trae el puño adentro del destello rojo y no se usa. «excluirFinal» saca el fondo entre las piernas y la pierna del cuadro de al lado.",
+   "_notaFix": "Sprites-fix (quinta tanda): en el impacto (3 extraído, golpe[2] del atlas) sale el humo oscuro entre las piernas y a la derecha de la pierna de adelante."
+  },
+  "patada": {
+   "inferencia": "ancho",
+   "region": [
+    470,
+    331,
+    868,
+    441
+   ],
+   "cajas": [
+    [
+     472,
+     333,
+     566,
+     441
+    ],
+    [
+     565,
+     333,
+     692,
+     441
+    ],
+    [
+     690,
+     331,
+     866,
+     441
+    ]
+   ],
+   "impactos": [
+    2
+   ],
+   "pintar": [
+    "rojo"
+   ],
+   "quitarColor": [
+    "rojo",
+    {
+     "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+     "zona": [
+      470,
+      434,
+      868,
+      443
+     ],
+     "bMenosRMin": 25,
+     "satMin": 0.35
+    }
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     470,
+     420,
+     868,
+     442
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 5
+   },
+   "excluirFinal": {
+    "2": [
+     [
+      [
+       757,
+       380
+      ],
+      [
+       772,
+       371
+      ],
+      [
+       792,
+       364
+      ],
+      [
+       812,
+       358
+      ],
+      [
+       832,
+       354
+      ],
+      [
+       845,
+       366
+      ],
+      [
+       845,
+       432
+      ],
+      [
+       770,
+       432
+      ],
+      [
+       760,
+       415
+      ],
+      [
+       757,
+       400
+      ]
+     ],
+     [
+      [
+       818,
+       328
+      ],
+      [
+       862,
+       328
+      ],
+      [
+       862,
+       360
+      ],
+      [
+       818,
+       358
+      ]
+     ]
+    ]
+   },
+   "_nota": "GOLPE BÁSICO 2 (PATADA) de la hoja: guardia, paso y patada alta (impacto). Debajo de la pierna el modelo se tragaba el interior oscuro del arco rojo: «excluirFinal» con el contorno medido."
+  },
+  "combo": {
+   "inferencia": "ancho",
+   "region": [
+    875,
+    331,
+    1594,
+    441
+   ],
+   "cajas": [
+    [
+     878,
+     333,
+     952,
+     441
+    ],
+    [
+     946,
+     333,
+     1038,
+     441
+    ],
+    [
+     1028,
+     333,
+     1118,
+     441
+    ],
+    [
+     1112,
+     333,
+     1214,
+     441
+    ],
+    [
+     1212,
+     333,
+     1306,
+     441
+    ],
+    [
+     1296,
+     333,
+     1412,
+     441
+    ]
+   ],
+   "impactos": [
+    2,
+    4,
+    5
+   ],
+   "pintar": [
+    "rojo"
+   ],
+   "quitarColor": [
+    "rojo",
+    {
+     "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+     "zona": [
+      875,
+      434,
+      1594,
+      443
+     ],
+     "bMenosRMin": 25,
+     "satMin": 0.35
+    }
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     875,
+     420,
+     1594,
+     442
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 5
+   },
+   "excluirFinal": {
+    "2": [
+     [
+      [
+       1068,
+       401
+      ],
+      [
+       1078,
+       401
+      ],
+      [
+       1088,
+       411
+      ],
+      [
+       1095,
+       425
+      ],
+      [
+       1098,
+       442
+      ],
+      [
+       1050,
+       442
+      ],
+      [
+       1054,
+       428
+      ],
+      [
+       1061,
+       412
+      ]
+     ]
+    ],
+    "4": [
+     [
+      [
+       1270,
+       366
+      ],
+      [
+       1290,
+       361
+      ],
+      [
+       1306,
+       364
+      ],
+      [
+       1306,
+       422
+      ],
+      [
+       1292,
+       424
+      ],
+      [
+       1286,
+       412
+      ],
+      [
+       1280,
+       398
+      ],
+      [
+       1272,
+       386
+      ]
+     ]
+    ]
+   },
+   "_nota": "COMBO de la hoja (8 posiciones): guardia, jab, directo, directo, directo y patada voladora (0 a 5). El 6 (con el cuerpo teñido de rojo encima del rival) y el 7 (el rival) no se usan. «excluirFinal» saca el fondo entre las piernas (2) y el interior oscuro del arco (4)."
+  },
+  "herramienta1": {
+   "_nota": "«Remate» (botón MÁQUINA): alias del final del combo, el directo y la patada voladora",
+   "alias": "combo",
+   "usar": [
+    4,
+    5,
+    4
+   ],
+   "impactos": [
+    1
+   ]
+  },
+  "herramienta2": {
+   "_nota": "alias de la patada",
+   "alias": "patada",
+   "usar": [
+    0,
+    1,
+    2
+   ],
+   "impactos": [
+    2
+   ]
+  },
+  "especial1": {
+   "inferencia": "ancho",
+   "region": [
+    6,
+    475,
+    1593,
+    589
+   ],
+   "cajas": [
+    [
+     10,
+     477,
+     110,
+     589
+    ],
+    [
+     112,
+     477,
+     210,
+     589
+    ],
+    [
+     952,
+     477,
+     1062,
+     589
+    ],
+    [
+     1318,
+     477,
+     1480,
+     589
+    ]
+   ],
+   "impactos": [
+    3
+   ],
+   "pintar": [
+    "aura"
+   ],
+   "quitarColor": {
+    "0": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       582,
+       1593,
+       591
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "humo y fondo oscuro entre las piernas, debajo del ruedo (la piel de las piernas tiene más saturación)",
+      "zona": [
+       35,
+       552,
+       85,
+       590
+      ],
+      "satMax": 0.25,
+      "lumMax": 205
+     },
+     {
+      "lumMax": 80,
+      "bMenosRMin": -10,
+      "zona": [
+       [
+        37,
+        561
+       ],
+       [
+        48,
+        560
+       ],
+       [
+        55,
+        557
+       ],
+       [
+        63,
+        556
+       ],
+       [
+        70,
+        556
+       ],
+       [
+        77,
+        557
+       ],
+       [
+        81,
+        559
+       ],
+       [
+        85,
+        563
+       ],
+       [
+        87,
+        568
+       ],
+       [
+        87,
+        575
+       ],
+       [
+        84,
+        578
+       ],
+       [
+        83,
+        590
+       ],
+       [
+        33,
+        590
+       ],
+       [
+        32,
+        578
+       ],
+       [
+        30,
+        573
+       ],
+       [
+        33,
+        566
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona)"
+     },
+     {
+      "satMax": 0.22,
+      "lumMax": 175,
+      "zona": [
+       [
+        37,
+        561
+       ],
+       [
+        48,
+        560
+       ],
+       [
+        55,
+        557
+       ],
+       [
+        63,
+        556
+       ],
+       [
+        70,
+        556
+       ],
+       [
+        77,
+        557
+       ],
+       [
+        81,
+        559
+       ],
+       [
+        85,
+        563
+       ],
+       [
+        87,
+        568
+       ],
+       [
+        87,
+        575
+       ],
+       [
+        84,
+        578
+       ],
+       [
+        83,
+        590
+       ],
+       [
+        33,
+        590
+       ],
+       [
+        32,
+        578
+       ],
+       [
+        30,
+        573
+       ],
+       [
+        33,
+        566
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona) (gris claro)"
+     }
+    ],
+    "1": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       582,
+       1593,
+       591
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "humo y fondo oscuro entre las piernas, debajo del ruedo (la piel de las piernas tiene más saturación)",
+      "zona": [
+       140,
+       552,
+       185,
+       590
+      ],
+      "satMax": 0.25,
+      "lumMax": 205
+     },
+     {
+      "lumMax": 80,
+      "bMenosRMin": -10,
+      "zona": [
+       [
+        140,
+        560
+       ],
+       [
+        150,
+        558
+       ],
+       [
+        160,
+        556
+       ],
+       [
+        170,
+        556
+       ],
+       [
+        180,
+        557
+       ],
+       [
+        186,
+        560
+       ],
+       [
+        189,
+        566
+       ],
+       [
+        190,
+        574
+       ],
+       [
+        188,
+        578
+       ],
+       [
+        187,
+        590
+       ],
+       [
+        136,
+        590
+       ],
+       [
+        136,
+        578
+       ],
+       [
+        134,
+        572
+       ],
+       [
+        137,
+        565
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona)"
+     },
+     {
+      "satMax": 0.22,
+      "lumMax": 175,
+      "zona": [
+       [
+        140,
+        560
+       ],
+       [
+        150,
+        558
+       ],
+       [
+        160,
+        556
+       ],
+       [
+        170,
+        556
+       ],
+       [
+        180,
+        557
+       ],
+       [
+        186,
+        560
+       ],
+       [
+        189,
+        566
+       ],
+       [
+        190,
+        574
+       ],
+       [
+        188,
+        578
+       ],
+       [
+        187,
+        590
+       ],
+       [
+        136,
+        590
+       ],
+       [
+        136,
+        578
+       ],
+       [
+        134,
+        572
+       ],
+       [
+        137,
+        565
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona) (gris claro)"
+     }
+    ],
+    "2": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       582,
+       1593,
+       591
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "humo y fondo oscuro entre las piernas, debajo del ruedo (la piel de las piernas tiene más saturación)",
+      "zona": [
+       985,
+       556,
+       1030,
+       590
+      ],
+      "satMax": 0.25,
+      "lumMax": 205
+     },
+     {
+      "lumMax": 80,
+      "bMenosRMin": -10,
+      "zona": [
+       [
+        997,
+        556
+       ],
+       [
+        1005,
+        553
+       ],
+       [
+        1015,
+        551
+       ],
+       [
+        1025,
+        551
+       ],
+       [
+        1035,
+        553
+       ],
+       [
+        1042,
+        556
+       ],
+       [
+        1044,
+        562
+       ],
+       [
+        1045,
+        570
+       ],
+       [
+        1046,
+        578
+       ],
+       [
+        1043,
+        590
+       ],
+       [
+        987,
+        590
+       ],
+       [
+        986,
+        580
+       ],
+       [
+        988,
+        574
+       ],
+       [
+        993,
+        566
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona)"
+     },
+     {
+      "satMax": 0.22,
+      "lumMax": 175,
+      "zona": [
+       [
+        997,
+        556
+       ],
+       [
+        1005,
+        553
+       ],
+       [
+        1015,
+        551
+       ],
+       [
+        1025,
+        551
+       ],
+       [
+        1035,
+        553
+       ],
+       [
+        1042,
+        556
+       ],
+       [
+        1044,
+        562
+       ],
+       [
+        1045,
+        570
+       ],
+       [
+        1046,
+        578
+       ],
+       [
+        1043,
+        590
+       ],
+       [
+        987,
+        590
+       ],
+       [
+        986,
+        580
+       ],
+       [
+        988,
+        574
+       ],
+       [
+        993,
+        566
+       ]
+      ],
+      "nota": "sprites-fix: el humo entre las piernas, debajo del ruedo (las zapatillas quedan afuera de la zona) (gris claro)"
+     }
+    ],
+    "3": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       582,
+       1593,
+       591
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ]
+   },
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     564,
+     1593,
+     590
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 6
+   },
+   "_nota": "DESAPARECER: se toca la gorra (0), se carga de aura azul (1 de la hoja), reaparece con la pelotita en el remolino (10 de la hoja) y pega el pelotazo con el puño (12 de la hoja, impacto). Los cuadros 2 a 9 de la hoja son transparentes o punteados (se esfuma) y el 11 reaparece a medias: no se usan, la transparencia la hace el render entre el 1 y el 2. Sprites-fix (quinta tanda): en 0, 1 y 2 sale el humo oscuro que quedaba entre las piernas (reglas de color en una zona medida: lo oscuro que no es piel y el gris claro); en el 3 (impacto) vuelven las dos zapatillas con «incluirFinal» (no estaban: el cuadro apoyaba en las medias) y sale la mancha azul marino junto al pie de apoyo; «apoyoX» del 3 con el valor de antes.",
+   "incluirFinal": {
+    "3": [
+     [
+      [
+       1333,
+       559
+      ],
+      [
+       1338,
+       558.5
+      ],
+      [
+       1341,
+       561
+      ],
+      [
+       1343,
+       565
+      ],
+      [
+       1342,
+       569
+      ],
+      [
+       1338,
+       573
+      ],
+      [
+       1335,
+       578
+      ],
+      [
+       1332,
+       581.5
+      ],
+      [
+       1329.5,
+       581
+      ],
+      [
+       1328.5,
+       575
+      ],
+      [
+       1329,
+       567
+      ],
+      [
+       1330.5,
+       561
+      ]
+     ],
+     [
+      [
+       1421,
+       579.5
+      ],
+      [
+       1431,
+       579.5
+      ],
+      [
+       1433,
+       581
+      ],
+      [
+       1437,
+       583
+      ],
+      [
+       1441,
+       584
+      ],
+      [
+       1442,
+       586
+      ],
+      [
+       1441,
+       588.5
+      ],
+      [
+       1420,
+       588.5
+      ],
+      [
+       1419.5,
+       585
+      ],
+      [
+       1420,
+       582
+      ]
+     ]
+    ]
+   },
+   "excluirFinal": {
+    "3": [
+     [
+      [
+       1398,
+       566
+      ],
+      [
+       1419,
+       566
+      ],
+      [
+       1420.5,
+       572
+      ],
+      [
+       1420.5,
+       579
+      ],
+      [
+       1419,
+       590
+      ],
+      [
+       1398,
+       590
+      ]
+     ]
+    ]
+   },
+   "apoyoX": {
+    "3": 1419.0
+   }
+  },
+  "especial2": {
+   "inferencia": "ancho",
+   "region": [
+    6,
+    623,
+    1593,
+    741
+   ],
+   "cajas": [
+    [
+     8,
+     623,
+     112,
+     741
+    ],
+    [
+     120,
+     625,
+     228,
+     741
+    ],
+    [
+     505,
+     623,
+     650,
+     741
+    ],
+    [
+     664,
+     623,
+     790,
+     741
+    ],
+    [
+     800,
+     623,
+     935,
+     741
+    ],
+    [
+     1095,
+     623,
+     1245,
+     741
+    ]
+   ],
+   "impactos": [
+    5
+   ],
+   "pintar": [
+    "aura"
+   ],
+   "quitarColor": {
+    "0": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "1": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "2": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "3": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "4": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "5": [
+     "aura",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       734,
+       1593,
+       743
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "humo y fondo oscuro entre las piernas, debajo del ruedo (la piel de las piernas tiene más saturación)",
+      "zona": [
+       1125,
+       700,
+       1215,
+       742
+      ],
+      "satMax": 0.25,
+      "lumMax": 205
+     },
+     {
+      "nota": "sprites-fix: el humo azul marino y gris que quedaba entre las piernas, debajo del ruedo (lo que no es piel —r − b > 10— ni blanco —lum > 200—; las zapatillas quedan afuera de la zona)",
+      "zona": [
+       [
+        1146,
+        709
+       ],
+       [
+        1190,
+        709
+       ],
+       [
+        1197,
+        713
+       ],
+       [
+        1201,
+        717
+       ],
+       [
+        1205,
+        722
+       ],
+       [
+        1207,
+        727
+       ],
+       [
+        1208,
+        741
+       ],
+       [
+        1123,
+        741
+       ],
+       [
+        1122,
+        726
+       ],
+       [
+        1125,
+        722
+       ],
+       [
+        1130,
+        718
+       ],
+       [
+        1135,
+        715
+       ],
+       [
+        1140,
+        712
+       ]
+      ],
+      "bMenosRMin": -10,
+      "lumMax": 200
+     }
+    ]
+   },
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     716,
+     1593,
+     742
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 6
+   },
+   "_nota": "SMASH DE PÁDEL: preparado con la paleta arriba (0), paleta abajo (1), carga el golpe atrás con el remolino (4 de la hoja), la paleta arriba con la pelotita (5), el smash (6) y el golpe que la manda (8 de la hoja, impacto). El 2 (el giro sin paleta), el 3 (transparente), el 7 (el rival) y el 9 (el estallido) no se usan. La paleta queda en la mano; la pelotita es el efecto «pelotita». Sprites-fix (quinta tanda): la paleta vuelve en 0, 3 y 5 (el 0, el 5 y el 8 de la hoja) con «incluirFinal» y el contorno del marco medido a 12x (el «aura» la pintaba antes de inferir y el modelo no la veía); en el 5 sale además el humo oscuro que quedaba entre las piernas; «apoyoX» con los valores de antes para que la paleta no corra el apoyo.",
+   "incluirFinal": {
+    "0": [
+     [
+      [
+       93,
+       627
+      ],
+      [
+       97,
+       626.5
+      ],
+      [
+       101,
+       627
+      ],
+      [
+       103.5,
+       628.5
+      ],
+      [
+       105.5,
+       630.5
+      ],
+      [
+       107.5,
+       633
+      ],
+      [
+       108.5,
+       636
+      ],
+      [
+       109,
+       639
+      ],
+      [
+       108.5,
+       642
+      ],
+      [
+       107,
+       645
+      ],
+      [
+       105.5,
+       647
+      ],
+      [
+       104.5,
+       649
+      ],
+      [
+       103.5,
+       651
+      ],
+      [
+       102,
+       653
+      ],
+      [
+       100,
+       654.5
+      ],
+      [
+       98.5,
+       656
+      ],
+      [
+       96.5,
+       657
+      ],
+      [
+       94.5,
+       658.5
+      ],
+      [
+       92,
+       660
+      ],
+      [
+       90,
+       661.5
+      ],
+      [
+       88,
+       662.5
+      ],
+      [
+       85,
+       663
+      ],
+      [
+       82,
+       662
+      ],
+      [
+       81.5,
+       659
+      ],
+      [
+       82.5,
+       656
+      ],
+      [
+       82.5,
+       648
+      ],
+      [
+       83.5,
+       643
+      ],
+      [
+       84.5,
+       639
+      ],
+      [
+       85.5,
+       636
+      ],
+      [
+       87,
+       633
+      ],
+      [
+       88.5,
+       630.5
+      ],
+      [
+       90.5,
+       628.5
+      ]
+     ]
+    ],
+    "3": [
+     [
+      [
+       744,
+       629
+      ],
+      [
+       750,
+       628
+      ],
+      [
+       757,
+       628
+      ],
+      [
+       763,
+       629
+      ],
+      [
+       767,
+       630
+      ],
+      [
+       770,
+       633
+      ],
+      [
+       770.5,
+       637
+      ],
+      [
+       771,
+       641
+      ],
+      [
+       770.5,
+       645
+      ],
+      [
+       769.5,
+       648.5
+      ],
+      [
+       768.5,
+       651.5
+      ],
+      [
+       767,
+       654.5
+      ],
+      [
+       765,
+       657
+      ],
+      [
+       763.5,
+       659
+      ],
+      [
+       763,
+       661.5
+      ],
+      [
+       760,
+       662.5
+      ],
+      [
+       757.5,
+       661
+      ],
+      [
+       757,
+       658
+      ],
+      [
+       753,
+       656
+      ],
+      [
+       749,
+       654
+      ],
+      [
+       745,
+       650
+      ],
+      [
+       738,
+       649
+      ],
+      [
+       735,
+       651
+      ],
+      [
+       733.5,
+       649
+      ],
+      [
+       732.5,
+       645.5
+      ],
+      [
+       732.5,
+       640
+      ],
+      [
+       733.5,
+       636.5
+      ],
+      [
+       735.5,
+       634
+      ],
+      [
+       738,
+       632
+      ],
+      [
+       741,
+       630.5
+      ]
+     ]
+    ],
+    "5": [
+     [
+      [
+       1207,
+       635.5
+      ],
+      [
+       1213,
+       634.5
+      ],
+      [
+       1219,
+       635
+      ],
+      [
+       1223,
+       636.5
+      ],
+      [
+       1226,
+       639
+      ],
+      [
+       1228.5,
+       642
+      ],
+      [
+       1229.5,
+       646
+      ],
+      [
+       1229.5,
+       650
+      ],
+      [
+       1228.5,
+       653.5
+      ],
+      [
+       1226,
+       656
+      ],
+      [
+       1222,
+       658.5
+      ],
+      [
+       1217,
+       660.5
+      ],
+      [
+       1211,
+       661.5
+      ],
+      [
+       1204,
+       661.5
+      ],
+      [
+       1199,
+       660.5
+      ],
+      [
+       1197.5,
+       657
+      ],
+      [
+       1197.5,
+       652
+      ],
+      [
+       1198.5,
+       647
+      ],
+      [
+       1200,
+       643
+      ],
+      [
+       1202,
+       640
+      ],
+      [
+       1204.5,
+       637.5
+      ]
+     ]
+    ]
+   },
+   "apoyoX": {
+    "0": 66.0,
+    "3": 735.0,
+    "5": 1174.0
+   }
+  },
+  "danio": {
+   "inferencia": "ancho&panel",
+   "region": [
+    6,
+    771,
+    326,
+    886
+   ],
+   "cajas": [
+    [
+     8,
+     773,
+     88,
+     886
+    ],
+    [
+     84,
+     773,
+     164,
+     886
+    ],
+    [
+     158,
+     773,
+     240,
+     886
+    ],
+    [
+     238,
+     773,
+     324,
+     886
+    ]
+   ],
+   "pintar": [
+    "rojo"
+   ],
+   "quitarColor": {
+    "0": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       879,
+       326,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "sprites-fix: el centro blanco y rosa de la chispa roja, sobre el hombro",
+      "zona": [
+       [
+        49,
+        780
+       ],
+       [
+        74,
+        780
+       ],
+       [
+        74,
+        803
+       ],
+       [
+        68,
+        800
+       ],
+       [
+        60,
+        795
+       ],
+       [
+        52,
+        793
+       ],
+       [
+        49,
+        790
+       ]
+      ],
+      "lumMin": 110
+     }
+    ],
+    "1": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       879,
+       326,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "humo y fondo oscuro entre las piernas, debajo del ruedo (la piel de las piernas tiene más saturación) (sprites-fix: sin el ruedo y la rodilla de la pierna de atrás, x 105-120 y 846-853, que la unen al cuerpo)",
+      "zona": [
+       [
+        120,
+        846
+       ],
+       [
+        140,
+        846
+       ],
+       [
+        140,
+        887
+       ],
+       [
+        105,
+        887
+       ],
+       [
+        105,
+        853
+       ],
+       [
+        120,
+        853
+       ]
+      ],
+      "satMax": 0.25,
+      "lumMax": 205
+     },
+     {
+      "nota": "sprites-fix: el fondo negro entre las piernas, debajo del ruedo",
+      "zona": [
+       [
+        113,
+        857
+       ],
+       [
+        120,
+        852
+       ],
+       [
+        128,
+        850
+       ],
+       [
+        136,
+        851
+       ],
+       [
+        140,
+        855
+       ],
+       [
+        141,
+        862
+       ],
+       [
+        140,
+        870
+       ],
+       [
+        139,
+        882
+       ],
+       [
+        113,
+        882
+       ],
+       [
+        112,
+        874
+       ],
+       [
+        109,
+        868
+       ],
+       [
+        109,
+        861
+       ]
+      ],
+      "lumMax": 70
+     }
+    ],
+    "2": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       879,
+       326,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "3": [
+     "rojo",
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       6,
+       879,
+       326,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ]
+   },
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     6,
+     868,
+     326,
+     887
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "_notaFix": "Sprites-fix (quinta tanda): en el 0 sale el centro blanco y rosa de la chispa sobre el hombro; en el 1, el fondo negro entre las piernas. En el 1 la pierna de atrás colgaba del cuerpo sólo por ese fondo negro (al ruedo y a la rodilla los había perdido el modelo): «incluir» los devuelve antes de la limpieza, así la pierna sigue pegada.",
+   "incluir": {
+    "1": [
+     [
+      [
+       106,
+       845.5
+      ],
+      [
+       118,
+       845.5
+      ],
+      [
+       119.5,
+       849
+      ],
+      [
+       117.5,
+       852
+      ],
+      [
+       105,
+       852
+      ],
+      [
+       104.5,
+       850
+      ]
+     ]
+    ]
+   }
+  },
+  "ko": {
+   "inferencia": "ancho&panel",
+   "region": [
+    332,
+    771,
+    668,
+    886
+   ],
+   "ancla": "caja",
+   "cajas": [
+    [
+     334,
+     785,
+     392,
+     886
+    ],
+    [
+     390,
+     800,
+     476,
+     886
+    ],
+    [
+     468,
+     812,
+     664,
+     886
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     332,
+     868,
+     668,
+     887
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "quitarColor": [
+    {
+     "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+     "zona": [
+      332,
+      879,
+      668,
+      888
+     ],
+     "bMenosRMin": 25,
+     "satMin": 0.35
+    }
+   ]
+  },
+  "levantarse": {
+   "inferencia": "ancho&panel",
+   "region": [
+    676,
+    771,
+    951,
+    886
+   ],
+   "cajas": [
+    [
+     678,
+     810,
+     752,
+     886
+    ],
+    [
+     744,
+     796,
+     826,
+     886
+    ],
+    [
+     820,
+     773,
+     894,
+     886
+    ],
+    [
+     892,
+     771,
+     950,
+     886
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     676,
+     868,
+     951,
+     887
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "quitarColor": [
+    {
+     "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+     "zona": [
+      676,
+      879,
+      951,
+      888
+     ],
+     "bMenosRMin": 25,
+     "satMin": 0.35
+    }
+   ]
+  },
+  "victoria": {
+   "inferencia": "ancho&panel",
+   "region": [
+    958,
+    744,
+    1266,
+    886
+   ],
+   "cajas": [
+    [
+     962,
+     773,
+     1030,
+     886
+    ],
+    [
+     1032,
+     773,
+     1102,
+     886
+    ],
+    [
+     1104,
+     744,
+     1180,
+     886
+    ],
+    [
+     1178,
+     773,
+     1262,
+     886
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     958,
+     868,
+     1266,
+     887
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "quitarColor": {
+    "0": [
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       958,
+       879,
+       1266,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "1": [
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       958,
+       879,
+       1266,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ],
+    "2": [
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       958,
+       879,
+       1266,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     },
+     {
+      "nota": "la barra azul del título (la mano y el dedo del cuadro 2 se meten en ella)",
+      "zona": [
+       958,
+       744,
+       1266,
+       772
+      ],
+      "bMenosRMin": 40,
+      "satMin": 0.45
+     }
+    ],
+    "3": [
+     {
+      "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+      "zona": [
+       958,
+       879,
+       1266,
+       888
+      ],
+      "bMenosRMin": 25,
+      "satMin": 0.35
+     }
+    ]
+   },
+   "apoyoX": {
+    "0": 996.0,
+    "1": 1066.5,
+    "2": 1142.0,
+    "3": 1217.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina",
+   "pintar": {
+    "2": [
+     {
+      "nota": "la barra azul del título (la mano y el dedo del cuadro 2 se meten en ella)",
+      "zona": [
+       958,
+       744,
+       1266,
+       772
+      ],
+      "bMenosRMin": 40,
+      "satMin": 0.45
+     }
+    ]
+   },
+   "_nota": "VICTORIA: brazos cruzados, puño, señala arriba y la mano en la gorra. En el 2 la mano y el dedo se meten en la barra del título: la caja arranca arriba de la barra y la barra (azul) se pinta antes de inferir; la piel queda."
+  },
+  "burla": {
+   "inferencia": "ancho&panel",
+   "region": [
+    1273,
+    771,
+    1593,
+    886
+   ],
+   "cajas": [
+    [
+     1275,
+     773,
+     1355,
+     886
+    ],
+    [
+     1357,
+     773,
+     1430,
+     886
+    ],
+    [
+     1424,
+     773,
+     1528,
+     886
+    ],
+    [
+     1522,
+     773,
+     1590,
+     886
+    ]
+   ],
+   "pegados": 2,
+   "pelarFondo": {
+    "lumMax": 22,
+    "stdMax": 2.5,
+    "pasos": 6
+   },
+   "humo": {
+    "zona": [
+     1273,
+     868,
+     1593,
+     887
+    ],
+    "lumMin": 40,
+    "lumMax": 205,
+    "satMax": 0.2,
+    "pasos": 4
+   },
+   "quitarColor": [
+    {
+     "nota": "el brillo violeta o azul del borde de abajo del panel, pegado a las suelas (las zapatillas son negras y blancas)",
+     "zona": [
+      1273,
+      879,
+      1593,
+      888
+     ],
+     "bMenosRMin": 25,
+     "satMin": 0.35
+    }
+   ],
+   "apoyoX": {
+    "0": 1313.0,
+    "1": 1393.5,
+    "2": 1470.5,
+    "3": 1556.0
+   },
+   "_notaApoyo": "«apoyoX» = el centro de los pies de cada cuadro (px de la hoja): el ciclo no patina"
+  }
+ },
+ "retrato": {
+  "anim": "quieto",
+  "cuadro": 0,
+  "alto": 720,
+  "cara": {
+   "lado": 24,
+   "arriba": 1,
+   "filas": 10
+  }
+ },
+ "efectos": {
+  "paleta": {
+   "_nota": "la paleta de pádel del smash (5 de la hoja): cara oscura con agujeros y borde claro, con el mango",
+   "caja": [
+    728,
+    622,
+    780,
+    672
+   ],
+   "inferencia": "brillo",
+   "lumMin": 60,
+   "dilatar": 1,
+   "limite": [
+    [
+     [
+      735,
+      640
+     ],
+     [
+      742,
+      628
+     ],
+     [
+      757,
+      625
+     ],
+     [
+      771,
+      629
+     ],
+     [
+      777,
+      640
+     ],
+     [
+      772,
+      652
+     ],
+     [
+      766,
+      657
+     ],
+     [
+      764,
+      664
+     ],
+     [
+      759,
+      664
+     ],
+     [
+      757,
+      657
+     ],
+     [
+      745,
+      655
+     ],
+     [
+      736,
+      650
+     ]
+    ]
+   ],
+   "quitarColor": [
+    {
+     "nota": "el brillo azul del remolino",
+     "bMenosRMin": 60,
+     "satMin": 0.55,
+     "lumMin": 60
+    },
+    {
+     "nota": "la gorra naranja de abajo",
+     "rMenosBMin": 60
+    }
+   ],
+   "rellenar": 300
+  },
+  "pelotita": {
+   "_nota": "la pelotita de pádel amarilla (arriba del rival, 7 de la hoja), sin el brillo de afuera",
+   "caja": [
+    1002,
+    644,
+    1023,
+    665
+   ],
+   "inferencia": "brillo",
+   "lumMin": 110,
+   "dilatar": 0,
+   "limite": [
+    [
+     [
+      1006,
+      648
+     ],
+     [
+      1012,
+      645
+     ],
+     [
+      1018,
+      648
+     ],
+     [
+      1020,
+      654
+     ],
+     [
+      1018,
+      660
+     ],
+     [
+      1012,
+      663
+     ],
+     [
+      1006,
+      660
+     ],
+     [
+      1004,
+      654
+     ]
+    ]
+   ],
+   "quitarColor": [
+    {
+     "nota": "el halo blanco y celeste de afuera (la pelotita es amarilla y saturada)",
+     "satMax": 0.35
+    }
+   ],
+   "rellenar": 60
+  }
+ }
+}

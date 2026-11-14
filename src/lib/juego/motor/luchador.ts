@@ -7,7 +7,7 @@ import type { EntradaJugador, EstadisticasLuchador, IdPersonaje, Lado, LuchadorE
 import { ENTRADA_VACIA } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import { iniciarMovimiento, intentarEspecial } from './acciones'
-import { danioContinuo, sumarCarga } from './combate'
+import { danioContinuo, despertar, sumarCarga } from './combate'
 import {
   ATERRIZAJE_TICKS,
   CARGA,
@@ -21,6 +21,7 @@ import {
   FRICCION_SUELO,
   GRAVEDAD,
   GUARDIA,
+  HIPNOSIS,
   INMUNIDAD,
   TICKS_BUFFER,
   TOPE_ENCIERRO,
@@ -45,13 +46,30 @@ import type { BotonBuffer, EstadoControl, EstadoInterno, InternoLuchador } from 
 import { emitir } from './interno'
 import type { DefEspecial, KitPersonaje } from './movimientos'
 
-const ESTADOS_CONTROL: readonly EstadoControl[] = ['aturdido', 'mareado', 'quemado', 'congelado', 'electrocutado']
+const ESTADOS_CONTROL: readonly EstadoControl[] = ['aturdido', 'mareado', 'quemado', 'congelado', 'electrocutado', 'hipnotizado', 'cegado']
 
 /** Velocidad de caminar con LENTO o MAREADO (no se suman: vale la peor). */
 function multVelocidad(l: LuchadorEstado): number {
   let m = 1
   if (l.efectos.lento > 0) m = Math.min(m, EFECTO.multLento)
   if (l.efectos.mareado > 0) m = Math.min(m, EFECTO.multMareado)
+  return m
+}
+
+/**
+ * Lo que caminar y correr valen para este luchador en este tick: el LENTO y el mareo (multVelocidad,
+ * sólo achican) por las pasivas que tocan la marcha (quinta tanda). Overclock (Nacho): con la carga
+ * alta, más rápido; aparte del LENTO. Presencia de jefe (Tony, en el RIVAL): cerca de él, más lento.
+ * No tocan el salto, la esquiva ni el caminar del hipnotizado.
+ */
+function multCaminar(p: Partida, I: EstadoInterno, lado: Lado): number {
+  const l = p.luchadores[lado]
+  let m = multVelocidad(l)
+  const oc = I.kits[lado].pasiva?.velocidadConCarga
+  if (oc && l.carga + 1e-9 >= oc.desde) m *= oc.mult
+  const otro = (1 - lado) as Lado
+  const pr = I.kits[otro].pasiva?.presencia
+  if (pr && Math.abs(p.luchadores[otro].x - l.x) <= pr.distancia) m *= pr.mult
   return m
 }
 
@@ -104,6 +122,9 @@ export function crearLuchador(id: IdPersonaje, lado: Lado): LuchadorEstado {
       quemado: 0,
       lento: 0,
       curando: 0,
+      hipnotizado: 0,
+      cegado: 0,
+      dominio: 0,
     },
     combo: 0,
   }
@@ -167,9 +188,11 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     danioRecibidoRound: 0,
     danioHechoRound: 0,
     vidaAntes: vida,
-    inmune: { aturdido: 0, mareado: 0, quemado: 0, congelado: 0, electrocutado: 0 },
+    inmune: { aturdido: 0, mareado: 0, quemado: 0, congelado: 0, electrocutado: 0, hipnotizado: 0, cegado: 0 },
     quema: null,
     agarradoPor: null,
+    hipnotizadoPor: null,
+    critListo: 0,
     sinControl: 0,
     conControl: 0,
     respiroInmune: 0,
@@ -200,6 +223,9 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   l.efectos.quemado = 0
   l.efectos.lento = 0
   l.efectos.curando = 0
+  l.efectos.hipnotizado = 0
+  l.efectos.cegado = 0
+  l.efectos.dominio = 0
   l.combo = 0
   for (const b of BOTONES_BUFFER) li.buf[b] = 0
   li.toque = null
@@ -232,6 +258,8 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   for (const e of ESTADOS_CONTROL) li.inmune[e] = 0
   li.quema = null
   li.agarradoPor = null
+  li.hipnotizadoPor = null
+  li.critListo = 0
   li.sinControl = 0
   li.conControl = 0
   li.respiroInmune = 0
@@ -389,6 +417,13 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
     return
   }
 
+  // Hipnotizado (los Lentes de Fran): camina hacia el que lo hipnotizó, sin control. Mientras le dura
+  // el aturdimiento del golpe del lente (o cualquier otra cosa que lo deje quieto) no camina.
+  if (l.efectos.hipnotizado > 0) {
+    caminarHipnotizado(p, I, lado)
+    return
+  }
+
   if (!puedeActuar(l, li)) {
     li.vMov = 0
     return
@@ -444,7 +479,7 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
   }
   if (dir !== 0) {
     const adelante = dir === l.mira
-    const mv = multVelocidad(l)
+    const mv = multCaminar(p, I, lado)
     if (adelante) {
       li.tAdelante++
       li.corriendo = li.tAdelante >= CORRER_DESDE && Math.abs(rival.x - l.x) > CORRER_DISTANCIA_MIN
@@ -464,6 +499,48 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
   }
 }
 
+/**
+ * Un tick del hipnotizado: libre de todo lo demás (sin aturdimiento del golpe, en el piso, sin hielo
+ * ni guardia rota), camina HIPNOSIS.paso px hacia el que lo hipnotizó; a HIPNOSIS.llega px se queda
+ * quieto, atontado, HIPNOSIS.quieto ticks como mucho y se despierta (relojes). Siempre igual de
+ * rápido: el LENTO, el mareo y las pasivas no lo tocan.
+ */
+function caminarHipnotizado(p: Partida, I: EstadoInterno, lado: Lado): void {
+  const l = p.luchadores[lado]
+  const li = I.luchadores[lado]
+  li.vMov = 0
+  li.guardia = false
+  li.agachado = false
+  li.corriendo = false
+  li.tAdelante = 0
+  li.atras = false
+  const ef = l.efectos
+  const quieto =
+    !l.enSuelo ||
+    li.stun > 0 ||
+    li.accion !== null ||
+    li.dash !== null ||
+    li.derribo > 0 ||
+    li.levantar > 0 ||
+    li.caidaDerribo > 0 ||
+    li.aterrizaje > 0 ||
+    li.agarradoPor !== null ||
+    ef.congelado > 0 ||
+    ef.electrocutado > 0 ||
+    ef.guardiaRota > 0 ||
+    ef.aturdido > 0
+  if (quieto) return
+  const hacia = p.luchadores[li.hipnotizadoPor ?? ((1 - lado) as Lado)]
+  const dx = hacia.x - l.x
+  const d = Math.abs(dx)
+  if (d <= HIPNOSIS.llega + 1e-9) {
+    if (ef.hipnotizado > HIPNOSIS.quieto) ef.hipnotizado = HIPNOSIS.quieto
+    return
+  }
+  mirarA(l, hacia.x)
+  li.vMov = (dx > 0 ? 1 : -1) * Math.min(HIPNOSIS.paso, d - HIPNOSIS.llega)
+}
+
 function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
   const l = p.luchadores[lado]
   const li = I.luchadores[lado]
@@ -480,7 +557,9 @@ function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
   }
   if (li.pose !== null) return
   if (li.caidaDerribo > 0) {
-    li.derribo = li.caidaDerribo
+    // Pibe de goma (Leo): se queda menos tirado (el levantarse dura lo mismo).
+    const md = I.kits[lado].pasiva?.multDerribo
+    li.derribo = md === undefined ? li.caidaDerribo : Math.max(1, Math.round(li.caidaDerribo * md))
     li.caidaDerribo = 0
     li.stun = 0
     emitir(p, { tipo: 'aterrizaje', quien: lado, fuerte: true })
@@ -623,6 +702,15 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
       li.quema = null
     }
   }
+  if (ef.hipnotizado > 0) {
+    ef.hipnotizado--
+    if (ef.hipnotizado === 0) despertar(l, li)
+  }
+  if (ef.cegado > 0) {
+    ef.cegado--
+    if (ef.cegado === 0) li.inmune.cegado = INMUNIDAD.cegado
+  }
+  if (li.critListo > 0) li.critListo--
   if (ef.lento > 0) ef.lento--
   if (ef.guardiaRota > 0) {
     ef.guardiaRota--
@@ -720,6 +808,7 @@ export function soltarEncierro(p: Partida, I: EstadoInterno, lado: Lado): void {
     ef.aturdido = 0
     li.inmune.aturdido = INMUNIDAD.aturdido
   }
+  if (ef.hipnotizado > 0) despertar(l, li)
   if (ef.guardiaRota > 0) {
     ef.guardiaRota = 0
     l.guardia = Math.max(l.guardia, GUARDIA.vuelve)
@@ -750,7 +839,9 @@ export function actualizarEstado(l: LuchadorEstado, li: InternoLuchador): void {
   else if (li.derribo > 0 || li.caidaDerribo > 0) l.estado = 'derribado'
   else if (li.levantar > 0) l.estado = 'levantandose'
   else if (ef.guardiaRota > 0) l.estado = 'guardia_rota'
-  else if (li.stun > 0 || ef.aturdido > 0) l.estado = 'aturdido'
+  // El hipnotizado no tiene el control: para el estado visible, como un aturdido (el render lo
+  // distingue por efectos.hipnotizado).
+  else if (li.stun > 0 || ef.aturdido > 0 || ef.hipnotizado > 0) l.estado = 'aturdido'
   else if (li.dash) l.estado = 'dash'
   else if (li.accion) l.estado = 'atacando'
   else if (!l.enSuelo) l.estado = 'saltando'

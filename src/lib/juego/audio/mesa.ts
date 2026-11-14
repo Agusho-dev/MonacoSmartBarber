@@ -94,6 +94,19 @@ const TOPES: Readonly<Record<string, number>> = {
   agarre: 1,
   cura: 2,
   estado: 3,
+  // quinta tanda (14/nov)
+  naipe: 3,
+  dominio: 2,
+  hipnosis: 2,
+  metal: 3,
+  glitch: 2,
+  codigo: 3,
+  padel: 3,
+  anillos: 3,
+  puas: 3,
+  monopatin: 1,
+  despido: 2,
+  gigante: 2,
 }
 const TOPE_EFECTOS = 4
 const TOPE_MUSICA = 6

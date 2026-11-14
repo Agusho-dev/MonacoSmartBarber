@@ -69,10 +69,18 @@ export function hashPartida(p: Partida): number {
     h = mezclarNumero(h, l.efectos.quemado)
     h = mezclarNumero(h, l.efectos.lento)
     h = mezclarNumero(h, l.efectos.curando)
+    // Quinta tanda (14/nov): el hipnotizado, el cegado y el dominio del All In.
+    h = mezclarNumero(h, l.efectos.hipnotizado)
+    h = mezclarNumero(h, l.efectos.cegado)
+    h = mezclarNumero(h, l.efectos.dominio)
   }
   h = mezclarEntero(h, p.proyectiles.length)
   for (const pr of p.proyectiles) {
     h = mezclarTexto(h, pr.tipo)
+    // El dueño cambia en vuelo desde la quinta tanda (el Smash de Pádel de Nehuen lo devuelve) y una púa
+    // de Nico M. se clava en el piso.
+    h = mezclarEntero(h, pr.duenio)
+    h = mezclarEntero(h, pr.plantado ? 1 : 0)
     h = mezclarNumero(h, pr.x)
     h = mezclarNumero(h, pr.y)
     h = mezclarEntero(h, pr.golpesRestantes)
@@ -89,6 +97,12 @@ export function hashPartida(p: Partida): number {
     h = mezclarEntero(h, li.sinControl)
     h = mezclarEntero(h, li.conControl)
     h = mezclarEntero(h, li.respiroInmune)
+    // Quinta tanda: hacia quién camina el hipnotizado, la pasiva de Fran (el crítico listo), si la
+    // contra del All In ya saltó y si Desaparecer ya llegó delante del rival.
+    h = mezclarEntero(h, li.hipnotizadoPor === null ? 2 : li.hipnotizadoPor)
+    h = mezclarEntero(h, li.critListo)
+    h = mezclarEntero(h, li.accion?.contraOk ? 1 : 0)
+    h = mezclarEntero(h, li.accion?.llego ? 1 : 0)
   }
   return h >>> 0
 }

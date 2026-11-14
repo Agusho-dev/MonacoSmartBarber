@@ -43,9 +43,13 @@ import {
   PAL_VERDE,
   PAL_VIOLETA,
 } from './particulas'
+import { impactoQuinta, rasgoQuinta } from './especiales-quinta'
 import { azar, TAU } from './util'
 
-/** Los especiales que dejan post-imágenes del color del barbero mientras se mueven. */
+/**
+ * Los especiales que dejan post-imágenes del color del barbero mientras se mueven. De la quinta tanda,
+ * la embestida del All In (violeta: el color secundario de Chino) y la patada voladora del Despido.
+ */
 export const ICONOS_ESTELA: ReadonlySet<IconoEspecial> = new Set<IconoEspecial>([
   'rayo',
   'moto',
@@ -54,7 +58,12 @@ export const ICONOS_ESTELA: ReadonlySet<IconoEspecial> = new Set<IconoEspecial>(
   'chilena',
   'baile',
   'navaja',
+  'dominio',
+  'despido',
 ])
+
+/** Los que dejan la post-imagen con el color SECUNDARIO de la ficha (el violeta del All In, el dorado del Despido). */
+export const ICONOS_ESTELA_SECUNDARIA: ReadonlySet<IconoEspecial> = new Set<IconoEspecial>(['dominio', 'despido'])
 
 /** Puntos del cuerpo en mundo-pantalla (del último cuadro dibujado). */
 const PT = { manoX: 0, manoY: 0, pieY: 0, cabezaY: 0, cx: 0, cy: 0, h: 205 }
@@ -187,6 +196,8 @@ export function rasgoEspecial(E: Escena, l: LuchadorEstado, v: VisualLuchador, i
       temblar(E.cam, 4)
       break
     default:
+      // los de la quinta tanda (especiales-quinta.ts)
+      rasgoQuinta(E, l, v, icono)
       break
   }
 }
@@ -315,7 +326,8 @@ export function impactoEspecial(E: Escena, l: LuchadorEstado, v: VisualLuchador,
       return true
     }
     default:
-      return false
+      // los de la quinta tanda (especiales-quinta.ts)
+      return impactoQuinta(E, l, v, icono, k)
   }
 }
 

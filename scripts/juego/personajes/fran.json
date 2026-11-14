@@ -1,0 +1,371 @@
+{
+  "_nota": "Fran para «Corte Final» (cuarta tanda, 31/oct/2026), hoja de 18 paneles (1536x1024). Se procesa con scripts/juego/extraer_fran.py (motor de extraer_gabriel.py con las extensiones de extraer_chino.py: pelarFondo con «bloques» y SIN_MODELO). herramienta1 = el final del combo (directo y rodilla; la rodilla en el aire trae el humo y el puño del vecino pegados) y herramienta2 = la patada. La fila de abajo está dibujada ~1,08 veces más grande: escala 0,93. Los dos especiales vienen en primer plano y cortados por el panel: especial1 = victoria[0] y burla[1] (la mano en los lentes, de cuerpo entero) + el cuadro de los dos dedos (el último de la hoja) INJERTADO sobre las piernas de golpe[3] (escala 0,456, alineado por la cabeza y la cintura); especial2 = guardia[0] + dos cuadros de la hoja (levanta las tijeras; estocada) injertados sobre golpe[3] (escalas 0,61 y 0,71: el panel corta las canillas). Prestados: dash = correr 1–3 (los cuadros del dash pierden las piernas en el humo), caer = la bajada del salto y dos aterrizajes, combo = golpe[1], el directo de golpe[3] y los cuadros 2 y 3 del combo (cruzado y rodilla) (los dos primeros se pisan con el vecino; el 4.º y el 5.º, con humo y el rival). burla[3] va espejada (de frente, miraba al lado contrario del rival). Los brillos pintados ENCIMA del cuerpo (los lentes y la punta de los dedos del especial 1, el puño de la estocada) se reconstruyen en la hoja antes de todo («limpiezasColor», inpaint): queda un tinte violeta suave. Efecto del atlas: «tijeras» (las tijeras abiertas que levanta en el especial 2, sin los dedos). Corrección (31/oct, después de la revisión): patada[2] recupera la zapatilla de apoyo («incluir», que después se pela) y saca el bloque marrón de la punta y el fondo bajo el brazo de atrás; combo[2] recupera la pierna de atrás («incluir»); levantarse[2] devuelve SU zapatilla izquierda (el rectángulo viejo la sacaba como si fuera del vecino) y saca la cuña negra entre el brazo y el cuerpo; correr[1] sin la estela detrás de la cabeza; caminar[3] con «sombra» entre los pies. Especial 1: los lentes quedan brillando (la limpieza sólo saca el destello que sale de la cara hacia el fondo) y la chispa de los dedos se limpia sólo más allá de las puntas; el destello y la chispa que el modelo pegaba se sacan con excluir.",
+  "personaje": "fran",
+  "hoja": "../../../../juego-fuentes/fran_anim.jpg",
+  "salida": "../../../public/juego/personajes/fran",
+  "reglas": {
+    "humo": [{"nota": "humo gris claro del piso", "lumMin": 60, "satMax": 0.16}],
+    "azules": [
+      {
+        "nota": "estelas, ondas y brillo azul o violeta (la piel y el jean no llegan)",
+        "bMenosRMin": 45,
+        "satMin": 0.35,
+        "lumMin": 40
+      }
+    ]
+  },
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho&panel",
+      "region": [8, 35, 379, 157],
+      "cajas": [[10, 35, 75, 157], [76, 35, 148, 157], [150, 35, 221, 157], [222, 35, 292, 157], [295, 35, 368, 157]],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+    },
+    "caminar": {
+      "inferencia": "ancho&panel",
+      "region": [390, 35, 762, 156],
+      "cajas": [[391, 35, 458, 156], [453, 35, 528, 156], [522, 35, 600, 156], [594, 35, 678, 156], [670, 35, 752, 156]],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "sombra": {"3": {"zona": [612, 146, 660, 157], "lumMax": 40, "recuperar": 1}}
+    },
+    "correr": {
+      "inferencia": "ancho",
+      "region": [774, 35, 1146, 156],
+      "cajas": [[776, 40, 892, 156], [860, 40, 974, 156], [943, 40, 1054, 156], [1026, 40, 1138, 156]],
+      "pegados": 2,
+      "pelarFondo": {
+        "0": [{"lumMax": 30, "stdMax": 7.0, "pasos": 40, "bMenosRMin": 0, "bloques": 20}, {"zona": [[776, 40], [858, 40], [858, 72], [892, 72], [892, 156], [776, 156]], "lumMax": 30, "stdMax": 60, "pasos": 3}],
+        "1": {"lumMax": 30, "stdMax": 7.0, "pasos": 40, "bMenosRMin": 0, "bloques": 20},
+        "2": [{"lumMax": 30, "stdMax": 7.0, "pasos": 40, "bMenosRMin": 0, "bloques": 20}, {"zona": [[943, 40], [1018, 40], [1018, 74], [1054, 74], [1054, 156], [943, 156]], "lumMax": 30, "stdMax": 60, "pasos": 3}],
+        "3": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+      },
+      "excluir": {
+        "0": [[[863, 122], [878, 117], [892, 106], [892, 156], [863, 156]]],
+        "1": [[860, 38, 895, 112], [950, 98, 974, 156], [856, 50, 898, 69], [[905, 62], [944, 55], [945, 59], [907, 68]]],
+        "2": [[943, 38, 977, 112], [1030, 98, 1054, 156]],
+        "3": [[1026, 38, 1058, 92]]
+      },
+      "sombra": {"zona": [774, 144, 1146, 156], "lumMax": 40, "recuperar": 1},
+      "quitarColorUltimo": {
+        "0": [{"nota": "quinta tanda: el fondo encerrado entre el antebrazo y el pecho", "zona": [836, 70, 892, 94], "lumMax": 28}, {"nota": "el fondo entre el brazo de atrás y la espalda", "zona": [814, 72, 832, 95], "lumMax": 38}],
+        "2": [{"nota": "quinta tanda: el fondo encerrado entre el antebrazo y el pecho", "zona": [1030, 70, 1054, 90], "lumMax": 28}]
+      },
+      "apoyoX": {"0": 846.0, "2": 1017.0}
+    },
+    "dash": {
+      "inferencia": "ancho",
+      "region": [1158, 35, 1528, 156],
+      "cajas": [[1180, 45, 1316, 156], [1312, 45, 1422, 156], [1420, 45, 1525, 156]],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "usar": [["correr", 1], ["correr", 2], ["correr", 3]]
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "region": [8, 193, 363, 301],
+      "cajas": [[9, 193, 91, 301], [90, 193, 177, 301], [176, 193, 266, 301], [266, 193, 356, 301]],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "apoyoX": {"0": 48.5, "1": 134.0, "2": 219.5, "3": 310.5},
+      "quitarColor": {
+        "2": [{"nota": "quinta tanda: el fondo encerrado entre el cuello y el antebrazo", "zona": [[233, 213], [240, 213], [244, 222], [244, 232], [240, 232], [232, 221]], "lumMax": 30}]
+      }
+    },
+    "agachado": {
+      "inferencia": "ancho&panel",
+      "region": [375, 193, 688, 300],
+      "cajas": [[377, 218, 450, 300], [450, 218, 520, 300], [523, 218, 595, 300], [598, 218, 675, 300]],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "region": [700, 176, 1063, 300],
+      "cajas": [[702, 215, 778, 300], [776, 185, 875, 300], [895, 176, 980, 292], [975, 195, 1060, 300]],
+      "pintar": {
+        "1": [{"zona": [776, 176, 875, 196], "bMenosRMin": 20, "lumMin": 25}],
+        "2": [{"zona": [895, 176, 980, 196], "bMenosRMin": 20, "lumMin": 25}]
+      },
+      "quitarColor": {
+        "1": [{"zona": [776, 176, 875, 196], "bMenosRMin": 20, "lumMin": 25}],
+        "2": [
+          {"zona": [895, 176, 980, 196], "bMenosRMin": 20, "lumMin": 25},
+          {"zona": [895, 176, 980, 210], "bMenosRMin": 30, "satMin": 0.4}
+        ]
+      },
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+    },
+    "caer": {
+      "inferencia": "ancho",
+      "region": [1075, 193, 1528, 300],
+      "cajas": [
+        [1080, 200, 1185, 300],
+        [1190, 220, 1278, 300],
+        [1278, 235, 1360, 300],
+        [1360, 220, 1440, 300],
+        [1440, 210, 1520, 300]
+      ],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "usar": [["saltar", 3], ["saltar", 3], 3, 4],
+      "quitarColor": {
+        "4": [{"nota": "quinta tanda: las gotas negras de fondo colgando debajo del brazo izquierdo", "zona": [1456, 264, 1472, 292], "lumMax": 40}]
+      }
+    },
+    "golpe": {
+      "inferencia": "ancho",
+      "region": [9, 337, 486, 451],
+      "cajas": [[9, 337, 95, 451], [88, 337, 182, 451], [176, 337, 296, 451], [270, 337, 392, 451]],
+      "impactos": [3],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+    },
+    "patada": {
+      "inferencia": "ancho",
+      "region": [498, 337, 935, 452],
+      "cajas": [[500, 337, 608, 452], [602, 337, 703, 452], [698, 337, 832, 452]],
+      "impactos": [2],
+      "pelarFondo": {
+        "0": [{"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}, {"zona": [565, 400, 610, 436], "lumMax": 32, "stdMax": 60, "pasos": 3}],
+        "1": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "2": {"lumMax": 30, "stdMax": 7.0, "pasos": 40, "bMenosRMin": 0, "bloques": 20}
+      },
+      "quitarColor": {
+        "0": [{"zona": [560, 425, 608, 452], "lumMin": 60, "satMax": 0.16}, {"nota": "quinta tanda: el fondo encerrado entre el antebrazo, el torso y el muslo", "zona": [[557, 377], [566, 377], [580, 382], [600, 382], [600, 387], [557, 387]], "lumMax": 34}],
+        "2": [{"zona": [698, 370, 750, 420], "lumMin": 120, "satMax": 0.25}, {"zona": [805, 345, 832, 390], "lumMin": 222}, {"zona": [805, 345, 832, 390], "rMenosBMin": 90, "satMin": 0.6, "lumMin": 140}, {"zona": [695, 383, 734, 405], "lumMin": 60, "satMax": 0.2}]
+      },
+      "limite": {"2": [[698, 337, 827, 452]]},
+      "excluir": {
+        "0": [[555, 430, 608, 452]],
+        "2": [
+          [[695, 389], [728, 386], [733, 392], [733, 404], [695, 404]],
+          [[822, 345], [834, 345], [834, 392], [810, 392], [814, 380], [819, 370], [821, 364]],
+          [[713, 392], [724, 386], [734, 380], [744, 375], [745, 386], [736, 396], [711, 396]]
+        ]
+      },
+      "incluir": {
+        "2": [
+          [
+            [740, 422],
+            [764, 422],
+            [762, 432],
+            [759, 437],
+            [762, 444],
+            [762, 451],
+            [732, 451],
+            [731, 446],
+            [735, 440],
+            [738, 433]
+          ]
+        ]
+      },
+      "apoyoX": {"0": 557.0},
+      "excluirUltimo": {"0": [[[546, 438], [560, 438], [560, 460], [546, 460]]]},
+      "_notaFix": "Sprites-fix (quinta tanda): en el 0 sale el bloque oscuro plano delante de la punta de la zapatilla de apoyo (F12; «excluirUltimo» desde x = 546, la punta llega a 544)."
+    },
+    "combo": {
+      "inferencia": "ancho",
+      "region": [947, 337, 1528, 452],
+      "cajas": [
+        [948, 337, 1035, 452],
+        [1030, 337, 1100, 452],
+        [1093, 337, 1196, 452],
+        [1180, 337, 1275, 452],
+        [1262, 337, 1358, 452]
+      ],
+      "impactos": [1, 2, 3],
+      "pelarFondo": {
+        "0": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "1": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "2": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "3": [{"lumMax": 30, "stdMax": 7.0, "pasos": 40, "bMenosRMin": 0, "bloques": 20}, {"zona": [1225, 380, 1276, 452], "lumMax": 30, "stdMax": 60, "pasos": 3}],
+        "4": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+      },
+      "usar": [["golpe", 1], ["golpe", 3], 2, 3],
+      "limite": {"4": [[1268, 337, 1358, 452]]},
+      "quitarColor": {"4": [{"zona": [1285, 436, 1352, 452], "lumMin": 45, "satMax": 0.18}]},
+      "excluir": {"4": [[1262, 360, 1276, 384]]},
+      "incluir": {"2": [[[1094, 428], [1094, 452], [1064, 452], [1064, 444], [1072, 439], [1083, 434]]]},
+      "excluirUltimo": {"3": [[[1176, 450], [1284, 450], [1284, 460], [1176, 460]]]},
+      "_notaFix": "Sprites-fix (quinta tanda): en el 3 sale la franja violeta del borde del panel debajo de las zapatillas («excluirUltimo» desde la fila 450: la suela termina en la 449)."
+    },
+    "herramienta1": {"alias": "combo", "usar": [2, 3], "impactos": [1]},
+    "herramienta2": {"alias": "patada", "usar": [0, 1, 2], "impactos": [2]},
+    "especial1": {
+      "inferencia": "ancho",
+      "region": [9, 489, 1524, 628],
+      "cajas": [
+        [12, 492, 122, 628],
+        [138, 492, 232, 628],
+        [244, 492, 365, 628],
+        [365, 492, 520, 628],
+        [536, 489, 690, 628],
+        [758, 495, 950, 628]
+      ],
+      "pintar": "azules",
+      "quitarColor": "azules",
+      "impactos": [2],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "injerto": {
+        "donante": ["golpe", 3],
+        "escala": 0.456,
+        "cuadros": {"5": {"corte": 620, "cabeza": 495, "dx": 0, "solape": 3}}
+      },
+      "usar": [["victoria", 0], ["burla", 1], 5, 5],
+      "excluir": {
+        "5": [
+          [[757, 546], [765, 545], [761, 560], [759, 578], [757, 592]],
+          [[835, 512], [852, 512], [852, 546], [838, 546], [838, 538], [836, 528]],
+          [[910, 518], [950, 518], [950, 538], [936, 541], [922, 545], [910, 546]]
+        ]
+      }
+    },
+    "especial2": {
+      "inferencia": "ancho",
+      "region": [9, 665, 1528, 815],
+      "cajas": [
+        [12, 668, 125, 815],
+        [138, 668, 250, 815],
+        [270, 680, 375, 815],
+        [385, 680, 528, 815],
+        [568, 668, 708, 815],
+        [760, 690, 885, 815],
+        [1028, 690, 1138, 815],
+        [1240, 680, 1370, 800]
+      ],
+      "pintar": "azules",
+      "quitarColor": {
+        "0": "azules",
+        "1": "azules",
+        "2": "azules",
+        "3": "azules",
+        "4": "azules",
+        "5": "azules",
+        "6": ["azules", {"zona": [1070, 715, 1145, 785], "bMenosRMin": 20, "lumMax": 90}],
+        "7": "azules"
+      },
+      "impactos": [3],
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "injerto": {
+        "donante": ["golpe", 3],
+        "escala": 0.6,
+        "cuadros": {"3": {"corte": 776, "cabeza": 684, "escala": 0.61}, "6": {"corte": 772, "cabeza": 693, "escala": 0.71}}
+      },
+      "usar": [["guardia", 0], 3, 3, 6, 6],
+      "excluir": {"6": [[1088, 748, 1140, 780]]}
+    },
+    "danio": {
+      "inferencia": "ancho&panel",
+      "region": [8, 852, 331, 1001],
+      "cajas": [[8, 855, 80, 1001], [79, 855, 154, 1001], [154, 855, 240, 1001], [241, 855, 331, 1001]],
+      "escala": 0.93,
+      "pelarFondo": {
+        "0": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "1": [{"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}, {"zona": [123, 896, 141, 926], "lumMax": 40, "stdMax": 10, "pasos": 40, "bloques": 15}],
+        "2": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+        "3": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+      },
+      "incluirFinal": {"1": [[[85, 969], [93, 969], [97, 972], [98, 976], [98, 983], [84, 983], [83, 976], [84, 971]]]},
+      "quitarColor": {
+        "2": [{"nota": "el fondo entre el antebrazo y el torso", "zona": [[194, 905], [203, 905], [209, 921], [208, 924], [202, 924], [194, 914]], "lumMax": 36}],
+        "3": [{"nota": "el fondo entre el brazo y el costado", "zona": [[278, 916], [283, 916], [292, 931], [291, 934], [286, 934], [276, 924], [276, 919]], "lumMax": 32}, {"nota": "la raya celeste del borde del panel pegada a la zapatilla", "zona": [326, 940, 336, 1002], "bMenosRMin": 45}]
+      },
+      "apoyoX": {"1": 115.9, "2": 192.2, "3": 272.9}
+    },
+    "ko": {
+      "inferencia": "ancho",
+      "region": [342, 852, 642, 1000],
+      "cajas": [[342, 880, 462, 990], [452, 925, 640, 995]],
+      "escala": 0.93,
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "incluirLum": {
+        "0": [{"nota": "la pierna levantada (zapatilla arriba a la izquierda, rodilla en x≈400): el modelo no la tomó", "zona": [[344, 880], [374, 880], [402, 885], [412, 893], [414, 935], [404, 938], [396, 925], [394, 906], [372, 910], [366, 918], [344, 918]], "lumMin": 40}]
+      },
+      "excluirUltimo": {"0": [[[397, 950], [421, 950], [421, 961], [389, 961], [389, 957], [396, 955]]]},
+      "apoyoX": {"0": 432.7}
+    },
+    "levantarse": {
+      "inferencia": "ancho&panel",
+      "region": [654, 852, 922, 1000],
+      "cajas": [[655, 895, 728, 1000], [716, 890, 779, 1000], [771, 865, 850, 1000], [842, 852, 920, 1000]],
+      "escala": 0.93,
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "excluir": {
+        "2": [
+          [[771, 958], [776, 958], [777, 975], [775, 984], [771, 984]],
+          [[822, 902], [835, 902], [838, 910], [838, 928], [836, 934], [830, 933], [827, 925], [824, 916], [821, 908]]
+        ]
+      },
+      "pegados": {"1": 1},
+      "incluirFinal": {"2": [[[774, 960], [782, 957], [788, 964], [790, 970], [777, 970], [773, 966]]]}
+    },
+    "victoria": {
+      "inferencia": "ancho&panel",
+      "region": [933, 852, 1210, 1000],
+      "cajas": [[934, 852, 1013, 1000], [1012, 852, 1083, 1000], [1082, 852, 1146, 1000], [1144, 852, 1209, 1000]],
+      "escala": 0.93,
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30}
+    },
+    "burla": {
+      "inferencia": "ancho&panel",
+      "region": [1221, 852, 1528, 1000],
+      "cajas": [[1223, 852, 1294, 1000], [1293, 852, 1364, 1000], [1358, 870, 1440, 1000], [1428, 852, 1526, 1000]],
+      "escala": 0.93,
+      "pelarFondo": {"lumMax": 26, "stdMax": 4.0, "pasos": 40, "bMenosRMin": 3, "bloques": 30},
+      "espejoPorCuadro": {"3": true}
+    }
+  },
+  "retrato": {"anim": "victoria", "cuadro": 2, "alto": 720, "cara": {"lado": 36, "arriba": 2, "filas": 14}},
+  "efectos": {
+    "tijeras": {
+      "caja": [343, 695, 387, 728],
+      "inferencia": "brillo",
+      "lumMin": 70,
+      "dilatar": 1,
+      "limite": [[[343, 695], [387, 695], [387, 718], [356, 725], [343, 725]]],
+      "quitarColor": [{"nota": "los dedos que las sostienen", "rMenosBMin": 40}]
+    }
+  },
+  "limpiezasColor": [
+    {
+      "nota": "el destello de los lentes que sale de la cara hacia el fondo (especial 1, último cuadro): el lente mismo queda brillando",
+      "zona": [838, 515, 880, 552],
+      "bMenosRMin": 18,
+      "lumMin": 95,
+      "dilatar": 1,
+      "radio": 3
+    },
+    {
+      "nota": "el centro blanco de ese destello, fuera de la cara",
+      "zona": [838, 515, 880, 552],
+      "lumMin": 215,
+      "dilatar": 1,
+      "radio": 3
+    },
+    {
+      "nota": "la chispa más allá de la punta de los dedos (especial 1); los dedos quedan con su piel",
+      "zona": [[936, 516], [964, 516], [964, 548], [948, 548], [944, 536], [938, 528]],
+      "bMenosRMin": 18,
+      "lumMin": 95,
+      "dilatar": 1,
+      "radio": 3
+    },
+    {
+      "nota": "el centro blanco de esa chispa",
+      "zona": [[936, 516], [964, 516], [964, 548], [948, 548], [944, 536], [938, 528]],
+      "lumMin": 215,
+      "dilatar": 1,
+      "radio": 3
+    },
+    {
+      "nota": "el puño que brilla (especial 2, estocada)",
+      "zona": [1092, 722, 1142, 768],
+      "bMenosRMin": 18,
+      "lumMin": 95,
+      "dilatar": 1,
+      "radio": 3
+    },
+    {
+      "nota": "el centro blanco del brillo del puño",
+      "zona": [1092, 722, 1142, 768],
+      "lumMin": 215,
+      "dilatar": 1,
+      "radio": 3
+    }
+  ]
+}

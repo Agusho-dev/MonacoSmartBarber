@@ -43,7 +43,9 @@ export const TIPS: readonly string[] = [
   'El golpe pesado (MÁQUINA, REMATE…) rompe guardias y tiene más chance de crítico.',
   'El bombo y el sismo corren por el piso: saltalos. El sismo ni siquiera se puede bloquear.',
   'La onda del grito no se frena con la guardia: se pasa con la ESQUIVA.',
-  'El agarre no se bloquea: si lo ves venir, alejate o saltá.',
+  // Desde la quinta tanda hay un agarre que también agarra en el aire (Lautaro): agacharse es una defensa.
+  'Los agarres no se bloquean: si ves venir uno, alejate. Saltar sirve contra casi todos; agacharte, contra el que va al cuello.',
+  'Agacharte esquiva lo que va a la cara: la mirada de los lentes y el agarre del cuello.',
   'Mareado no te podés cubrir: alejate hasta que se te pase.',
   'Si aparece «¡DEJALO AL CERO!», apretá cualquier golpe: son puntos extra.',
   'Pegarle a alguien congelado lo rompe con un golpe extra.',
@@ -86,6 +88,23 @@ const CONTRA_ESPECIAL: Partial<Record<IconoEspecial, string>> = {
   termo: 'El agua del termo de {n} quema de a poco: salí del chorro.',
   agarre: 'El agarre de {n} no se bloquea: si lo ves venir, alejate o saltá.',
   sismo: 'El Puño Sísmico de {n} corre por el piso y no se bloquea de pie: saltalo.',
+  // Quinta tanda (14/nov).
+  cartas: 'Las Cartas Malditas de {n} salen en abanico: alta, al medio y al ras del piso. Saltando o agachado alguna te alcanza: cubrite.',
+  dominio: 'En el All In, {n} espera tu golpe: si le pegás o le tirás algo, te contesta con todo. No le pegues: esperá, y saltá o cubrite la embestida del final.',
+  lentes: 'Los Lentes Hipnóticos de {n} van a la altura de los ojos: agachate o cubrite. Si te alcanzan de lejos, caminás hacia él sin poder hacer nada.',
+  corte: 'El Corte de Precisión de {n} es crítico con la punta de la tijera: pegate a él o alejate del todo.',
+  gigante: 'Mientras {n} crece, los golpes leves no lo frenan y el aplastón llega lejos: alejate, cortalo con un golpe fuerte o un especial, o cubrite (te gasta mucha guardia).',
+  lanzamiento: 'El Lanzamiento Aéreo de {n} te agarra del cuello aunque saltes y no se bloquea: agachate o esquivalo.',
+  herramientas: 'Las herramientas de {n} van adonde estás, aunque saltes: cubrite.',
+  aerosol: 'El Spray Cegador de {n} te deja un segundo sin poder pegar: cubrite y no te ciega; si te ciega, cubrite o alejate hasta que se te pase.',
+  ejecucion: 'El agarre de {n} te alcanza desde media distancia y no se bloquea: saltá, esquivalo o pegate a él, que de cerca no llega.',
+  codigo: 'El Terremoto de {n} levanta columnas de código cada vez más lejos: cubrite, o cruzalo con la ESQUIVA hacia él y castigalo arrodillado.',
+  fantasma: 'Cuando {n} desaparece no lo podés tocar: cubrite, que reaparece delante tuyo y te pega con la pelota.',
+  padel: 'El Smash de {n} te devuelve lo que le tirás mientras remata, y más rápido: no le tires cosas cuando tiene carga; la pelota se cubre o se salta.',
+  orden: 'La Orden Final de {n} cruza casi toda la pantalla y no se salta: cubrite apenas te señala.',
+  espinas: 'Las Espinas de {n} que no te pegan quedan clavadas en el piso: saltalas o esperá que se apaguen; pisarlas te tira.',
+  monopatin: 'El Monopatín de {n} sale despacio y acelera: cubrí el revoleo de cerca y saltá el monopatín antes de que agarre velocidad.',
+  despido: 'Si {n} te muestra el papel del Despido y no te cubriste, te arrodillás y te come una patada voladora: cubrite y castigalo, que queda regalado.',
 }
 
 /**

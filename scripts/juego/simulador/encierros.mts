@@ -74,6 +74,7 @@ export function soloBloqueo(l: LuchadorEstado, li: InternoLuchador): boolean {
     ef.congelado === 0 &&
     ef.aturdido === 0 &&
     ef.electrocutado === 0 &&
+    ef.hipnotizado === 0 &&
     li.derribo === 0 &&
     li.levantar === 0 &&
     li.caidaDerribo === 0 &&
@@ -377,7 +378,7 @@ export interface ResultadoBusqueda {
   difMotor: number
 }
 
-/** Guiones al azar contra las 13 víctimas y las 4 maneras de escaparse, y mutaciones de los peores. */
+/** Guiones al azar contra todas las víctimas y las 4 maneras de escaparse, y mutaciones de los peores. */
 export function buscar(atacante: IdPersonaje, azar: number, mut: number, semilla: number, hueco = 2): ResultadoBusqueda {
   const r = rngGuion(semilla)
   const todos: { m: MedidaEncierro; c: CasoEncierro }[] = []
@@ -429,7 +430,7 @@ export function buscar(atacante: IdPersonaje, azar: number, mut: number, semilla
   return { atacante, sims, peores, sueltas, difMotor }
 }
 
-/** La búsqueda de los 13 atacantes repartida en hilos. */
+/** La búsqueda de todos los atacantes repartida en hilos. */
 export async function buscarEnHilos(azar: number, mut: number, semilla: number, hueco: number, hilos: number): Promise<ResultadoBusqueda[]> {
   const n = Math.max(1, Math.min(hilos, availableParallelism()))
   const lotes: IdPersonaje[][] = Array.from({ length: n }, () => [])
