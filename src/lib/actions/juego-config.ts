@@ -13,13 +13,16 @@
  * las otras organizaciones de BarberOS no hay nada que prender.
  *
  * Además, «Jugar como dueño» (`crearPaseDuenos`): el link al juego con el pase que
- * deja ver y elegir a los personajes de los dueños (src/lib/juego/pase.ts).
+ * deja ver y elegir a los personajes de los dueños (src/lib/juego/pase.ts). Y el PIN de
+ * dueños (mig 239, `obtenerPinDuenos` / `guardarPinDuenos` / `quitarPinDuenos`): en el
+ * juego, 5 toques al logo de Monaco y el PIN dan el mismo pase (src/lib/juego/pin-duenos.ts).
  */
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCachedAuthUser } from '@/lib/auth-cache'
 import { isValidUUID } from '@/lib/validation'
 import { firmarPaseDuenos } from '@/lib/juego/pase'
+import { SIN_TABLA, esFormatoPin, hashearPin } from '@/lib/juego/pin-duenos'
 import { orgDelJuego, urlDelJuego } from '@/lib/juego/servidor'
 import { getCurrentOrgId } from './org'
 import { getCurrentUserPermissions } from './permissions-gate'
@@ -188,4 +191,110 @@ export async function crearPaseDuenos(): Promise<
     console.error('[crearPaseDuenos]', e instanceof Error ? e.message : String(e))
     return { ok: false, error: 'No pudimos armar el pase. Probá de nuevo.' }
   }
+}
+
+// ── El PIN de dueños (mig 239) ──────────────────────────────────────────────
+
+const ERROR_SIN_TABLA = 'El PIN de dueños todavía no está disponible: falta aplicar la migración 239.'
+
+/** Estado del PIN de dueños para la tarjeta: si hay y desde cuándo. El PIN (y su hash) nunca sale. */
+export type EstadoPinDuenos =
+  | { ok: true; configurado: boolean; desde: string | null }
+  | { ok: false; error: string }
+
+/** Permiso y organización del juego para el PIN: el orgId si pasa, si no el error para mostrar. */
+async function accesoPin(permiso: 'settings.view' | 'settings.manage'): Promise<{ orgId: string } | { error: string }> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: SESION_VENCIDA }
+  const permisos = await getCurrentUserPermissions()
+  if (permisos[permiso] !== true) {
+    return {
+      error: permiso === 'settings.manage' ? 'No tenés permiso para cambiar la configuración.' : 'No tenés permiso para ver la configuración.',
+    }
+  }
+  const delJuego = await esOrgDelJuego(orgId)
+  if (delJuego === null) return { error: 'No pudimos leer la configuración del juego. Probá de nuevo.' }
+  if (!delJuego) return { error: 'El juego no está disponible para esta organización.' }
+  return { orgId }
+}
+
+/** ¿Hay PIN de dueños y desde cuándo? Pide `settings.view` y la organización del juego. */
+export async function obtenerPinDuenos(): Promise<EstadoPinDuenos> {
+  const acceso = await accesoPin('settings.view')
+  if ('error' in acceso) return { ok: false, error: acceso.error }
+  const { data, error } = await createAdminClient()
+    .from('juego_pin_duenos')
+    .select('updated_at')
+    .eq('organization_id', acceso.orgId)
+    .maybeSingle()
+  if (error) {
+    console.error('[obtenerPinDuenos]', error.code, error.message)
+    return { ok: false, error: SIN_TABLA.has(error.code ?? '') ? ERROR_SIN_TABLA : 'No pudimos leer el PIN de dueños. Probá de nuevo.' }
+  }
+  const desde = (data as { updated_at?: string | null } | null)?.updated_at ?? null
+  return { ok: true, configurado: data !== null, desde }
+}
+
+/**
+ * Pone o cambia el PIN de dueños (uno por organización, compartido por los 4). Pide
+ * `settings.manage` y la organización del juego; 4 a 8 dígitos, iguales en «PIN» y «Repetir PIN».
+ * Guarda sólo el hash (scrypt con sal propia) y confirma con la fila que quedó. Cambiarlo NO anula
+ * los pases que ya se dieron (ver src/lib/juego/pase.ts).
+ */
+export async function guardarPinDuenos(
+  pin: string,
+  repetir: string,
+): Promise<{ ok: true; desde: string } | { ok: false; error: string }> {
+  if (!esFormatoPin(pin)) return { ok: false, error: 'El PIN tiene que tener de 4 a 8 números.' }
+  if (pin !== repetir) return { ok: false, error: 'Los dos PIN no coinciden.' }
+
+  const acceso = await accesoPin('settings.manage')
+  if ('error' in acceso) return { ok: false, error: acceso.error }
+  const usuario = await getCachedAuthUser()
+  if (!usuario) return { ok: false, error: SESION_VENCIDA }
+
+  let pinHash: string
+  try {
+    pinHash = await hashearPin(pin)
+  } catch (e) {
+    console.error('[guardarPinDuenos] hash:', e instanceof Error ? e.message : String(e))
+    return { ok: false, error: 'No pudimos guardar el PIN. Probá de nuevo.' }
+  }
+
+  const { data, error } = await createAdminClient()
+    .from('juego_pin_duenos')
+    .upsert(
+      { organization_id: acceso.orgId, pin_hash: pinHash, actualizado_por: usuario.id, updated_at: new Date().toISOString() },
+      { onConflict: 'organization_id' },
+    )
+    .select('updated_at')
+  if (error) {
+    console.error('[guardarPinDuenos]', error.code, error.message)
+    return { ok: false, error: SIN_TABLA.has(error.code ?? '') ? ERROR_SIN_TABLA : 'No pudimos guardar el PIN. Probá de nuevo.' }
+  }
+  const fila = (data as Array<{ updated_at?: string | null }> | null)?.[0]
+  if (!fila?.updated_at) return { ok: false, error: 'No pudimos confirmar el PIN guardado. Probá de nuevo.' }
+
+  console.info('[guardarPinDuenos] PIN de dueños actualizado', { usuario: usuario.id })
+  return { ok: true, desde: fila.updated_at }
+}
+
+/** Quita el PIN de dueños: el gesto del logo deja de servir. Pide `settings.manage`. */
+export async function quitarPinDuenos(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const acceso = await accesoPin('settings.manage')
+  if ('error' in acceso) return { ok: false, error: acceso.error }
+  const usuario = await getCachedAuthUser()
+  if (!usuario) return { ok: false, error: SESION_VENCIDA }
+
+  const { error } = await createAdminClient()
+    .from('juego_pin_duenos')
+    .delete()
+    .eq('organization_id', acceso.orgId)
+    .select('organization_id')
+  if (error) {
+    console.error('[quitarPinDuenos]', error.code, error.message)
+    return { ok: false, error: SIN_TABLA.has(error.code ?? '') ? ERROR_SIN_TABLA : 'No pudimos quitar el PIN. Probá de nuevo.' }
+  }
+  console.info('[quitarPinDuenos] PIN de dueños quitado', { usuario: usuario.id })
+  return { ok: true }
 }

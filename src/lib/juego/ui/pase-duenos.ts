@@ -27,6 +27,15 @@ import { useSyncExternalStore } from 'react'
 export type RespuestaPaseDuenos = { ok: true; venceEn: number } | { ok: false; invalido: boolean }
 export type ValidarPase = (pase: string) => Promise<RespuestaPaseDuenos>
 
+/**
+ * Lo que contesta el canje del PIN de dueños (`canjearPinDuenos`, src/lib/actions/juego.ts; mig
+ * 239). `'pin'`: incorrecto, sin PIN configurado o la base no contestó (falla cerrado); `'tope'`:
+ * demasiados intentos, con los segundos que faltan.
+ */
+export type RespuestaPinDuenos =
+  | { ok: true; pase: string; venceEn: number }
+  | { ok: false; motivo: 'pin' | 'tope'; esperarSeg?: number }
+
 export const CLAVE_PASE = 'cf.duenos.v1'
 /** El parámetro del link de «Jugar como dueño». */
 export const PARAMETRO_PASE = 'd'
@@ -194,6 +203,35 @@ export function revisarPase(validar: ValidarPase, ahoraMs: number = Date.now()):
   })
   enVuelo = vuelta
   return vuelta
+}
+
+/**
+ * Guarda el pase que dio el canje del PIN (la capa del logo, pin-duenos.tsx) igual que el del link y
+ * lo deja confirmado en esta visita: el servidor lo acaba de firmar, así que no se vuelve a
+ * preguntar. Pisa un `?d=` que todavía no se revisó. False si el pase o el vencimiento no tienen
+ * forma (no guarda nada). `ahoraMs` existe para las pruebas.
+ */
+export function adoptarPase(pase: unknown, venceEn: unknown, ahoraMs: number = Date.now()): boolean {
+  if (!esPase(pase) || typeof venceEn !== 'number' || !Number.isFinite(venceEn) || venceEn * 1000 <= ahoraMs) {
+    return false
+  }
+  deLaDireccion = null
+  guardar({ pase, vence: venceEn })
+  marcar(true)
+  return true
+}
+
+/** «Quitar de este celular»: borra `cf.duenos.v1` y los dueños desaparecen sin recargar. */
+export function quitarPase(): void {
+  deLaDireccion = null
+  borrar()
+  marcar(false)
+}
+
+/** Hasta cuándo vale el pase confirmado (unix, segundos); null si no hay. Sólo desde handlers. */
+export function venceDelPase(): number | null {
+  if (!valido) return null
+  return leerGuardado()?.vence ?? null
 }
 
 /** ¿Este celular tiene un pase de dueños que el servidor confirmó en esta visita? */

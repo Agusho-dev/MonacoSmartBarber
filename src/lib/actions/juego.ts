@@ -22,7 +22,8 @@ import { IDS_PARA_CLIENTES, IDS_PERSONAJES, esSoloDuenos, peleaConDuenos } from 
 import { IDS_ARENAS } from '@/lib/juego/arenas'
 import { firmarTokenJuego, leerTokenJuego } from '@/lib/juego/token'
 import { leerPaseDuenos, paseConfigurado } from '@/lib/juego/pase'
-import type { RespuestaPaseDuenos } from '@/lib/juego/ui/pase-duenos'
+import { canjearPin, esFormatoPin, type ClientePin } from '@/lib/juego/pin-duenos'
+import type { RespuestaPaseDuenos, RespuestaPinDuenos } from '@/lib/juego/ui/pase-duenos'
 import {
   APODO_ANONIMO,
   LIMITE_GUARDAR_IP,
@@ -659,5 +660,28 @@ export async function validarPaseDuenos(pase: string): Promise<RespuestaPaseDuen
   } catch (e) {
     console.error('[juego] validarPaseDuenos:', mensaje(e))
     return { ok: false, invalido: false }
+  }
+}
+
+/**
+ * El PIN de dueños (mig 239): 5 toques al logo de Monaco en la portada abren un teclado y esto
+ * canjea el PIN por el mismo pase que da «Jugar como dueño» en el dashboard. Pública (el juego no
+ * tiene sesión). El formato va antes de todo (sin tocar la base); después el tope (5 cada 10 min
+ * por IP y 30 cada 10 min para todos, cuenta todos los intentos) y recién entonces el hash: ver
+ * src/lib/juego/pin-duenos.ts. Sin PIN configurado, PIN incorrecto o la base caída dan lo mismo,
+ * `{ ok: false, motivo: 'pin' }`. El PIN no se loguea nunca. Action NUEVA: ninguna de las de
+ * arriba cambió de forma (Known Risk #38).
+ */
+export async function canjearPinDuenos(pin: string): Promise<RespuestaPinDuenos> {
+  if (!esFormatoPin(pin)) return { ok: false, motivo: 'pin' }
+  try {
+    const admin = createAdminClient()
+    const ip = await getClientIP()
+    // ClientePin es la parte del cliente que usa el canje (estructural, para probarlo con Node): los
+    // genéricos de supabase-js hacen que TypeScript no termine de comparar los dos tipos.
+    return await canjearPin(admin as unknown as ClientePin, pin, { ip, orgDelJuego: () => orgDelJuego(admin) })
+  } catch (e) {
+    console.error('[juego] canjearPinDuenos:', mensaje(e))
+    return { ok: false, motivo: 'pin' }
   }
 }

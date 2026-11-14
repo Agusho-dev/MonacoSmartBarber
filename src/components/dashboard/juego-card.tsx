@@ -8,21 +8,31 @@
  *
  * «Jugar como dueño»: abre el juego con el pase que deja ver y elegir a los personajes de los
  * dueños (`crearPaseDuenos`; el pase, en src/lib/juego/pase.ts). Lo ve quien ve la tarjeta.
+ *
+ * «PIN de dueños» (mig 239): en el juego, 5 toques al logo de Monaco y el PIN dan el mismo pase.
+ * Muestra si hay PIN y desde cuándo (nunca el PIN); ponerlo y quitarlo pide `settings.manage`. Si la
+ * tabla no está (la migración sin aplicar), sólo esta sección muestra el error.
  */
-import { useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { QRCodeSVG } from 'qrcode.react'
-import { AlertTriangle, Copy, Crown, ExternalLink, Gamepad2, Info, Loader2, QrCode, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Copy, Crown, ExternalLink, Gamepad2, Info, KeyRound, Loader2, QrCode, RefreshCw, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
   actualizarJuegoSucursal,
   crearPaseDuenos,
+  guardarPinDuenos,
   obtenerJuegoSucursales,
+  obtenerPinDuenos,
+  quitarPinDuenos,
+  type EstadoPinDuenos,
   type SucursalJuego,
 } from '@/lib/actions/juego-config'
 import { esAppInstalada } from '@/lib/app-instalable'
@@ -380,6 +390,7 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
                   </p>
                 </div>
               )}
+              <PinDuenos puedeEditar={puedeEditar} />
             </aside>
           </div>
         </div>
@@ -404,5 +415,216 @@ function TituloCard() {
       </span>
       Corte Final · el juego de la espera
     </CardTitle>
+  )
+}
+
+/** Lo que sale del input: sólo números, hasta 8. */
+function soloDigitos(valor: string): string {
+  return valor.replace(/[^0-9]/g, '').slice(0, 8)
+}
+
+/**
+ * «PIN de dueños»: si hay PIN y desde cuándo (nunca lo muestra), ponerlo o cambiarlo con «Repetir
+ * PIN», y quitarlo. Se carga sola al montar (una action nueva: `obtenerJuegoSucursales` no cambió de
+ * forma, Known Risk #38). Un error acá (la tabla sin migrar, la red) no toca el resto de la tarjeta.
+ */
+function PinDuenos({ puedeEditar }: { puedeEditar: boolean }) {
+  const [estado, setEstado] = useState<EstadoPinDuenos | null>(null)
+  const [pin, setPin] = useState('')
+  const [repetir, setRepetir] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [quitando, setQuitando] = useState(false)
+  const [confirmarQuitar, setConfirmarQuitar] = useState(false)
+  const [errorForm, setErrorForm] = useState<string | null>(null)
+
+  useEffect(() => {
+    let vivo = true
+    obtenerPinDuenos()
+      .then((r) => {
+        if (vivo) setEstado(r)
+      })
+      .catch(() => {
+        if (vivo) setEstado({ ok: false, error: SIN_CONEXION })
+      })
+    return () => {
+      vivo = false
+    }
+  }, [])
+
+  async function reintentar() {
+    setEstado(null)
+    try {
+      setEstado(await obtenerPinDuenos())
+    } catch {
+      setEstado({ ok: false, error: SIN_CONEXION })
+    }
+  }
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault()
+    if (guardando) return
+    if (pin.length < 4) return setErrorForm('El PIN tiene que tener de 4 a 8 números.')
+    if (pin !== repetir) return setErrorForm('Los dos PIN no coinciden.')
+    setErrorForm(null)
+    setGuardando(true)
+    try {
+      const r = await guardarPinDuenos(pin, repetir)
+      if (!r.ok) {
+        setErrorForm(r.error)
+        return
+      }
+      setEstado({ ok: true, configurado: true, desde: r.desde })
+      setPin('')
+      setRepetir('')
+      toast.success('PIN de dueños guardado', { description: 'En el juego: tocá 5 veces el logo de Monaco y poné el PIN.' })
+    } catch {
+      setErrorForm(SIN_CONEXION)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  async function quitar() {
+    if (quitando) return
+    if (!confirmarQuitar) return setConfirmarQuitar(true)
+    setQuitando(true)
+    try {
+      const r = await quitarPinDuenos()
+      if (!r.ok) {
+        toast.error('No pudimos quitar el PIN', { description: r.error })
+        return
+      }
+      setEstado({ ok: true, configurado: false, desde: null })
+      toast.success('PIN de dueños quitado')
+    } catch {
+      toast.error('No pudimos quitar el PIN', { description: SIN_CONEXION })
+    } finally {
+      setQuitando(false)
+      setConfirmarQuitar(false)
+    }
+  }
+
+  const configurado = estado?.ok === true && estado.configurado
+  const desde = estado?.ok === true && estado.desde ? new Date(estado.desde) : null
+
+  return (
+    <div className="space-y-2.5 border-t border-amber-500/20 pt-3" aria-labelledby="juego-pin-duenos">
+      <p id="juego-pin-duenos" className="flex items-center gap-2 text-sm font-medium">
+        <KeyRound className="size-4 text-amber-400" aria-hidden="true" />
+        PIN de dueños
+      </p>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        En el juego: tocá 5 veces el logo de Monaco y poné el PIN.
+      </p>
+
+      {estado === null ? (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          Revisando el PIN…
+        </p>
+      ) : !estado.ok ? (
+        <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-2.5">
+          <p className="flex items-start gap-2 text-xs leading-relaxed text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            {estado.error}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void reintentar()}>
+            <RefreshCw />
+            Reintentar
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-xs">
+            {configurado ? (
+              <>
+                <Badge variant="secondary" className="mr-1.5">
+                  Activo
+                </Badge>
+                {desde ? `Desde el ${format(desde, "d 'de' MMMM 'de' yyyy, HH:mm", { locale: es })}` : 'Hay un PIN puesto'}
+              </>
+            ) : (
+              <span className="text-muted-foreground">Todavía no hay PIN: el gesto del logo no sirve hasta que pongas uno.</span>
+            )}
+          </p>
+
+          {puedeEditar ? (
+            <form className="space-y-2" onSubmit={(e) => void guardar(e)} noValidate>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="juego-pin" className="text-xs">
+                    {configurado ? 'PIN nuevo' : 'PIN'}
+                  </Label>
+                  <Input
+                    id="juego-pin"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="new-password"
+                    maxLength={8}
+                    placeholder="6 números"
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(soloDigitos(e.target.value))
+                      setErrorForm(null)
+                    }}
+                    disabled={guardando}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="juego-pin-repetir" className="text-xs">
+                    Repetir PIN
+                  </Label>
+                  <Input
+                    id="juego-pin-repetir"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="new-password"
+                    maxLength={8}
+                    value={repetir}
+                    onChange={(e) => {
+                      setRepetir(soloDigitos(e.target.value))
+                      setErrorForm(null)
+                    }}
+                    disabled={guardando}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                De 4 a 8 números; te recomendamos 6. Es uno solo para los 4 dueños. Cambiarlo no saca a los dueños de
+                los celulares donde ya entraron.
+              </p>
+              {errorForm && (
+                <p className="text-xs text-destructive" role="alert">
+                  {errorForm}
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="submit" size="sm" disabled={guardando || pin.length < 4 || repetir.length < 4}>
+                  {guardando ? <Loader2 className="animate-spin" /> : <KeyRound />}
+                  Guardar
+                </Button>
+                {configurado && (
+                  <Button
+                    type="button"
+                    variant={confirmarQuitar ? 'destructive' : 'outline'}
+                    size="sm"
+                    onClick={() => void quitar()}
+                    onBlur={() => setConfirmarQuitar(false)}
+                    disabled={quitando}
+                  >
+                    {quitando ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                    {confirmarQuitar ? '¿Seguro?' : 'Quitar PIN'}
+                  </Button>
+                )}
+              </div>
+            </form>
+          ) : (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Para ponerlo o cambiarlo hace falta el permiso de editar la configuración.
+            </p>
+          )}
+        </>
+      )}
+    </div>
   )
 }

@@ -5819,3 +5819,277 @@ html.cf-html body {
     transform: none;
   }
 }
+
+/* ─── Modo dueño: el gesto del logo y el teclado del PIN (pin-duenos.tsx, mig 239) ─────────────
+   El logo de Monaco se traga sus toques (5 en 3 s abren la capa); el resto de la portada sigue
+   siendo «Tocá para jugar». La capa va con Capa (touch-action: none) y un teclado propio: no sale
+   el teclado del celular. */
+.cf-inicio__monaco-toque {
+  pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cf-capa--pin {
+  z-index: 46;
+}
+
+.cf-pin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 340px);
+  padding: 22px 18px 18px;
+  border: 1px solid rgba(245, 179, 1, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(28, 24, 14, 0.96), rgba(10, 10, 14, 0.97));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  animation: cf-pop 0.35s var(--cf-rebote) both;
+}
+
+.cf-pin[data-tiembla='a'] {
+  animation: cf-pin-tiembla-a 0.42s ease-out both;
+}
+
+.cf-pin[data-tiembla='b'] {
+  animation: cf-pin-tiembla-b 0.42s ease-out both;
+}
+
+@keyframes cf-pin-tiembla-a {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  55% {
+    transform: translateX(-10px);
+  }
+  35%,
+  75% {
+    transform: translateX(10px);
+  }
+}
+
+@keyframes cf-pin-tiembla-b {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  55% {
+    transform: translateX(-10px);
+  }
+  35%,
+  75% {
+    transform: translateX(10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-pin[data-tiembla] {
+    animation: none;
+  }
+}
+
+.cf-pin__cabeza {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.cf-pin__cerrar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--cf-texto-2);
+}
+
+.cf-pin__cerrar svg {
+  width: 22px;
+  height: 22px;
+}
+
+.cf-pin__cerrar:active {
+  color: #fff;
+  transform: scale(0.94);
+}
+
+.cf-pin__corona {
+  width: 30px;
+  height: 30px;
+  color: var(--cf-oro);
+  filter: drop-shadow(0 0 10px rgba(245, 179, 1, 0.45));
+}
+
+.cf-pin__titulo {
+  font-size: clamp(38px, 11vw, 52px);
+  text-align: center;
+}
+
+.cf-pin__puntos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.cf-pin__punto {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #fff6c8, var(--cf-oro));
+  box-shadow: 0 0 10px rgba(245, 179, 1, 0.55);
+  animation: cf-pop 0.2s var(--cf-rebote) both;
+}
+
+.cf-pin__vacio {
+  font-family: var(--cf-numeros);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+}
+
+.cf-pin__aviso {
+  min-height: 20px;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--cf-texto-2);
+}
+
+.cf-pin__aviso--error {
+  color: var(--cf-rojo);
+}
+
+.cf-pin__teclado {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  width: 100%;
+}
+
+.cf-pin__tecla {
+  display: grid;
+  place-items: center;
+  height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #2c2d38, #15151c);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--cf-texto);
+  transition:
+    transform 0.1s var(--cf-salida),
+    filter 0.12s;
+}
+
+.cf-pin__tecla svg {
+  width: 26px;
+  height: 26px;
+}
+
+.cf-pin__tecla:active:not(:disabled) {
+  transform: translateY(1px) scale(0.96);
+  filter: brightness(1.25);
+}
+
+.cf-pin__tecla:disabled {
+  opacity: 0.4;
+}
+
+.cf-pin__tecla:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+.cf-pin__tecla--accion {
+  color: var(--cf-texto-2);
+}
+
+.cf-pin__tecla--entrar {
+  border-color: rgba(245, 179, 1, 0.5);
+  background: linear-gradient(180deg, #fff1b0, var(--cf-oro) 55%, #b97800);
+  color: #150d00;
+}
+
+.cf-pin__girando {
+  animation: cf-girar 0.9s linear infinite;
+}
+
+.cf-pin__texto {
+  margin: 0;
+  max-width: 28ch;
+  font-size: 17px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--cf-texto);
+}
+
+.cf-pin__acciones {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.cf-pin__acciones .cf-btn {
+  width: 100%;
+}
+
+/* Apaisado: título, puntos y aviso a la izquierda; el teclado a la derecha (entra en 844×390). */
+@media (orientation: landscape) and (max-height: 500px) {
+  .cf-pin:not(.cf-pin--estado) {
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    align-items: center;
+    gap: 18px;
+    width: min(100%, 600px);
+    padding: 16px 18px;
+  }
+
+  .cf-pin__titulo {
+    font-size: clamp(32px, 9vh, 44px);
+  }
+
+  /* El teclado ocupa la columna derecha: la X va arriba a la izquierda para no tapar el 3. */
+  .cf-pin:not(.cf-pin--estado) .cf-pin__cerrar {
+    right: auto;
+    left: 6px;
+  }
+
+  .cf-pin__tecla {
+    height: 48px;
+    font-size: 24px;
+  }
+
+  .cf-pin__teclado {
+    gap: 7px;
+  }
+
+  .cf-pin--estado {
+    gap: 10px;
+    width: min(100%, 460px);
+    padding: 16px 18px;
+  }
+
+  .cf-pin__acciones {
+    flex-direction: row;
+  }
+}
