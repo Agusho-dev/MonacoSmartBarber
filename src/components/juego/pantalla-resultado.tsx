@@ -482,7 +482,7 @@ export function PantallaResultado({
               {sinRanking ? (
                 <p className="cf-apodo__listo" data-estado="duenos">
                   <Crown aria-hidden="true" />
-                  <span>Pelea de dueños: no cuenta para el ranking</span>
+                  <span>Pelea de Bosses: no cuenta para el ranking</span>
                 </p>
               ) : envio.tipo === 'listo' ? (
                 <p className="cf-apodo__listo">

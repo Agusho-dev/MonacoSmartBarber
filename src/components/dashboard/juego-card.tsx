@@ -349,7 +349,7 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
                 Jugar como dueño
               </p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Los personajes de los dueños no los ve ningún cliente: aparecen sólo en el navegador donde abras este
+                Los Bosses (los personajes de los dueños) no los ve ningún cliente: aparecen sólo en el navegador donde abras este
                 pase, durante 90 días. Esas peleas no van al ranking.
               </p>
               <Button variant="outline" size="sm" className="w-full" onClick={() => void jugarComoDueno()} disabled={pidiendoPase}>
@@ -386,7 +386,7 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
                   </div>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
                     Vale hasta el {format(new Date(pase.venceEn * 1000), "d 'de' MMMM 'de' yyyy", { locale: es })}. Con
-                    este enlace cualquiera ve a los dueños: no lo compartas con clientes.
+                    este enlace cualquiera ve a los Bosses: no lo compartas con clientes.
                   </p>
                 </div>
               )}

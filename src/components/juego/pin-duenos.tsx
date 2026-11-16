@@ -126,7 +126,7 @@ export function CapaPinDuenos({ inicial, onCerrar }: { inicial: VistaPin; onCerr
   )
 
   if (vista.tipo !== 'teclado') {
-    const titulo = vista.tipo === 'activo' ? 'Modo dueño activo' : 'Listo'
+    const titulo = vista.tipo === 'activo' ? 'Modo Boss activo' : 'Listo'
     return (
       <Capa titulo="cf-pin-titulo" className="cf-capa--pin">
         <div className="cf-pin cf-pin--estado" data-vista={vista.tipo}>
@@ -136,10 +136,10 @@ export function CapaPinDuenos({ inicial, onCerrar }: { inicial: VistaPin; onCerr
             {titulo}
           </h2>
           <p className="cf-pin__texto" role="status">
-            {vista.tipo === 'listo' && `Listo: los dueños quedan en este celular hasta el ${fecha(vista.vence)}.`}
+            {vista.tipo === 'listo' && `Listo: los Bosses quedan en este celular hasta el ${fecha(vista.vence)}.`}
             {vista.tipo === 'activo' &&
-              (vista.vence ? `Los dueños están en este celular hasta el ${fecha(vista.vence)}.` : 'Los dueños están en este celular.')}
-            {vista.tipo === 'quitado' && 'Listo: los dueños ya no están en este celular.'}
+              (vista.vence ? `Los Bosses están en este celular hasta el ${fecha(vista.vence)}.` : 'Los Bosses están en este celular.')}
+            {vista.tipo === 'quitado' && 'Listo: los Bosses ya no están en este celular.'}
           </p>
           <div className="cf-pin__acciones">
             {vista.tipo === 'activo' && (
@@ -164,7 +164,7 @@ export function CapaPinDuenos({ inicial, onCerrar }: { inicial: VistaPin; onCerr
         <div className="cf-pin__cabeza">
           <KeyRound className="cf-pin__corona" aria-hidden="true" />
           <h2 id="cf-pin-titulo" className="cf-titulo cf-pin__titulo">
-            Modo dueño
+            Modo Boss
           </h2>
           <div className="cf-pin__puntos" aria-label={`${digitos.length} de ${LARGO_MAXIMO} números`} role="img">
             {digitos.length === 0 ? (

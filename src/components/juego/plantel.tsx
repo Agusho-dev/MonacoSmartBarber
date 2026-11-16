@@ -158,7 +158,7 @@ export function GrillaPlantel({
 // ─── Los dueños (sólo con el pase) ─────────────────────────────────────────────
 
 /**
- * El grupo «Dueños»: los personajes `soloDuenos`, aparte de los barberos y fuera del filtro por
+ * El grupo «Bosses» (los dueños; así lo nombró el dueño el 16/nov): los personajes `soloDuenos`, aparte de los barberos y fuera del filtro por
  * sucursal. Sólo lo dibuja quien tiene el pase de dueños (src/lib/juego/ui/pase-duenos.ts): sin
  * pase o sin personajes de dueños, `ids` llega vacío y no se dibuja nada. Las mismas caras y marcas
  * que la grilla de los barberos (es una `GrillaPlantel`).
@@ -169,10 +169,10 @@ export function GrupoDuenos({ ids, ...grilla }: Omit<Parameters<typeof GrillaPla
     <div className="cf-duenos">
       <p className="cf-duenos__rotulo">
         <Crown aria-hidden="true" />
-        <span>Dueños</span>
+        <span>Bosses</span>
         <small>Con tu pase · no van al ranking</small>
       </p>
-      <GrillaPlantel ids={ids} {...grilla} etiqueta="Los dueños" />
+      <GrillaPlantel ids={ids} {...grilla} etiqueta="Los Bosses" />
     </div>
   )
 }
@@ -334,7 +334,7 @@ export function VictoriasLuchador({
     return (
       <div className="cf-bloque cf-victorias">
         <Crown aria-hidden="true" />
-        <span>Personaje de los dueños: sus peleas no van al ranking ni a las estadísticas.</span>
+        <span>Es un Boss: sus peleas no van al ranking ni a las estadísticas.</span>
       </div>
     )
   }
