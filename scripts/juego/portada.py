@@ -55,6 +55,17 @@ MOTA px separadas del cuerpo) y pasan por el mismo recorte y la misma escala, qu
 de afuera del contorno por el del borde (así el resplandor escondido no entra al escalar). Si
 existen las dos fuentes de un barbero, manda el PNG.
 
+Las portadas de FONDO BLANCO LISO (16/nov/2026: Joaquín, Lautaro y Leo; ilustración con contorno
+negro grueso, no pixel art) llegan como JPG o como PNG sin transparencia. Se reconocen por el borde de
+la imagen: casi todo blanco (canal más bajo ≥ BLANCO) y parejo, sin los dos tonos del damero. Van por
+el mismo camino que el damero (inundación desde el borde que frena en el contorno, franja «contorno +
+fondo», restos pegados al borde) con dos diferencias: el blanco del fondo es más claro y más neutro
+que el gris del damero, y una mancha clara ENCERRADA nunca se decide sola, porque el texto «Monaco» de
+la remera, las suelas y la pipa de Nike son tan blancos y neutros como el fondo y no hay damero que
+los distinga: el fondo encerrado (entre el brazo y el cuerpo, debajo del ala del gorro) va a mano en
+AJUSTES, con `huecos` (un punto adentro) o con `zonas` (un rectángulo donde todo lo claro y neutro es
+fondo, aunque el cierre del contorno lo haya tapado: las rendijas de 2–6 px entre el brazo y el torso).
+
 OJO: los extractores con --retrato (o --solo retrato) reescriben retrato.webp desde un cuadro de la
 hoja y pisan la portada: después de correrlos con esa opción, volver a correr este script con los
 barberos que tienen portada (con --cara).
@@ -92,6 +103,11 @@ FRANJA = 2.5           # px de transición del JPG entre el damero y el contorno
 HUECO_AREA = 120       # una mancha encerrada más chica no se puede probar contra el damero (va a mano)
 MANCHA_AREA = 60       # restos del damero pegados al borde, metidos en el contorno o el pelo
 
+# Portadas de fondo blanco liso
+BLANCO = 235           # el canal más bajo de un píxel del fondo (≈ 250–254, ± JPG)
+NEUTRO_BLANCO = 14     # máx − mín de un píxel del fondo blanco
+BORDE_BLANCO = 0.9     # fracción del borde de la imagen que tiene que ser blanca (el damero da ≈ 0,5)
+
 # Portadas PNG con transparencia
 ALFA_DIBUJO = 253      # el alfa con que vienen los píxeles del dibujo (se lleva a 255)
 MOTA = 200             # manchas sueltas más chicas que esto (px de la fuente) se borran; las de hoy, ≤ 14
@@ -105,15 +121,27 @@ CARA_ARRIBA = 0.55     # cuánto pelo o gorra entra arriba de la frente, en anch
 CARA_AJUSTES = {
     # la mancha de Luciano suma la mano de la máquina: sin esto queda medio cuerpo
     'luciano': (0.0, 0.0, 0.85),
+    # el gorro chino de Joaquín sube más que cualquier pelo: un poco más arriba y más abierto, para que
+    # entre la punta sin achicar mucho la cara
+    'joaquin': (0.0, -0.07, 1.12),
 }
 
 # Lo que no sale solo, en px de la fuente.
 #   huecos: un punto adentro de un asomo chico del damero (fondo encerrado de menos de HUECO_AREA px)
+#           o, en el fondo blanco, de cualquier fondo encerrado
+#   zonas:  (x0, y0, x1, y1), sólo fondo blanco: todo lo claro y neutro que no es fondo es fondo
 AJUSTES = {
     # entre el pulgar de la mano de la máquina y la remera (20 px)
     'fabri': {'huecos': [(397, 432)]},
     # entre la mano de la máquina y la manga (79 px); el cuadrado blanco de la oreja es el arito (no va)
     'luciano': {'huecos': [(353, 564)]},
+    # debajo del ala del gorro, entre la máquina y el hombro (14.537 px). Lo demás claro y encerrado es
+    # el gi (tira a crema) y las cuchillas de la máquina
+    'joaquin': {'huecos': [(288, 389)]},
+    # entre el brazo que cuelga y la remera (1.004 px y dos rendijas más abajo)
+    'lautaro': {'zonas': [(750, 680, 790, 835)]},
+    # la rendija entre el brazo del tatuaje y la pechera (dos manchas de 30 y 99 px y lo que tapó el cierre)
+    'leo': {'zonas': [(686, 695, 704, 810)]},
 }
 
 CRUZ = ndimage.generate_binary_structure(2, 1)
@@ -155,12 +183,28 @@ def _damero_explica(lum_c, ys_c, xs_c, lum_f, ys_f, xs_f):
     return float(r2), float(np.median(np.abs(lum_c - pred))), float(p)
 
 
-def separar(a, nombre):
-    """Alfa (0..1) y color del personaje sobre la fuente entera, más lo que se hizo (para la revisión)."""
+def tipo_de_fondo(rgba):
+    """'transparente' (PNG con alfa), 'blanco' (fondo blanco liso) o 'damero' (dibujado en el JPG)."""
+    if (rgba[..., 3] < 250).any():
+        return 'transparente'
+    a = rgba[..., :3].astype(np.float32)
+    borde = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+    blanco = (borde.min(axis=1) >= BLANCO) & ((borde.max(axis=1) - borde.min(axis=1)) <= NEUTRO_BLANCO)
+    if blanco.mean() >= BORDE_BLANCO and np.percentile(_luminancia(borde[blanco]), 5) >= 245:
+        return 'blanco'
+    return 'damero'
+
+
+def separar(a, nombre, blanco=False):
+    """Alfa (0..1) y color del personaje sobre la fuente entera, más lo que se hizo (para la revisión).
+    Con `blanco`, la fuente tiene fondo blanco liso en vez del damero (ver el docstring)."""
     alto, ancho = a.shape[:2]
     mn, mx = a.min(axis=2), a.max(axis=2)
     lum = _luminancia(a)
-    claro = (mn >= CLARO) & ((mx - mn) <= NEUTRO)
+    if blanco:
+        claro = (mn >= BLANCO) & ((mx - mn) <= NEUTRO_BLANCO)
+    else:
+        claro = (mn >= CLARO) & ((mx - mn) <= NEUTRO)
     contorno = lum < OSCURO
     contorno |= ndimage.binary_closing(contorno, structure=_disco(CIERRE))
     pasa = claro & ~contorno
@@ -170,11 +214,14 @@ def separar(a, nombre):
     ids = np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
     fondo = np.isin(lab, ids[ids > 0])
 
-    # 2) fondo encerrado: manchas claras y neutras que el damero de alrededor explica
+    # 2) fondo encerrado: manchas claras y neutras que el damero de alrededor explica (en el fondo
+    #    blanco no hay con qué decidirlo: sólo las de AJUSTES)
     encerrado, _ = ndimage.label(pasa & ~fondo, structure=CRUZ)
     huecos = np.zeros_like(fondo)
     rng = np.random.default_rng(0)
     for i, sl in enumerate(ndimage.find_objects(encerrado)):
+        if blanco:
+            break
         m = encerrado[sl] == i + 1
         area = int(m.sum())
         if area < HUECO_AREA:
@@ -203,6 +250,11 @@ def separar(a, nombre):
         m = encerrado == encerrado[y, x]
         print(f'  {nombre}: hueco a mano ({x}, {y}): {int(m.sum())} px')
         huecos |= m
+    for (x0, y0, x1, y1) in AJUSTES.get(nombre, {}).get('zonas', []):
+        z = np.zeros_like(fondo)
+        z[y0:y1, x0:x1] = claro[y0:y1, x0:x1] & ~fondo[y0:y1, x0:x1]
+        print(f'  {nombre}: zona a mano x {x0}–{x1}, y {y0}–{y1}: {int(z.sum())} px')
+        huecos |= z
     fondo |= huecos
 
     # 3) la franja del JPG entre el damero y el contorno: «contorno + fondo»
@@ -213,8 +265,9 @@ def separar(a, nombre):
     d_nucleo, (iy, ix) = ndimage.distance_transform_edt(~nucleo, return_indices=True)
     suma = ndimage.uniform_filter(np.where(fondo, lum, 0).astype(np.float32), 9)
     cuenta = ndimage.uniform_filter(fondo.astype(np.float32), 9)
-    lum_fondo = np.where(cuenta > 1e-3, suma / np.maximum(cuenta, 1e-3), 243)
-    lum_fondo = np.where(lum_fondo > 150, lum_fondo, 243)
+    lum_def = 252 if blanco else 243          # el fondo típico, si no hay fondo cerca para medirlo
+    lum_fondo = np.where(cuenta > 1e-3, suma / np.maximum(cuenta, 1e-3), lum_def)
+    lum_fondo = np.where(lum_fondo > 150, lum_fondo, lum_def)
     mezcla = cerca & (d_nucleo <= 3)
     alfa = np.where(fondo, 0.0, 1.0).astype(np.float32)
     lum_nucleo = lum[iy, ix]
@@ -372,14 +425,15 @@ def main():
         carpeta = os.path.join(REPO, 'public', 'juego', 'personajes', nombre)
         if not os.path.isdir(carpeta):
             sys.exit(f'{nombre} no está en el juego (falta {carpeta})')
-        if os.path.exists(png):
-            rgba = np.asarray(Image.open(png).convert('RGBA'))
-            fuente = rgba[..., :3]
+        rgba = np.asarray(Image.open(png if os.path.exists(png) else jpg).convert('RGBA'))
+        fuente = rgba[..., :3]
+        tipo = tipo_de_fondo(rgba)
+        print(f'{nombre}: fondo {tipo}')
+        if tipo == 'transparente':
             alfa, color = desde_png(rgba)
             partes = None
         else:
-            fuente = np.asarray(Image.open(jpg).convert('RGB'))
-            alfa, color, partes = separar(fuente.astype(np.float32), nombre)
+            alfa, color, partes = separar(fuente.astype(np.float32), nombre, blanco=tipo == 'blanco')
         retrato = escalar(alfa, color, args.alto)
         destino = os.path.join(carpeta, 'retrato.webp')
         retrato.save(destino, 'WEBP', quality=CALIDAD, method=6)

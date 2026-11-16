@@ -356,6 +356,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Cada golpe que bloquea le da carga.',
     },
     frases: ['Cham-poo no perdona.', 'Disciplina, respeto y fade.', 'Mi gorro vuelve. Vos no.'],
+    retratoFijo: true,
     rutas: ruta('joaquin'),
   },
   nahuel: {
@@ -608,6 +609,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Sus golpes llegan más lejos que los de cualquiera.',
     },
     frases: ['Desde acá arriba te veo chiquito.', 'Agarrate, que vas para arriba.', 'Cuando me agrando, no hay techo.'],
+    retratoFijo: true,
     rutas: ruta('lautaro'),
   },
   leo: {
@@ -644,6 +646,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Cuando lo tiran al piso, se levanta antes que nadie.',
     },
     frases: ['Traje el cinturón completo.', 'Ojo con el spray, que pica.', 'Tijera, máquina y a casa.'],
+    retratoFijo: true,
     rutas: ruta('leo'),
   },
   // ─── Quinta tanda (14/nov): los dueños (sólo los eligen los dueños; los apodos pueden cambiar) ───
