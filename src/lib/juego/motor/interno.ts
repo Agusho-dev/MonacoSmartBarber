@@ -195,6 +195,11 @@ export interface InternoLuchador {
    * llegó a TOPE_ENCIERRO.inmuneDesde (TOPE_ENCIERRO.respiroInmune al terminar).
    */
   respiroInmune: number
+  /**
+   * Tamaño del luchador (1 = normal; un Boss del modo historia, ModificadorJefe.escala). Agranda su
+   * caja de daño, sus cajas de golpe y de dónde salen sus tiros. Constante en toda la partida.
+   */
+  escala: number
 }
 
 export interface EstadoFinal {

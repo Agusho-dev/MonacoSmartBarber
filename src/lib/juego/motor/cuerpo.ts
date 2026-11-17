@@ -26,30 +26,38 @@ export function dirDe(e: EntradaJugador): -1 | 0 | 1 {
   return 0
 }
 
-export function altoParado(l: LuchadorEstado): number {
-  return PERSONAJES[l.id].alturaMundo - 10
+/**
+ * Alto de la caja de daño de pie: el del dibujo menos 10. `escala` es el tamaño de un Boss del modo
+ * historia (InternoLuchador.escala); con 1 da lo mismo que siempre.
+ */
+export function altoParado(l: LuchadorEstado, escala = 1): number {
+  return PERSONAJES[l.id].alturaMundo * escala - 10
 }
 
-/** Caja de daño en coordenadas del mundo, o null si no se le puede pegar (tirado, cayendo). */
+/**
+ * Caja de daño en coordenadas del mundo, o null si no se le puede pegar (tirado, cayendo). Un Boss
+ * del modo historia (li.escala ≠ 1) la tiene más ancha y más alta, como su sprite.
+ */
 export function cajaCuerpo(l: LuchadorEstado, li: InternoLuchador): Caja | null {
   if (li.derribo > 0 || li.levantar > 0 || li.caidaDerribo > 0 || li.pose === 'ko' || li.agarradoPor !== null) return null
+  const e = li.escala
   if (!l.enSuelo) {
-    const m = CUERPO_AIRE.ancho / 2
-    return { x0: l.x - m, x1: l.x + m, y0: l.y, y1: l.y + CUERPO_AIRE.alto }
+    const m = (CUERPO_AIRE.ancho / 2) * e
+    return { x0: l.x - m, x1: l.x + m, y0: l.y, y1: l.y + CUERPO_AIRE.alto * e }
   }
   if (li.agachado) {
-    const m = CUERPO_AGACHADO.ancho / 2
-    return { x0: l.x - m, x1: l.x + m, y0: 0, y1: CUERPO_AGACHADO.alto }
+    const m = (CUERPO_AGACHADO.ancho / 2) * e
+    return { x0: l.x - m, x1: l.x + m, y0: 0, y1: CUERPO_AGACHADO.alto * e }
   }
   // El Gigante de Lautaro (DefMovimiento.cuerpo): mientras crece, la caja sigue al sprite.
   const a = li.accion
   const cu = a?.mov.cuerpo
   if (a && cu && a.t >= cu.desde && a.t < cu.hasta) {
-    const mg = cu.ancho / 2
-    return { x0: l.x - mg, x1: l.x + mg, y0: 0, y1: altoParado(l) * cu.altoMult }
+    const mg = (cu.ancho / 2) * e
+    return { x0: l.x - mg, x1: l.x + mg, y0: 0, y1: altoParado(l, e) * cu.altoMult }
   }
-  const m = CUERPO_ANCHO / 2
-  return { x0: l.x - m, x1: l.x + m, y0: 0, y1: altoParado(l) }
+  const m = (CUERPO_ANCHO / 2) * e
+  return { x0: l.x - m, x1: l.x + m, y0: 0, y1: altoParado(l, e) }
 }
 
 /** Franja vertical de la caja de empuje. */
@@ -62,11 +70,15 @@ export function franjaEmpuje(l: LuchadorEstado, li: InternoLuchador): { y0: numb
   return { y0: 0, y1: EMPUJE_CAJA.parado }
 }
 
-/** Caja de golpe de una ventana, espejada según hacia dónde mira. */
-export function cajaGolpe(l: LuchadorEstado, c: Caja): Caja {
-  const x0 = l.mira === 1 ? l.x + c.x0 : l.x - c.x1
-  const x1 = l.mira === 1 ? l.x + c.x1 : l.x - c.x0
-  return { x0, x1, y0: l.y + c.y0, y1: l.y + c.y1 }
+/**
+ * Caja de golpe de una ventana, espejada según hacia dónde mira. `escala` agranda la caja de un Boss
+ * del modo historia desde sus pies, como su sprite (con 1, la caja tal cual).
+ */
+export function cajaGolpe(l: LuchadorEstado, c: Caja, escala = 1): Caja {
+  const k = escala === 1 ? c : { x0: c.x0 * escala, x1: c.x1 * escala, y0: c.y0 * escala, y1: c.y1 * escala }
+  const x0 = l.mira === 1 ? l.x + k.x0 : l.x - k.x1
+  const x1 = l.mira === 1 ? l.x + k.x1 : l.x - k.x0
+  return { x0, x1, y0: l.y + k.y0, y1: l.y + k.y1 }
 }
 
 export function interseccion(a: Caja, b: Caja): Caja | null {

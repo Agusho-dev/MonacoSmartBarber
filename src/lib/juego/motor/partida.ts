@@ -6,7 +6,7 @@
  * Fases: presentacion → anuncio → pelea → (ko | tiempo) → entre_rounds → anuncio … y en el round
  * que define con KO: pelea → final → ko → entre_rounds → terminada.
  */
-import type { ConfigPartida, EntradaJugador, Lado, LuchadorEstado, Partida } from '../tipos'
+import type { ConfigPartida, EntradaJugador, Lado, LuchadorEstado, ModificadorJefe, Partida } from '../tipos'
 import { ENTRADA_VACIA, TPS } from '../tipos'
 import type { BotonRemate } from './acciones'
 import { avanzarAccion, cerrarTickAccion, iniciarRemate, REMATE_IMPACTO } from './acciones'
@@ -81,8 +81,21 @@ function limpiarEfectos(l: LuchadorEstado, li: InternoLuchador): void {
 function periciaCpu(config: ConfigPartida, kits: readonly [KitPersonaje, KitPersonaje], lado: Lado): number {
   const dif = config.dificultad
   const yo = kits[lado].cpu
-  if (config.cpu?.[otro(lado)]) return yo.pericia?.[dif] ?? 0
-  return (yo.periciaHumano?.[dif] ?? yo.pericia?.[dif] ?? 0) - (kits[otro(lado)].cpu.asistencia?.[dif] ?? 0)
+  // Un Boss del modo historia suma su pericia (ModificadorJefe.pericia) a la de siempre: así sigue
+  // emparejado contra cada barbero de la persona y además juega mejor. Sin `jefes`, lo de siempre.
+  const jefe = config.jefes?.[lado]?.pericia
+  const base = config.cpu?.[otro(lado)]
+    ? (yo.pericia?.[dif] ?? 0)
+    : (yo.periciaHumano?.[dif] ?? yo.pericia?.[dif] ?? 0) - (kits[otro(lado)].cpu.asistencia?.[dif] ?? 0)
+  return jefe ? base + jefe : base
+}
+
+/** Un Boss del modo historia arranca con su vida reforzada (ModificadorJefe.vida); sin jefe, igual. */
+function conJefe(l: LuchadorEstado, jefe: ModificadorJefe | null | undefined): LuchadorEstado {
+  if (!jefe) return l
+  l.vidaMax = Math.round(l.vidaMax * jefe.vida)
+  l.vida = l.vidaMax
+  return l
 }
 
 export function crearPartida(config: ConfigPartida): Partida {
@@ -103,7 +116,7 @@ export function crearPartida(config: ConfigPartida): Partida {
     tiempoRestante: ticksRound,
     turbo: false,
     rondasGanadas: [0, 0],
-    luchadores: [crearLuchador(id0, 0), crearLuchador(id1, 1)],
+    luchadores: [conJefe(crearLuchador(id0, 0), config.jefes?.[0]), conJefe(crearLuchador(id1, 1), config.jefes?.[1])],
     proyectiles: [],
     eventos: [],
     escalaTiempo: 1,
@@ -134,6 +147,7 @@ export function crearPartida(config: ConfigPartida): Partida {
     ultimoAcierto: [0, 0],
   }
   for (const lado of LADOS) p.luchadores[lado].carga = cargaDeInicio(I.kits[lado])
+  for (const lado of LADOS) I.luchadores[lado].escala = config.jefes?.[lado]?.escala ?? 1
   guardarInterno(p, I)
   emitir(p, { tipo: 'presentacion' })
   I.luchadores[0].pose = 'burla'

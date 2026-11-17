@@ -1,6 +1,6 @@
 'use client'
 
-import { CircleHelp, Trophy, Volume2, VolumeX } from 'lucide-react'
+import { ChevronRight, CircleHelp, Crown, Trophy, Volume2, VolumeX } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
@@ -20,6 +20,10 @@ interface Props {
   turno: EstadoTurnoJuego | null
   prefs: PreferenciasJuego
   onJugar: () => void
+  /** Modo historia (16/nov/2026): el Torneo de Monaco. */
+  onHistoria: () => void
+  /** El torneo guardado en el celular (piso que toca, 1..total), o null si no hay uno empezado. */
+  torneo: { piso: number; total: number } | null
   onRanking: () => void
   onComoSeJuega: () => void
   onSonido: () => void
@@ -32,7 +36,18 @@ const LOGO_MONACO = { src: '/juego/logo-monaco.webp', ancho: 720, alto: 199 } as
 const TOQUES_GESTO = 5
 const VENTANA_GESTO_MS = 3000
 
-export function PantallaInicio({ datos, luchadores, turno, prefs, onJugar, onRanking, onComoSeJuega, onSonido }: Props) {
+export function PantallaInicio({
+  datos,
+  luchadores,
+  turno,
+  prefs,
+  onJugar,
+  onHistoria,
+  torneo,
+  onRanking,
+  onComoSeJuega,
+  onSonido,
+}: Props) {
   const arena = ARENAS[datos.arenaInicial]
   const [sinLogo, setSinLogo] = useState(false)
   /** La capa del modo dueño (null: cerrada). Con ella abierta, Enter y espacio no arrancan. */
@@ -137,6 +152,15 @@ export function PantallaInicio({ datos, luchadores, turno, prefs, onJugar, onRan
         </div>
 
         <div className="cf-inicio__abajo">
+          {/* El modo historia: su propio botón (el resto de la portada sigue siendo «Tocá para jugar»). */}
+          <button type="button" className="cf-inicio__historia" onClick={onHistoria}>
+            <Crown className="cf-inicio__historia-corona" aria-hidden="true" />
+            <span className="cf-inicio__historia-texto">
+              <b>{torneo ? 'Seguir el torneo' : 'Modo historia'}</b>
+              <small>{torneo ? `Piso ${torneo.piso} de ${torneo.total}` : 'El Torneo de Monaco'}</small>
+            </span>
+            <ChevronRight className="cf-inicio__historia-flecha" aria-hidden="true" />
+          </button>
           <p className="cf-inicio__cta" aria-hidden="true">
             Tocá para jugar
           </p>

@@ -29,6 +29,8 @@ interface Props {
   tactil: boolean
   /** Etiqueta del golpe pesado del luchador (Máquina, Remate, Celular…) para la leyenda de teclas. */
   herramienta?: string
+  /** El botón de salir (por defecto «Cambiar barbero»; en el modo historia, «Volver a la torre»). */
+  textoSalir?: string
   onContinuar: () => void
   onReiniciar: () => void
   onComoSeJuega: () => void
@@ -44,6 +46,7 @@ export function MenuPausa({
   turno,
   tactil,
   herramienta = 'Máquina',
+  textoSalir = 'Cambiar barbero',
   onContinuar,
   onReiniciar,
   onComoSeJuega,
@@ -83,7 +86,7 @@ export function MenuPausa({
             {...alTocar(() => (confirmarSalida ? onSalir() : setConfirmarSalida(true)))}
           >
             <LogOut aria-hidden="true" />
-            <span>{confirmarSalida ? 'Tocá de nuevo para salir' : 'Cambiar barbero'}</span>
+            <span>{confirmarSalida ? 'Tocá de nuevo para salir' : textoSalir}</span>
           </button>
         </div>
 

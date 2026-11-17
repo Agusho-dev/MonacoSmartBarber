@@ -103,8 +103,10 @@ export function lanzarProyectil(p: Partida, I: EstadoInterno, lado: Lado, esp: D
       }
     : base
   const l = p.luchadores[lado]
-  let x = l.x + l.mira * d.salidaX
-  let y = l.y + d.salidaY
+  // Un Boss del modo historia (escala ≠ 1) tira desde su mano agrandada; con 1, lo de siempre.
+  const e = I.luchadores[lado].escala
+  let x = l.x + l.mira * d.salidaX * e
+  let y = l.y + d.salidaY * e
   let vx = l.mira * d.vx
   let vy = d.vy
   if (d.diferido) {
@@ -119,7 +121,7 @@ export function lanzarProyectil(p: Partida, I: EstadoInterno, lado: Lado, esp: D
     // y min/max: da lo mismo en todos los motores de JS. No lo sigue después.
     const r = p.luchadores[(1 - lado) as Lado]
     const ri = I.luchadores[(1 - lado) as Lado]
-    const yObjetivo = !r.enSuelo ? r.y + 75 : ri.agachado ? 60 : r.y + altoParado(r) * 0.55
+    const yObjetivo = !r.enSuelo ? r.y + 75 : ri.agachado ? 60 : r.y + altoParado(r, ri.escala) * 0.55
     const tope = Math.abs(d.vx) * 0.8
     vy = limitar((Math.abs(d.vx) * (yObjetivo - y)) / Math.max(60, Math.abs(r.x - x)), -tope, tope)
   } else if (d.rastrero) {
@@ -127,7 +129,7 @@ export function lanzarProyectil(p: Partida, I: EstadoInterno, lado: Lado, esp: D
     vy = 0
   }
   if (d.chorro) {
-    x = l.x + l.mira * (d.salidaX + d.ancho / 2)
+    x = l.x + l.mira * (d.salidaX * e + d.ancho / 2)
     vx = 0
     vy = 0
   }
@@ -307,7 +309,7 @@ function devolver(p: Partida, I: EstadoInterno, pi: ProyectilInterno, d: DefProy
   const dv = (a?.mov as DefEspecial | undefined)?.devuelve
   if (!a || !dv || a.t < dv.desde || a.t >= dv.hasta || !devolvible(pi, d)) return false
   const l = p.luchadores[lado]
-  if (!interseccion(caja(q), cajaGolpe(l, dv.caja))) return false
+  if (!interseccion(caja(q), cajaGolpe(l, dv.caja, I.luchadores[lado].escala))) return false
   pi.efectoTiro = efectoDelContacto(p, pi, d)
   q.duenio = lado
   q.vx = l.mira * Math.min(dv.max, Math.abs(q.vx) * dv.mult)
@@ -371,8 +373,9 @@ export function actualizarProyectiles(p: Partida, I: EstadoInterno, pegan: boole
       }
       medir(pi)
       q.mira = due.mira
-      q.x = due.x + due.mira * (d.salidaX + q.ancho / 2)
-      q.y = due.y + d.salidaY
+      const eDue = I.luchadores[q.duenio].escala
+      q.x = due.x + due.mira * (d.salidaX * eDue + q.ancho / 2)
+      q.y = due.y + d.salidaY * eDue
     } else if (d.diferido) {
       if (!pi.estallo && q.edad >= d.diferido.espera) pi.estallo = true
       medir(pi)

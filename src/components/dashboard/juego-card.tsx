@@ -349,8 +349,8 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
                 Jugar como dueño
               </p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Los Bosses (los personajes de los dueños) no los ve ningún cliente: aparecen sólo en el navegador donde abras este
-                pase, durante 90 días. Esas peleas no van al ranking.
+                Con el pase, los Bosses se pueden elegir en la pelea libre del navegador donde lo abras, durante 90 días (los
+                clientes sólo los enfrentan en el modo historia). Esas peleas no van al ranking.
               </p>
               <Button variant="outline" size="sm" className="w-full" onClick={() => void jugarComoDueno()} disabled={pidiendoPase}>
                 {pidiendoPase ? <Loader2 className="animate-spin" /> : <Crown />}
@@ -386,7 +386,7 @@ export function JuegoCard({ inicial, errorInicial }: Props) {
                   </div>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
                     Vale hasta el {format(new Date(pase.venceEn * 1000), "d 'de' MMMM 'de' yyyy", { locale: es })}. Con
-                    este enlace cualquiera ve a los Bosses: no lo compartas con clientes.
+                    este enlace cualquiera puede jugar con los Bosses: no lo compartas con clientes.
                   </p>
                 </div>
               )}

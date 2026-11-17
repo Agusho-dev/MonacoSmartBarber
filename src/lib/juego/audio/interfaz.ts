@@ -109,6 +109,26 @@ function puntos(m: Mesa, t: number, racha: number): void {
   m.osc(v, 'triangle', hz, t, fin + 0.01, g)
 }
 
+/**
+ * Modo historia: «¡Se acerca un Boss!». Un golpe grave y una sirena de dos tonos (La y Mi bemol, el
+ * tritono de las alarmas) que se repite tres veces, sin pasar del pico del VS.
+ */
+function alarma(m: Mesa, t: number): void {
+  const v = m.voz('anuncio', t, { volumen: 0.75, reverb: 0.35, saturar: true })
+  if (!v) return
+  const gB = m.ganancia(v, 0, v.salida)
+  const finB = envPercusion(gB.gain, t, 0.002, 0.8, 0.7)
+  const oB = m.osc(v, 'sine', 90, t, finB + 0.01, gB)
+  barrido(oB.frequency, t, 90, 32, 0.6)
+  const f = m.filtro(v, 'lowpass', 1800, 1.5, v.salida)
+  for (let i = 0; i < 6; i++) {
+    const ti = t + 0.12 + i * 0.2
+    const g = m.ganancia(v, 0, f)
+    const fin = envPercusion(g.gain, ti, 0.01, 0.07, 0.17)
+    m.osc(v, 'sawtooth', midiHz(i % 2 === 0 ? 69 : 63), ti, fin + 0.01, g)
+  }
+}
+
 /** `racha` = cuántos «puntos» seguidos van (lo lleva el que llama). */
 export function sonidoUi(m: Mesa, t: number, s: SonidoUi, racha: number): void {
   switch (s) {
@@ -132,6 +152,16 @@ export function sonidoUi(m: Mesa, t: number, s: SonidoUi, racha: number): void {
       break
     case 'puntos':
       puntos(m, t, racha)
+      break
+    case 'alarma':
+      alarma(m, t)
+      break
+    case 'subir':
+      // La torre sube un piso: un arpegio de La mayor que trepa.
+      blips(m, t, [69, 73, 76, 81, 85], 0.075, 0.2, 'pulso')
+      break
+    case 'cuenta':
+      blips(m, t, [76], 0.1, 0.22, 'triangle')
       break
   }
 }

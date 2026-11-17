@@ -1,9 +1,12 @@
 'use client'
 
 import '@/app/juego/sala.css'
+import '@/app/juego/historia.css'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { guardarPartidaJuego, obtenerEstadisticasPersonajes, validarPaseDuenos } from '@/lib/actions/juego'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
+import { esJefe, peleaDelPiso, TOTAL_PISOS } from '@/lib/juego/historia/jefes'
+import { caer, crearTorre, pisoActual, subir, terminada, type Campeon } from '@/lib/juego/historia/torre'
 import { Duelo, type EstadoDuelo } from '@/lib/juego/online/duelo'
 import { sanearNombre, versionJuego, type EstadoJugador } from '@/lib/juego/online/protocolo'
 import { marcadorCon, registrarResultadoOnline, useRegistroOnline } from '@/lib/juego/online/registro'
@@ -29,10 +32,18 @@ import { pedirPantallaCompleta } from '@/lib/juego/ui/pantalla-completa'
 import { revisarPase, usePaseDuenos } from '@/lib/juego/ui/pase-duenos'
 import { jugadorSugerido, personajeDelBarbero, personajeInicialOnline, rivalSugerido } from '@/lib/juego/ui/plantel'
 import { cancelarPrecarga, estadoPrecarga, precargar, usePrecarga } from '@/lib/juego/ui/precarga'
+import { guardarTorre, marcarIntroVista, sumarCampeon, useHistoria } from '@/lib/juego/ui/historia-guardada'
 import { guardarPreferencias, registrarPelea, usePreferencias } from '@/lib/juego/ui/preferencias'
 import type { PeleaDePrueba } from '@/lib/juego/ui/prueba'
 import type { Eleccion, FuentesJuego, Pantalla, ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
 import { vibrar } from '@/lib/juego/ui/vibrar'
+import { IntroHistoria } from './historia/intro-historia'
+import { PantallaCampeon } from './historia/pantalla-campeon'
+import { PantallaContinuar } from './historia/pantalla-continuar'
+import { PantallaTorre } from './historia/pantalla-torre'
+import { PresentacionJefe } from './historia/presentacion-jefe'
+import { SeleccionHistoria } from './historia/seleccion-historia'
+import { VictoriaPiso } from './historia/victoria-piso'
 import { RecursosFaltantes } from './imagen-juego'
 import { LogoCorteFinal } from './logo-corte-final'
 import { PantallaCarga } from './pantalla-carga'
@@ -69,11 +80,28 @@ interface EleccionUsuario {
   dificultad?: Dificultad
 }
 
-/** Las pantallas de siempre más las de la sala y las peleas online. */
-type PantallaRaiz = Pantalla | 'sala' | 'online-eleccion' | 'online-vs' | 'online-pelea' | 'online-resultado'
+/**
+ * Las pantallas de siempre, las de la sala y las peleas online, y las del modo historia (16/nov/2026:
+ * la intro, la elección, la torre, la presentación de un Boss, «¿Continuar?», el piso superado y el
+ * campeón). Las peleas del torneo usan las mismas 'vs', 'carga' y 'pelea' (modoPelea === 'historia').
+ */
+type PantallaRaiz =
+  | Pantalla
+  | 'sala'
+  | 'online-eleccion'
+  | 'online-vs'
+  | 'online-pelea'
+  | 'online-resultado'
+  | 'historia-intro'
+  | 'historia-eleccion'
+  | 'historia-torre'
+  | 'historia-jefe'
+  | 'historia-victoria'
+  | 'historia-continuar'
+  | 'historia-campeon'
 
 /** Con la pelea contra la CPU ya decidida: recién ahí se bajan los atlas de los dos. */
-const PANTALLAS_CON_PELEA: readonly PantallaRaiz[] = ['vs', 'carga', 'pelea', 'resultado']
+const PANTALLAS_CON_PELEA: readonly PantallaRaiz[] = ['vs', 'carga', 'pelea', 'resultado', 'historia-jefe', 'historia-continuar']
 
 /** Dónde se avisa que llegó alguien a la sala (en la pelea contra la CPU, sólo el chip chico). */
 const CON_AVISO_DE_SALA: readonly PantallaRaiz[] = ['inicio', 'seleccion', 'resultado']
@@ -180,6 +208,22 @@ export function JuegoRaiz({
   const [ultimoGuardado, setUltimoGuardado] = useState<{ apodo: string; puntaje: number } | null>(null)
   const [toast, setToast] = useState<{ texto: string; n: number } | null>(null)
 
+  // ─── Modo historia (el Torneo de Monaco) ─────────────────────────────────
+  /** El torneo guardado en el celular, la galería de campeones y si ya vio la intro. */
+  const historia = useHistoria()
+  /** De qué es la pelea que arranca en 'vs' / 'carga' / 'pelea': libre (la de siempre) o del torneo. */
+  const [modoPelea, setModoPelea] = useState<'libre' | 'historia'>('libre')
+  /** Lo que tocó en «¿Quién sube la torre?» (si no tocó nada, el sugerido). */
+  const [jugadorHistoriaElegido, setJugadorHistoriaElegido] = useState<IdPersonaje | null>(null)
+  const [dificultadHistoria, setDificultadHistoria] = useState<Dificultad | null>(null)
+  /** La torre se abre recién ganada una pelea: el jugador sube un piso con su sonido. */
+  const [subioPiso, setSubioPiso] = useState(false)
+  /** La última pelea del torneo y su piso (para «¡Piso superado!» y «¿Continuar?»). */
+  const [peleaHistoria, setPeleaHistoria] = useState<{ resultado: ResultadoPelea; piso: number; rival: IdPersonaje } | null>(null)
+  const [campeonNuevo, setCampeonNuevo] = useState<Campeon | null>(null)
+  /** Adónde vuelve la intro: a elegir (la primera vez) o a la torre («Ver la historia»). */
+  const [despuesDeIntro, setDespuesDeIntro] = useState<'historia-eleccion' | 'historia-torre'>('historia-eleccion')
+
   // ─── Sala y duelo online ─────────────────────────────────────────────────
   const { sala, estado: estadoSala } = useSala(datos.sucursal?.slug ?? null)
   const [duelo, setDuelo] = useState<Duelo | null>(null)
@@ -212,8 +256,23 @@ export function JuegoRaiz({
   const jugador = eleccionUsuario.jugador ?? jugadorSugerido(prefs.ultimoPersonaje, contextoPlantel)
   const rival = eleccionUsuario.rival ?? rivalSugerido(jugador, contextoPlantel)
   const arena = arenaJugable(eleccionUsuario.arena ?? datos.arenaInicial)
-  const eleccion: Eleccion = { jugador, rival, arena, dificultad: eleccionUsuario.dificultad ?? prefs.dificultad }
-  const rivalEsBarbero = barbero !== null && rival === barbero
+  const eleccionLibre: Eleccion = { jugador, rival, arena, dificultad: eleccionUsuario.dificultad ?? prefs.dificultad }
+
+  // El torneo: el piso que toca y la pelea que arma (historia/jefes.ts). En el torneo el jugador es
+  // siempre uno de los 17 barberos y el barbero del QR cuenta sólo si es uno de ellos (sin pase).
+  const torre = historia.torre && !terminada(historia.torre) ? historia.torre : null
+  const piso = torre ? pisoActual(torre) : null
+  const barberoCliente = personajeDelBarbero(datos.barberoAsignado, false)
+  const jugadorHistoria =
+    jugadorHistoriaElegido ?? jugadorSugerido(prefs.ultimoPersonaje, { barbero: barberoCliente, sucursal: datos.sucursal?.slug ?? null, conPase: false })
+  const peleaDelTorneo = torre && piso ? peleaDelPiso(torre.dificultad, piso.indice, piso.rival) : null
+  const enTorneo = modoPelea === 'historia' && torre !== null && piso !== null && peleaDelTorneo !== null
+  // La pelea que se arma en 'vs', 'carga' y 'pelea': la del torneo o la libre.
+  const eleccion: Eleccion =
+    enTorneo && torre && piso && peleaDelTorneo
+      ? { jugador: torre.jugador, rival: piso.rival, arena: arenaJugable(piso.arena), dificultad: peleaDelTorneo.dificultad }
+      : eleccionLibre
+  const rivalEsBarbero = barbero !== null && eleccion.rival === barbero
 
   // Online la arena es la de la sucursal (la misma para los dos: están en la misma sala).
   const arenaOnline = arenaJugable(datos.arenaInicial)
@@ -229,9 +288,9 @@ export function JuegoRaiz({
   // y la selección, nada: recorrer las 13 caras no gasta datos del celular.
   const peleaDecidida = personajesOnline !== null || PANTALLAS_CON_PELEA.includes(pantalla)
   const precarga = usePrecarga(
-    personajesOnline ? personajesOnline[0] : jugador,
-    personajesOnline ? personajesOnline[1] : rival,
-    personajesOnline ? arenaOnline : arena,
+    personajesOnline ? personajesOnline[0] : eleccion.jugador,
+    personajesOnline ? personajesOnline[1] : eleccion.rival,
+    personajesOnline ? arenaOnline : eleccion.arena,
     peleaDecidida,
   )
 
@@ -319,8 +378,12 @@ export function JuegoRaiz({
   const temaPantalla: TemaMusica | null | undefined =
     pantalla === 'pelea' || pantalla === 'online-pelea'
       ? undefined
-      : pantalla === 'vs' || pantalla === 'carga' || pantalla === 'online-vs'
+      : pantalla === 'vs' || pantalla === 'carga' || pantalla === 'online-vs' || pantalla === 'historia-jefe'
         ? null
+        : pantalla === 'historia-victoria' || pantalla === 'historia-campeon'
+          ? 'victoria'
+          : pantalla === 'historia-continuar'
+            ? 'derrota'
         : pantalla === 'resultado'
           ? resultado?.gano
             ? 'victoria'
@@ -626,17 +689,117 @@ export function JuegoRaiz({
   const pelear = () => {
     audio.desbloquear()
     audio.ui('confirmar')
+    setModoPelea('libre')
     precargar(jugador, rival, arena)
     irA('vs')
   }
 
   const alTerminarVs = () => {
-    const e = estadoPrecarga(jugador, rival, arena)
+    const e = estadoPrecarga(eleccion.jugador, eleccion.rival, eleccion.arena)
     if (e.estado === 'listo' && e.recursos) empezarPelea(e.recursos)
     else irA('carga')
   }
 
+  // ─── Modo historia ───────────────────────────────────────────────────────
+  /** Desde la portada: el torneo guardado, o la intro (la primera vez), o elegir barbero. */
+  const abrirHistoria = () => {
+    if (verTutorial || teToca) return
+    audio.desbloquear()
+    audio.ui('confirmar')
+    if (prefs.pantallaCompleta && esPantallaTactil()) void pedirPantallaCompleta()
+    if (torre) {
+      setSubioPiso(false)
+      irA('historia-torre')
+      return
+    }
+    if (!historia.introVista) {
+      setDespuesDeIntro('historia-eleccion')
+      irA('historia-intro')
+      return
+    }
+    irA('historia-eleccion')
+  }
+
+  const terminarIntro = () => {
+    marcarIntroVista()
+    setSubioPiso(false)
+    irA(torre ? despuesDeIntro : 'historia-eleccion')
+  }
+
+  const entrarAlTorneo = () => {
+    audio.ui('confirmar')
+    const nueva = crearTorre(
+      jugadorHistoria,
+      dificultadHistoria ?? prefs.dificultad,
+      barberoCliente,
+      Math.floor(Math.random() * 0x7fffffff),
+      Date.now(),
+    )
+    guardarPreferencias({ ultimoPersonaje: jugadorHistoria })
+    irA('historia-torre', () => {
+      guardarTorre(nueva)
+      setSubioPiso(false)
+    })
+  }
+
+  /** «¡A pelear!» en la torre: un Boss tiene su presentación antes del VS. */
+  const pelearPiso = () => {
+    if (!torre || !piso) return
+    audio.desbloquear()
+    audio.ui('confirmar')
+    setModoPelea('historia')
+    precargar(torre.jugador, piso.rival, arenaJugable(piso.arena))
+    irA(piso.jefe ? 'historia-jefe' : 'vs')
+  }
+
+  /**
+   * Termina una pelea del torneo: ganó, sube un piso (o es campeón); perdió, «¿Continuar?». La torre
+   * se guarda con la cortina ya cerrada (alCambiar): si no, la pelea que se va dibujaba un instante el
+   * HUD con el rival del piso siguiente. No va al ranking ni a los récords del celular: los Bosses
+   * vienen reforzados y se puede reintentar.
+   */
+  const terminarPeleaTorneo = (r: ResultadoPelea) => {
+    if (!torre) {
+      irA('inicio')
+      return
+    }
+    const pisoJugado = torre.piso
+    const datosPelea = { resultado: r, piso: pisoJugado, rival: r.eleccion.rival }
+    if (r.gano) {
+      const nueva = subir(torre, r.duracionSeg)
+      if (terminada(nueva)) {
+        const campeon: Campeon = {
+          id: torre.jugador,
+          dificultad: torre.dificultad,
+          fecha: Date.now(),
+          reintentos: nueva.reintentos,
+          segundos: nueva.segundosPelea,
+        }
+        irA('historia-campeon', () => {
+          sumarCampeon(campeon)
+          setCampeonNuevo(campeon)
+          setModoPelea('libre')
+        })
+        return
+      }
+      irA('historia-victoria', () => {
+        guardarTorre(nueva)
+        setPeleaHistoria(datosPelea)
+      })
+      return
+    }
+    const nueva = caer(torre, r.duracionSeg)
+    irA('historia-continuar', () => {
+      guardarTorre(nueva)
+      setPeleaHistoria(datosPelea)
+    })
+  }
+
   const terminarPelea = (r: ResultadoPelea) => {
+    if (modoPelea === 'historia') {
+      terminarPeleaTorneo(r)
+      return
+    }
     // Una pelea con un dueño no suma a los récords de este celular (ni al ranking ni a las
     // estadísticas de los barberos: el resultado no la guarda).
     const mejorAnterior = peleaConDuenos(r.eleccion.jugador, r.eleccion.rival)
@@ -715,6 +878,8 @@ export function JuegoRaiz({
             turno={turno}
             prefs={prefs}
             onJugar={jugar}
+            onHistoria={abrirHistoria}
+            torneo={torre ? { piso: torre.piso + 1, total: TOTAL_PISOS } : null}
             onRanking={() => {
               audio.desbloquear()
               verRanking()
@@ -739,7 +904,7 @@ export function JuegoRaiz({
 
         {pantalla === 'seleccion' && (
           <PantallaSeleccion
-            eleccion={eleccion}
+            eleccion={eleccionLibre}
             datos={datos}
             barbero={barbero}
             duenos={duenos}
@@ -762,7 +927,13 @@ export function JuegoRaiz({
         )}
 
         {pantalla === 'vs' && (
-          <PantallaVs eleccion={eleccion} rivalEsBarbero={rivalEsBarbero} audio={audio} onListo={alTerminarVs} />
+          <PantallaVs
+            eleccion={eleccion}
+            rivalEsBarbero={rivalEsBarbero}
+            audio={audio}
+            onListo={alTerminarVs}
+            historia={enTorneo && piso ? { jefe: piso.jefe, final: piso.final, piso: piso.indice + 1, total: TOTAL_PISOS } : undefined}
+          />
         )}
 
         {(pantalla === 'carga' || (pantalla === 'pelea' && !recursosPelea)) && (
@@ -772,14 +943,14 @@ export function JuegoRaiz({
             onListo={empezarPelea}
             onReintentar={() => {
               audio.ui('confirmar')
-              precargar(jugador, rival, arena)
+              precargar(eleccion.jugador, eleccion.rival, eleccion.arena)
             }}
             onVolver={() => {
               audio.ui('atras')
               // La carga abandonada no sigue bajando (ni deja una bajada colgada para el próximo
               // «¡A pelear!»): se cortan sus pedidos y lo ya bajado queda para retomar.
-              cancelarPrecarga(jugador, rival, arena)
-              irA('seleccion')
+              cancelarPrecarga(eleccion.jugador, eleccion.rival, eleccion.arena)
+              irA(enTorneo ? 'historia-torre' : 'seleccion')
             }}
           />
         )}
@@ -797,7 +968,8 @@ export function JuegoRaiz({
             sinTutorial={prueba !== null}
             onTerminar={terminarPelea}
             onReiniciar={() => irA('pelea', () => setIdPelea((n) => n + 1))}
-            onSalir={() => irA('seleccion')}
+            onSalir={() => irA(enTorneo ? 'historia-torre' : 'seleccion')}
+            historia={enTorneo && peleaDelTorneo ? { refuerzo: peleaDelTorneo.refuerzo, jefe: peleaDelTorneo.jefe } : undefined}
             superpuesto={
               <>
                 {estadoSala && estadoSala.otros.length > 0 && (
@@ -827,6 +999,111 @@ export function JuegoRaiz({
             onRanking={verRanking}
             onGuardado={(apodo, puntaje) => setUltimoGuardado({ apodo, puntaje })}
             sala={chipSala}
+          />
+        )}
+
+        {pantalla === 'historia-intro' && (
+          <IntroHistoria audio={audio} onTerminar={terminarIntro} />
+        )}
+
+        {pantalla === 'historia-eleccion' && (
+          <SeleccionHistoria
+            jugador={jugadorHistoria}
+            dificultad={dificultadHistoria ?? prefs.dificultad}
+            barbero={barberoCliente}
+            sucursal={datos.sucursal?.slug ?? null}
+            campeones={historia.campeones}
+            turno={turno}
+            onElegir={(id) => {
+              if (id === jugadorHistoria) return
+              audio.ui('elegir')
+              vibrar(10)
+              setJugadorHistoriaElegido(id)
+            }}
+            onDificultad={(d) => {
+              audio.ui('tocar')
+              setDificultadHistoria(d)
+            }}
+            onEntrar={entrarAlTorneo}
+            onVolver={() => {
+              audio.ui('atras')
+              irA('inicio')
+            }}
+            onTocar={() => audio.ui('tocar')}
+          />
+        )}
+
+        {pantalla === 'historia-torre' && torre && (
+          <PantallaTorre
+            torre={torre}
+            subio={subioPiso}
+            turno={turno}
+            audio={audio}
+            onPelear={pelearPiso}
+            onSalir={() => {
+              audio.ui('atras')
+              setModoPelea('libre')
+              irA('inicio')
+            }}
+            onVerHistoria={() => {
+              audio.ui('tocar')
+              setDespuesDeIntro('historia-torre')
+              irA('historia-intro')
+            }}
+          />
+        )}
+
+        {pantalla === 'historia-jefe' && piso && esJefe(piso.rival) && (
+          <PresentacionJefe key={piso.rival} jefe={piso.rival} audio={audio} onListo={() => irA('vs')} />
+        )}
+
+        {pantalla === 'historia-victoria' && peleaHistoria && (
+          <VictoriaPiso
+            key={peleaHistoria.resultado.id}
+            resultado={peleaHistoria.resultado}
+            piso={peleaHistoria.piso}
+            audio={audio}
+            onSeguir={() => {
+              audio.ui('confirmar')
+              irA('historia-torre', () => setSubioPiso(true))
+            }}
+          />
+        )}
+
+        {pantalla === 'historia-continuar' && peleaHistoria && torre && (
+          <PantallaContinuar
+            key={peleaHistoria.resultado.id}
+            rival={peleaHistoria.rival}
+            piso={peleaHistoria.piso}
+            derrotas={torre.derrotasPiso}
+            audio={audio}
+            onSi={() => {
+              audio.ui('confirmar')
+              // La misma pelea otra vez: los atlas ya están (si no, el VS los vuelve a pedir).
+              if (recursosPelea) irA('pelea', () => setIdPelea((n) => n + 1))
+              else irA('vs')
+            }}
+            onSalir={() => {
+              audio.ui('atras')
+              setModoPelea('libre')
+              irA('inicio')
+            }}
+          />
+        )}
+
+        {pantalla === 'historia-campeon' && campeonNuevo && (
+          <PantallaCampeon
+            campeon={campeonNuevo}
+            campeones={historia.campeones}
+            audio={audio}
+            onInicio={() => {
+              audio.ui('confirmar')
+              irA('inicio')
+            }}
+            onOtro={() => {
+              audio.ui('confirmar')
+              irA('historia-eleccion')
+            }}
           />
         )}
 

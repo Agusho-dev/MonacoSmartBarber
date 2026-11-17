@@ -123,7 +123,7 @@ function romperGuardia(p: Partida, I: EstadoInterno, victima: Lado, atacante: La
   vi.stun = 0
   vi.stunBloqueo = false
   p.estadisticas[atacante].guardiasRotas++
-  emitir(p, { tipo: 'guardia_rota', quien: victima, x: v.x, y: v.y + altoParado(v) * 0.6 })
+  emitir(p, { tipo: 'guardia_rota', quien: victima, x: v.x, y: v.y + altoParado(v, vi.escala) * 0.6 })
 }
 
 /** Duración real de un estado para esa víctima (Noches sin dormir: la mitad). */
@@ -219,8 +219,11 @@ function multiplicadorCombo(golpe: number): number {
  * pega con la herramienta o un especial). Con el puño y la patada no: medido, con armadura también
  * en esos Brian ganaba 3 de 4 en normal.
  */
-function tieneArmadura(kit: KitPersonaje, accion: Accion | null, fuerza: FuerzaGolpe): boolean {
+function tieneArmadura(kit: KitPersonaje, accion: Accion | null, fuerza: FuerzaGolpe, jefe = false): boolean {
   if (!accion || accion.remate) return false
+  // Un Boss del modo historia con armadura (ModificadorJefe.armadura): los leves no lo frenan
+  // mientras pega con lo que sea, en el piso, hasta que se le terminan las ventanas.
+  if (jefe && fuerza === 'leve' && !accion.mov.aereo && accion.t < finVentanas(accion.mov)) return true
   const ar = accion.mov.armadura
   if (ar && accion.t < ar.hasta && ar.contra.includes(fuerza)) return true
   const pas = kit.pasiva?.armaduraAtaques
@@ -243,11 +246,17 @@ function pinchar(p: Partida, I: EstadoInterno, imp: Impacto): void {
   emitir(p, { tipo: 'pinchazo', quien: imp.atacante, x: imp.x, y: imp.y })
 }
 
-/** Furia: con poca vida pega más (La 12 no para). */
+/**
+ * Furia: con poca vida pega más (La 12 no para). Y un Boss del modo historia pega más siempre
+ * (ModificadorJefe.danio): este factor multiplica todo el daño que hace, limpio, al bloqueo o contra
+ * armadura. Sin `jefes` el factor es el de siempre.
+ */
 function multFuria(p: Partida, I: EstadoInterno, lado: Lado): number {
   const f = I.kits[lado].pasiva?.furia
   const l = p.luchadores[lado]
-  return f && l.vida < l.vidaMax * f.umbral ? f.mult : 1
+  const furia = f && l.vida < l.vidaMax * f.umbral ? f.mult : 1
+  const jefe = p.config.jefes?.[lado]
+  return jefe ? furia * jefe.danio : furia
 }
 
 /** El agarre: lo levanta y lo deja 'agarrado' (lo aprieta y lo tira progresarAgarre). */
@@ -321,7 +330,7 @@ export function progresarAgarre(p: Partida, I: EstadoInterno, lado: Lado, a: Acc
       atacante: lado,
       victima: g.victima,
       x: vic.x,
-      y: vic.y + altoParado(vic) * 0.55,
+      y: vic.y + altoParado(vic, I.luchadores[g.victima].escala) * 0.55,
       danio: real,
       critico: false,
       bloqueado: false,
@@ -478,7 +487,7 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   // ─── Super armadura (Chipi con la herramienta, Brian mientras ataca: contra golpes leves) ───
   // Y el que llegó al tope del encierro (TOPE_ENCIERRO.tope), hasta que respire: aguanta cualquier
   // golpe así (le saca vida, pero no lo frena, no lo tira ni le pone ningún efecto).
-  if ((tieneArmadura(kitV, vi.accion, imp.fuerza) && imp.efecto === null) || aguantaGolpes(vi)) {
+  if ((tieneArmadura(kitV, vi.accion, imp.fuerza, p.config.jefes?.[imp.victima]?.armadura === true) && imp.efecto === null) || aguantaGolpes(vi)) {
     const danio = Math.max(1, Math.round(imp.danio * (1 - kitV.reduccionDanio) * furia))
     hacerDanio(p, I, imp.atacante, imp.victima, danio)
     stA.golpesAcertados++
@@ -660,7 +669,7 @@ export function contactosCuerpoACuerpo(p: Partida, I: EstadoInterno): Impacto[] 
       if (a.resueltas[i] || a.esperaVentana[i] > 0) continue
       const w = a.mov.ventanas[i]
       if (a.t < w.desde || a.t >= w.desde + w.ticks) continue
-      const inter = interseccion(cajaGolpe(l, w.caja), cuerpo)
+      const inter = interseccion(cajaGolpe(l, w.caja, li.escala), cuerpo)
       if (!inter) continue
       // Multigolpe: cuenta el contacto y se rearma; el último es el remate.
       const total = w.golpes ?? 1

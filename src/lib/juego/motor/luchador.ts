@@ -196,6 +196,7 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     sinControl: 0,
     conControl: 0,
     respiroInmune: 0,
+    escala: 1,
   }
 }
 

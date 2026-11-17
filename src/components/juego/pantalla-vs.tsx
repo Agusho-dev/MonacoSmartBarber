@@ -30,19 +30,22 @@ export function PantallaVs({
   audio,
   onListo,
   online,
+  historia,
 }: {
   eleccion: Eleccion
   rivalEsBarbero: boolean
   audio: AudioSeguro
   onListo: () => void
   online?: VsOnline
+  /** Modo historia: el piso del torneo y si el rival es un Boss (dorado, más grande, «Boss» en vez de «CPU»). */
+  historia?: { jefe: boolean; final: boolean; piso: number; total: number }
 }) {
   const jugador = PERSONAJES[online ? online.personajes[0] : eleccion.jugador]
   const rival = PERSONAJES[online ? online.personajes[1] : eleccion.rival]
   const arena = ARENAS[eleccion.arena]
   const etiquetas: [string, string] = online
     ? [online.nombres[0], online.nombres[1]]
-    : ['Vos', rivalEsBarbero ? 'Tu barbero' : 'CPU']
+    : ['Vos', historia?.jefe ? (historia.final ? 'Jefe final' : 'Boss') : rivalEsBarbero ? 'Tu barbero' : 'CPU']
   const listo = useEffectEvent(onListo)
 
   useEffect(() => {
@@ -56,6 +59,7 @@ export function PantallaVs({
     <section
       className="cf-pantalla cf-vs"
       aria-label={`${jugador.nombre} contra ${rival.nombre}`}
+      data-jefe={historia?.jefe ? '' : undefined}
       style={
         {
           '--cf-c1': jugador.color,
@@ -103,7 +107,8 @@ export function PantallaVs({
       <p className="cf-vs__arena">
         {online ? <Wifi aria-hidden="true" /> : <MapPin aria-hidden="true" />}
         <span>
-          Arena {arena.nombre} · {online ? 'Online' : NOMBRE_DIFICULTAD[eleccion.dificultad]}
+          Arena {arena.nombre} ·{' '}
+          {online ? 'Online' : historia ? `Piso ${historia.piso} de ${historia.total}` : NOMBRE_DIFICULTAD[eleccion.dificultad]}
         </span>
       </p>
       {online?.esperando && (

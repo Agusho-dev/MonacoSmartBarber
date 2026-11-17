@@ -1,0 +1,1769 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   «CORTE FINAL» — MODO HISTORIA (16/nov/2026): el Torneo de Monaco.
+   La torre de 9 pisos, los 4 Bosses (Nacho, Nehuen, Nico, Tony), «¿Continuar?» y el
+   campeón. Las mismas piezas que el resto del juego (cromo, cortes diagonales, la
+   fuente de títulos) con el oro de la Máquina de Oro como acento propio.
+   Pantallas sin paneo (touch-action: none): el pulgar que viene de la pelea puede seguir
+   apoyado; lo único que se desplaza es la lista de pisos y el campeón (pan-y).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cf-hist {
+  --cf-hist-oro: linear-gradient(180deg, #fff6cf 0%, #ffd45a 36%, #e3a400 60%, #8a5200 100%);
+  --cf-hist-borde: rgba(245, 179, 1, 0.6);
+  background: radial-gradient(120% 80% at 50% 0%, #1b1408 0%, var(--cf-negro) 62%);
+  touch-action: none;
+}
+
+@keyframes cf-hist-golpe {
+  from {
+    opacity: 0;
+    transform: skewX(-7deg) scale(1.7);
+  }
+  60% {
+    opacity: 1;
+    transform: skewX(-7deg) scale(0.96);
+  }
+  to {
+    transform: skewX(-7deg) scale(1);
+  }
+}
+
+@keyframes cf-hist-subir-texto {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@keyframes cf-hist-latido {
+  0%,
+  100% {
+    transform: scale(1) rotate(-6deg);
+  }
+  50% {
+    transform: scale(1.12) rotate(5deg);
+  }
+}
+
+@keyframes cf-hist-flotar {
+  50% {
+    transform: translateY(-10px) rotate(4deg);
+  }
+}
+
+/* ─── La portada: el botón del torneo ─────────────────────────────────────── */
+
+.cf-inicio__historia {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 7px 20px 7px 18px;
+  color: #1a1000;
+  text-align: left;
+  pointer-events: auto;
+  animation: cf-bajar-suave 0.7s var(--cf-salida) 0.55s both;
+  transition:
+    transform 0.12s var(--cf-salida),
+    filter 0.15s;
+}
+
+.cf-inicio__historia::before,
+.cf-inicio__historia::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.cf-inicio__historia::before {
+  inset: 0;
+  z-index: -2;
+  clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+  background: linear-gradient(180deg, #fffbe6, #7a4a00);
+}
+
+.cf-inicio__historia::after {
+  inset: 2px;
+  z-index: -1;
+  clip-path: polygon(13px 0, 100% 0, calc(100% - 13px) 100%, 0 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 48%),
+    linear-gradient(180deg, #ffd45a 0%, #e38a00 100%);
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.22);
+}
+
+.cf-inicio__historia:active {
+  transform: translateY(1px) scale(0.97);
+  filter: brightness(1.1);
+}
+
+.cf-inicio__historia-corona {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.55));
+  animation: cf-hist-latido 2.4s ease-in-out infinite;
+}
+
+.cf-inicio__historia-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cf-inicio__historia-texto b {
+  font-family: var(--cf-titulo);
+  font-weight: 400;
+  font-size: 27px;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cf-inicio__historia-texto small {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+
+.cf-inicio__historia-flecha {
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+}
+
+/* ─── La pelea: el Boss en el HUD y en el VS ──────────────────────────────── */
+
+.cf-hud .cf-hud__jefe {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #1a1000;
+  background: linear-gradient(180deg, #fff3b0, #f5b301);
+}
+
+.cf-hud__jefe svg {
+  width: 11px;
+  height: 11px;
+  margin-top: -1px;
+}
+
+@media (max-width: 400px) {
+  .cf-hud .cf-hud__cpu.cf-hud__jefe {
+    display: inline-flex;
+  }
+}
+
+.cf-hud[data-jefe] .cf-hud__lado[data-lado='1'] .cf-hud__cara {
+  box-shadow:
+    inset 0 0 0 2px #f5b301,
+    inset 0 0 10px rgba(245, 179, 1, 0.55);
+}
+
+/* El Boss en el VS: más grande, con aura dorada y «Boss» en su etiqueta. `scale` (y no
+   `transform`) para no pisar la animación de entrada del retrato. */
+.cf-vs[data-jefe] .cf-vs__lado--2 .cf-vs__retrato {
+  scale: 1.12;
+  transform-origin: center bottom;
+  filter: drop-shadow(0 0 22px rgba(245, 179, 1, 0.55)) drop-shadow(0 0 30px rgba(0, 0, 0, 0.9));
+}
+
+.cf-vs[data-jefe] .cf-vs__lado--2 .cf-vs__etiqueta {
+  color: #1a1000;
+  background: linear-gradient(180deg, #fff3b0, #f5b301);
+}
+
+/* ─── La intro: 4 viñetas ─────────────────────────────────────────────────── */
+
+.cf-hist-intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.cf-hist-intro__escena {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: calc(var(--cf-sa-t) + 28px) calc(var(--cf-sa-r) + 16px) 42vh calc(var(--cf-sa-l) + 16px);
+  animation: cf-hist-escena 0.7s var(--cf-salida) both;
+}
+
+@keyframes cf-hist-escena {
+  from {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+}
+
+.cf-hist-intro__tocar {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.cf-hist-intro__vineta {
+  position: relative;
+  z-index: 2;
+  margin: 0 calc(var(--cf-sa-r) + 14px) 0 calc(var(--cf-sa-l) + 14px);
+  padding: 14px 18px 18px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(24, 18, 8, 0.94), rgba(8, 6, 3, 0.97));
+  box-shadow: inset 0 0 0 2px var(--cf-hist-borde);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
+  animation: cf-hist-subir-texto 0.5s var(--cf-salida) 0.12s both;
+}
+
+.cf-hist-intro__numero {
+  margin: 0 0 6px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--cf-oro);
+}
+
+.cf-hist-intro__titulo {
+  margin-bottom: 8px;
+  font-size: clamp(30px, 9vw, 46px);
+}
+
+.cf-hist-intro__texto {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--cf-texto);
+  text-wrap: pretty;
+}
+
+.cf-hist-intro__pie {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px calc(var(--cf-sa-r) + 14px) calc(var(--cf-sa-b) + 14px) calc(var(--cf-sa-l) + 14px);
+  pointer-events: none;
+}
+
+.cf-hist-intro__botones {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.cf-hist-puntos {
+  display: flex;
+  gap: 6px;
+}
+
+.cf-hist-puntos span {
+  width: 16px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.2);
+  transform: skewX(-24deg);
+  transition:
+    width 0.3s var(--cf-salida),
+    background 0.3s;
+}
+
+.cf-hist-puntos span[data-visto] {
+  background: rgba(245, 179, 1, 0.45);
+}
+
+.cf-hist-puntos span[data-activo] {
+  width: 30px;
+  background: var(--cf-oro);
+}
+
+/* Viñeta 1: las caras del plantel. */
+.cf-hist-mosaico {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 420px);
+}
+
+.cf-hist-mosaico__cara {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 45%, #111), #09090c);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--cf-acento) 70%, transparent);
+  animation: cf-hist-cara 0.5s var(--cf-rebote) calc(var(--k) * 45ms) both;
+}
+
+@keyframes cf-hist-cara {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.6);
+  }
+}
+
+/* Viñeta 2: la Máquina de Oro. */
+.cf-hist-premio {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.cf-hist-premio__rayos {
+  position: absolute;
+  inset: -40% -20%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 212, 90, 0.28) 0deg 7deg, transparent 7deg 22deg);
+  -webkit-mask: radial-gradient(circle, #000 12%, transparent 62%);
+  mask: radial-gradient(circle, #000 12%, transparent 62%);
+  animation: cf-girar 20s linear infinite;
+}
+
+.cf-hist-premio__maquina {
+  position: relative;
+  height: min(40vh, 280px);
+  width: auto;
+  filter: drop-shadow(0 0 28px rgba(255, 212, 90, 0.75)) drop-shadow(0 12px 22px rgba(0, 0, 0, 0.8));
+  animation: cf-hist-flotar 2.6s ease-in-out infinite;
+}
+
+/* Viñeta 3: los 4 Bosses, en silueta con el borde dorado. */
+.cf-hist-cuatro {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 2px;
+  width: min(100%, 520px);
+  height: min(46vh, 380px);
+}
+
+.cf-hist-cuatro__jefe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 86%;
+  animation: cf-hist-cara 0.6s var(--cf-rebote) calc(0.15s + var(--k) * 0.16s) both;
+}
+
+.cf-hist-cuatro__jefe[data-final] {
+  height: 100%;
+}
+
+.cf-hist-cuatro__retrato {
+  position: relative;
+  flex: 1;
+  width: 140%;
+  filter: brightness(0.16) saturate(0) drop-shadow(0 0 1.5px #ffd45a) drop-shadow(0 0 10px rgba(245, 179, 1, 0.55));
+}
+
+.cf-hist-cuatro__nombre {
+  margin-top: 6px;
+  font-family: var(--cf-titulo);
+  font-size: clamp(18px, 5vw, 26px);
+  line-height: 1;
+  text-transform: uppercase;
+  color: #ffd45a;
+  text-shadow: 0 2px 0 #000;
+}
+
+/* Viñeta 4: la maqueta de la torre (los pisos de los Bosses, dorados). */
+.cf-hist-maqueta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: min(100%, 300px);
+}
+
+.cf-hist-maqueta__piso {
+  display: grid;
+  place-items: center;
+  width: calc(82% - var(--k) * 2.6%);
+  height: clamp(18px, 3.4vh, 30px);
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--cf-texto-2);
+  background: linear-gradient(180deg, #2c2d38, #111117);
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
+  animation: cf-hist-cara 0.45s var(--cf-rebote) calc(var(--k) * 70ms) both;
+}
+
+.cf-hist-maqueta__piso[data-jefe] {
+  color: #1a1000;
+  background: var(--cf-hist-oro);
+}
+
+/* ─── ¿Quién sube la torre? ───────────────────────────────────────────────── */
+
+.cf-hist-galeria-mini .cf-rotulo svg {
+  width: 16px;
+  height: 16px;
+  color: var(--cf-oro);
+}
+
+.cf-hist-galeria-mini__lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-hist-galeria-mini__lista li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 12px 3px 3px;
+  background: linear-gradient(90deg, rgba(245, 179, 1, 0.22), rgba(245, 179, 1, 0.06));
+  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-hist-galeria-mini__cara {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 45%, #111), #09090c);
+}
+
+.cf-hist-galeria-mini__nombre {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cf-hist-galeria-mini__nombre small {
+  margin-left: 4px;
+  font-size: 13px;
+  color: var(--cf-oro);
+}
+
+/* ─── La torre ────────────────────────────────────────────────────────────── */
+
+.cf-hist-torre {
+  display: flex;
+  flex-direction: column;
+}
+
+.cf-hist-torre__fondo {
+  position: absolute;
+  inset: 0;
+  opacity: 0.4;
+  filter: saturate(0.75);
+}
+
+.cf-hist-torre__velo {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90% 50% at 50% 100%, color-mix(in srgb, var(--cf-acento) 26%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(5, 5, 7, 0.55) 0%, rgba(5, 5, 7, 0.82) 45%, rgba(5, 5, 7, 0.95) 100%);
+}
+
+.cf-hist-torre .cf-barra-sup__titulo {
+  flex: 1 1 auto;
+}
+
+.cf-hist-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 3px 12px 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+  background: rgba(245, 179, 1, 0.12);
+  clip-path: polygon(7px 0, 100% 0, calc(100% - 7px) 100%, 0 100%);
+}
+
+.cf-hist-chip--boton {
+  padding: 0 12px;
+  color: var(--cf-texto);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.cf-hist-chip--boton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-hist-torre__cuerpo {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cf-hist-pisos {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  margin: 0;
+  padding: 4px calc(var(--cf-sa-r) + 14px) 10px calc(var(--cf-sa-l) + 14px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+
+.cf-hist-pisos::-webkit-scrollbar {
+  display: none;
+}
+
+.cf-hist-piso {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: 34px 44px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 4px 14px 4px 6px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  animation: cf-hist-cara 0.4s var(--cf-salida) both;
+}
+
+.cf-hist-piso__numero {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 21px;
+  line-height: 1;
+  color: var(--cf-texto-3);
+  text-align: center;
+}
+
+.cf-hist-piso__cara {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 45%, #111), #09090c);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+
+.cf-hist-piso__texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cf-hist-piso__texto b {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cf-hist-piso__texto small {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cf-texto-3);
+}
+
+.cf-hist-piso__corona {
+  width: 20px;
+  height: 20px;
+  color: var(--cf-oro);
+}
+
+/* Los pisos de los Bosses: dorados; el de Tony, más alto y con la corona que brilla. */
+.cf-hist-piso[data-jefe] {
+  background: linear-gradient(90deg, rgba(245, 179, 1, 0.24), rgba(245, 179, 1, 0.05));
+}
+
+.cf-hist-piso[data-jefe] .cf-hist-piso__numero,
+.cf-hist-piso[data-jefe] .cf-hist-piso__texto small {
+  color: var(--cf-oro);
+}
+
+.cf-hist-piso[data-final] {
+  min-height: 62px;
+  background: linear-gradient(90deg, rgba(255, 212, 90, 0.4), rgba(245, 179, 1, 0.08));
+}
+
+.cf-hist-piso[data-final] .cf-hist-piso__corona {
+  width: 26px;
+  height: 26px;
+  filter: drop-shadow(0 0 8px rgba(255, 212, 90, 0.9));
+  animation: cf-hist-latido 2s ease-in-out infinite;
+}
+
+.cf-hist-piso[data-estado='ganado'] {
+  opacity: 0.55;
+}
+
+.cf-hist-piso[data-estado='ganado'] .cf-hist-piso__cara {
+  filter: grayscale(1) brightness(0.7);
+}
+
+.cf-hist-piso__ko {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: #08130b;
+  background: #34d17a;
+  clip-path: polygon(5px 0, 100% 0, calc(100% - 5px) 100%, 0 100%);
+}
+
+.cf-hist-piso__ko svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 3;
+}
+
+.cf-hist-piso[data-estado='actual'] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--cf-acento) 50%, transparent), rgba(255, 255, 255, 0.05)),
+    rgba(0, 0, 0, 0.4);
+}
+
+.cf-hist-piso[data-estado='actual'][data-jefe] {
+  background:
+    linear-gradient(90deg, rgba(255, 212, 90, 0.55), rgba(245, 179, 1, 0.08)),
+    rgba(0, 0, 0, 0.4);
+}
+
+.cf-hist-piso[data-estado='actual'] .cf-hist-piso__numero {
+  visibility: hidden;
+}
+
+.cf-hist-piso[data-estado='pendiente']:not([data-jefe]) {
+  opacity: 0.8;
+}
+
+/* La cara del jugador en el piso que le toca (rebota; recién ganado, sube desde el de abajo). */
+.cf-hist-piso__vos {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  margin-top: -17px;
+  overflow: hidden;
+  background: #000;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  box-shadow: inset 0 0 0 2px var(--cf-acento);
+  animation: cf-hist-vos 1.4s ease-in-out infinite;
+}
+
+.cf-hist-piso[data-subio] .cf-hist-piso__vos {
+  animation:
+    cf-hist-subir 0.75s var(--cf-rebote) 0.25s both,
+    cf-hist-vos 1.4s ease-in-out 1.1s infinite;
+}
+
+@keyframes cf-hist-vos {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes cf-hist-subir {
+  from {
+    transform: translateY(58px);
+  }
+}
+
+/* La ficha del que sigue. */
+.cf-hist-rival {
+  position: relative;
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 6px calc(var(--cf-sa-r) + 14px) calc(var(--cf-sa-b) + 12px) calc(var(--cf-sa-l) + 14px);
+  background: linear-gradient(180deg, rgba(5, 5, 7, 0), rgba(5, 5, 7, 0.95) 22%);
+}
+
+.cf-hist-rival__retrato {
+  position: relative;
+  height: 172px;
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--cf-acento) 55%, transparent)) drop-shadow(0 8px 14px rgba(0, 0, 0, 0.8));
+  animation: cf-retrato-der 0.6s var(--cf-rebote) both;
+}
+
+.cf-hist-torre[data-jefe] .cf-hist-rival__retrato {
+  scale: 1.08;
+  transform-origin: center bottom;
+  filter: drop-shadow(0 0 20px rgba(245, 179, 1, 0.6)) drop-shadow(0 8px 14px rgba(0, 0, 0, 0.8));
+}
+
+.cf-hist-rival__placa {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding-bottom: 4px;
+  animation: cf-hist-subir-texto 0.45s var(--cf-salida) 0.15s both;
+}
+
+.cf-hist-rival__piso {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-hist-rival__piso svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cf-hist-rival__nombre {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--cf-titulo);
+  font-weight: 400;
+  font-size: clamp(36px, 11vw, 54px);
+  line-height: 0.9;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow:
+    0 3px 0 #000,
+    0 0 18px color-mix(in srgb, var(--cf-acento) 60%, transparent);
+  transform: skewX(-7deg);
+}
+
+.cf-hist-torre[data-jefe] .cf-hist-rival__nombre {
+  background: var(--cf-hist-oro);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 3px 0 #000);
+}
+
+.cf-hist-rival__apodo {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.1;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+}
+
+.cf-hist-rival__frase {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--cf-texto-2);
+}
+
+.cf-hist-rival__arena {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0;
+  font-family: var(--cf-numeros);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cf-texto-3);
+}
+
+.cf-hist-rival__arena svg {
+  width: 14px;
+  height: 14px;
+}
+
+.cf-hist-rival__pelear {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.cf-hist-torre[data-jefe] .cf-hist-rival__pelear {
+  --cf-acento: #ffd45a;
+  --cf-acento-2: #e38a00;
+}
+
+/* ─── La presentación de un Boss ──────────────────────────────────────────── */
+
+.cf-hist-jefe {
+  background: radial-gradient(100% 70% at 50% 35%, color-mix(in srgb, var(--cf-acento) 32%, #0a0806) 0%, #050507 72%);
+}
+
+.cf-hist-jefe__tocar {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.cf-hist-alarma {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  pointer-events: none;
+  background: #140003;
+  animation: cf-hist-parpadeo 0.42s steps(2) infinite;
+}
+
+@keyframes cf-hist-parpadeo {
+  50% {
+    background: #3c0008;
+  }
+}
+
+.cf-hist-alarma__franja {
+  position: absolute;
+  top: 16%;
+  left: -10%;
+  right: -10%;
+  height: 46px;
+  background: repeating-linear-gradient(-45deg, #f5b301 0 22px, #121212 22px 44px);
+  background-size: 62px 62px;
+  transform: rotate(-4deg);
+  animation: cf-hist-franja 0.6s linear infinite;
+}
+
+.cf-hist-alarma__franja--abajo {
+  top: auto;
+  bottom: 16%;
+  animation-direction: reverse;
+}
+
+@keyframes cf-hist-franja {
+  to {
+    background-position: 62px 0;
+  }
+}
+
+.cf-hist-alarma__icono {
+  width: 64px;
+  height: 64px;
+  color: var(--cf-rojo);
+  filter: drop-shadow(0 0 12px rgba(255, 46, 67, 0.85));
+  animation: cf-hist-alerta 0.42s ease-in-out infinite alternate;
+}
+
+@keyframes cf-hist-alerta {
+  to {
+    transform: scale(1.15);
+  }
+}
+
+.cf-hist-alarma__texto {
+  padding-inline: 12px;
+  font-size: clamp(38px, 11vw, 76px);
+  text-align: center;
+  background: linear-gradient(180deg, #fff 0%, #ffb3b3 44%, #ff2e43 55%, #7a0010 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: cf-hist-golpe 0.5s var(--cf-rebote) both;
+}
+
+.cf-hist[data-final] .cf-hist-alarma__texto {
+  background: var(--cf-hist-oro);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.cf-hist-alarma__sub {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #ffd0d4;
+  animation: cf-hist-subir-texto 0.4s var(--cf-salida) 0.2s both;
+}
+
+.cf-hist-jefe__aura {
+  position: absolute;
+  inset: -25%;
+  pointer-events: none;
+  background: repeating-conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--cf-acento) 34%, transparent) 0deg 6deg,
+    transparent 6deg 18deg,
+    rgba(245, 179, 1, 0.16) 18deg 21deg,
+    transparent 21deg 36deg
+  );
+  -webkit-mask: radial-gradient(circle at 50% 40%, #000 14%, transparent 62%);
+  mask: radial-gradient(circle at 50% 40%, #000 14%, transparent 62%);
+  animation: cf-girar 22s linear infinite;
+}
+
+.cf-hist-jefe__retrato {
+  position: absolute;
+  top: calc(var(--cf-sa-t) + 14px);
+  bottom: 36%;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 0 26px color-mix(in srgb, var(--cf-acento) 70%, transparent)) drop-shadow(0 12px 30px rgba(0, 0, 0, 0.85));
+  animation: cf-hist-entra-jefe 0.75s var(--cf-rebote) both;
+}
+
+.cf-hist[data-final] .cf-hist-jefe__retrato {
+  filter: drop-shadow(0 0 30px rgba(255, 212, 90, 0.8)) drop-shadow(0 12px 30px rgba(0, 0, 0, 0.85));
+}
+
+@keyframes cf-hist-entra-jefe {
+  from {
+    opacity: 0;
+    transform: scale(1.5) translateY(-4%);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+}
+
+.cf-hist-jefe__placa {
+  position: absolute;
+  left: calc(var(--cf-sa-l) + 16px);
+  right: calc(var(--cf-sa-r) + 16px);
+  bottom: calc(29% + 8px);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  animation: cf-hist-subir-texto 0.5s var(--cf-salida) 0.35s both;
+}
+
+.cf-hist-jefe__numero {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  text-shadow:
+    0 1px 0 #000,
+    0 0 8px rgba(0, 0, 0, 0.95);
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-hist-jefe__numero svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-hist-jefe__nombre {
+  font-size: clamp(58px, 18vw, 112px);
+}
+
+.cf-hist[data-final] .cf-hist-jefe__nombre {
+  background: var(--cf-hist-oro);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.cf-hist-jefe__apodo {
+  margin: 4px 0 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 2px 0 #000;
+}
+
+.cf-hist-jefe__lema {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+}
+
+/* El globo de diálogo (también el chico, en «¡Boss derrotado!» y en el campeón). */
+.cf-hist-dialogo {
+  position: absolute;
+  left: calc(var(--cf-sa-l) + 12px);
+  right: calc(var(--cf-sa-r) + 12px);
+  bottom: calc(var(--cf-sa-b) + 12px);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 27%;
+  padding: 12px 16px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(16, 13, 9, 0.96), rgba(6, 5, 4, 0.98));
+  box-shadow: inset 0 0 0 2px var(--cf-hist-borde);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
+  animation: cf-hist-subir-texto 0.4s var(--cf-salida) 0.5s both;
+}
+
+.cf-hist-dialogo__quien {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-hist-dialogo__texto {
+  flex: 1;
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.4;
+  color: #fff;
+  text-wrap: pretty;
+}
+
+.cf-hist-escribe__resto {
+  visibility: hidden;
+}
+
+.cf-hist-dialogo__pie {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cf-hist-dialogo__seguir {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--cf-numeros);
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cf-texto-3);
+  animation: cf-llamar 1.4s ease-in-out infinite;
+}
+
+.cf-hist-dialogo__seguir svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cf-hist-dialogo__pelear {
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  --cf-acento: #ffd45a;
+  --cf-acento-2: #e38a00;
+}
+
+.cf-hist-dialogo--chico {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  display: block;
+  width: min(100%, 460px);
+  min-height: 0;
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--cf-texto);
+  text-align: left;
+  animation-delay: 0.3s;
+}
+
+.cf-hist-dialogo--chico b {
+  margin-right: 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+/* ─── ¿Continuar? ─────────────────────────────────────────────────────────── */
+
+.cf-hist-continuar {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: radial-gradient(90% 60% at 50% 30%, color-mix(in srgb, var(--cf-acento) 26%, #160408) 0%, #050507 72%);
+}
+
+.cf-hist-continuar__retrato {
+  position: absolute;
+  top: calc(var(--cf-sa-t) + 12px);
+  bottom: 44%;
+  left: 0;
+  right: 0;
+  filter: drop-shadow(0 0 20px rgba(255, 46, 67, 0.35)) drop-shadow(0 10px 20px rgba(0, 0, 0, 0.8));
+  animation: cf-retrato-der 0.6s var(--cf-rebote) both;
+}
+
+.cf-hist-continuar__contenido {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px calc(var(--cf-sa-r) + 16px) calc(var(--cf-sa-b) + 16px) calc(var(--cf-sa-l) + 16px);
+  text-align: center;
+  background: linear-gradient(180deg, rgba(5, 5, 7, 0), rgba(5, 5, 7, 0.94) 22%);
+}
+
+.cf-hist-continuar__frase {
+  max-width: 36ch;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--cf-texto);
+}
+
+.cf-hist-continuar__frase b {
+  margin-right: 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cf-rojo);
+}
+
+.cf-hist-continuar__titulo {
+  font-size: clamp(50px, 15vw, 88px);
+  background: linear-gradient(180deg, #fff 0%, #ffc2c8 44%, #ff2e43 56%, #6b0010 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: cf-hist-golpe 0.55s var(--cf-rebote) both;
+}
+
+.cf-hist-continuar__cuenta {
+  margin: 4px 0 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: clamp(56px, 17vw, 100px);
+  line-height: 0.9;
+  color: #fff;
+  text-shadow:
+    0 0 24px rgba(255, 46, 67, 0.9),
+    0 4px 0 #000;
+  animation: cf-hist-cuenta 0.35s var(--cf-rebote) both;
+}
+
+@keyframes cf-hist-cuenta {
+  from {
+    opacity: 0.2;
+    transform: scale(1.6);
+  }
+}
+
+.cf-hist-continuar__botones .cf-btn--grande {
+  --cf-acento: #ffd45a;
+  --cf-acento-2: #e38a00;
+}
+
+.cf-hist-continuar__botones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.cf-hist-continuar__nota {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cf-texto-3);
+}
+
+/* ─── ¡Piso superado! / ¡Boss derrotado! ──────────────────────────────────── */
+
+.cf-hist-victoria {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: calc(var(--cf-sa-t) + 16px) calc(var(--cf-sa-r) + 16px) calc(var(--cf-sa-b) + 16px) calc(var(--cf-sa-l) + 16px);
+  text-align: center;
+}
+
+.cf-hist-victoria__rayos {
+  position: absolute;
+  inset: -30%;
+  pointer-events: none;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--cf-acento) 30%, transparent) 0deg 6deg, transparent 6deg 20deg);
+  -webkit-mask: radial-gradient(circle at 50% 45%, #000 12%, transparent 60%);
+  mask: radial-gradient(circle at 50% 45%, #000 12%, transparent 60%);
+  animation: cf-girar 26s linear infinite;
+}
+
+.cf-hist-victoria[data-jefe] .cf-hist-victoria__rayos {
+  background: repeating-conic-gradient(from 0deg, rgba(255, 212, 90, 0.32) 0deg 6deg, transparent 6deg 20deg);
+}
+
+.cf-hist-victoria__piso {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-hist-victoria__piso svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-hist-victoria__titulo {
+  position: relative;
+  font-size: clamp(44px, 12.5vw, 76px);
+  animation: cf-hist-golpe 0.6s var(--cf-rebote) both;
+}
+
+.cf-hist-victoria[data-jefe] .cf-hist-victoria__titulo {
+  background: var(--cf-hist-oro);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.cf-hist-victoria__duelo {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: end;
+  width: min(100%, 460px);
+  height: min(36vh, 300px);
+}
+
+.cf-hist-victoria__yo,
+.cf-hist-victoria__rival {
+  position: relative;
+  height: 100%;
+}
+
+.cf-hist-victoria__yo {
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--cf-acento) 55%, transparent));
+  animation: cf-retrato-izq 0.6s var(--cf-rebote) both;
+}
+
+/* El rival, vencido: el retrato gris que se va para atrás, con el sello del K.O. */
+.cf-hist-victoria__rival {
+  filter: grayscale(1) brightness(0.5);
+  transform: translate(4%, 4%) rotate(-9deg) scale(0.84);
+  transform-origin: right bottom;
+  animation: cf-hist-cae 0.7s var(--cf-salida) 0.15s both;
+}
+
+@keyframes cf-hist-cae {
+  from {
+    filter: none;
+    transform: none;
+  }
+}
+
+.cf-hist-victoria__ko {
+  position: absolute;
+  top: 34%;
+  left: 74%;
+  z-index: 2;
+  padding: 6px 10px 2px;
+  font-family: var(--cf-titulo);
+  font-size: clamp(38px, 11vw, 60px);
+  line-height: 1;
+  color: var(--cf-rojo);
+  border: 4px solid var(--cf-rojo);
+  text-shadow: 0 2px 0 #000;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%) rotate(-14deg);
+  animation: cf-hist-sello 0.45s var(--cf-rebote) 0.55s both;
+}
+
+@keyframes cf-hist-sello {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-14deg) scale(2.4);
+  }
+}
+
+.cf-hist-victoria__datos {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--cf-numeros);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+}
+
+.cf-hist-victoria__datos li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cf-hist-victoria__datos svg {
+  width: 17px;
+  height: 17px;
+  color: var(--cf-oro);
+}
+
+.cf-hist-victoria__seguir {
+  position: relative;
+  margin-top: 6px;
+}
+
+/* ─── ¡Campeón! ───────────────────────────────────────────────────────────── */
+
+.cf-hist-campeon {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  background: radial-gradient(110% 70% at 50% 25%, #3d2800 0%, #0d0904 60%, #050507 100%);
+}
+
+.cf-hist-campeon__rayos {
+  position: absolute;
+  inset: -45%;
+  pointer-events: none;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 212, 90, 0.26) 0deg 6deg, transparent 6deg 18deg);
+  -webkit-mask: radial-gradient(circle at 50% 38%, #000 10%, transparent 58%);
+  mask: radial-gradient(circle at 50% 38%, #000 10%, transparent 58%);
+  animation: cf-girar 30s linear infinite;
+}
+
+.cf-hist-confeti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cf-hist-confeti span {
+  position: absolute;
+  top: -6%;
+  left: var(--x);
+  width: 8px;
+  height: 14px;
+  opacity: 0.9;
+  transform: rotate(var(--giro));
+  animation: cf-hist-confeti var(--dur) linear var(--demora) infinite;
+}
+
+@keyframes cf-hist-confeti {
+  to {
+    transform: translateY(120vh) rotate(calc(var(--giro) + 720deg));
+  }
+}
+
+.cf-hist-campeon__desliza {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-height: 100%;
+  padding: calc(var(--cf-sa-t) + 16px) calc(var(--cf-sa-r) + 16px) calc(var(--cf-sa-b) + 22px) calc(var(--cf-sa-l) + 16px);
+  text-align: center;
+}
+
+.cf-hist-campeon__sobre {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--cf-oro);
+}
+
+.cf-hist-campeon__sobre svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-hist-campeon__titulo {
+  font-size: clamp(64px, 19vw, 124px);
+  background: var(--cf-hist-oro);
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: cf-hist-golpe 0.75s var(--cf-rebote) 0.1s both;
+}
+
+.cf-hist-campeon__escena {
+  position: relative;
+  flex-shrink: 0;
+  width: min(100%, 420px);
+  height: min(38vh, 320px);
+}
+
+.cf-hist-campeon__retrato {
+  position: absolute;
+  inset: 0 24% 0 0;
+  filter: drop-shadow(0 0 22px color-mix(in srgb, var(--cf-acento) 60%, transparent)) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.8));
+  animation: cf-retrato-izq 0.7s var(--cf-rebote) 0.2s both;
+}
+
+.cf-hist-campeon__maquina {
+  position: absolute;
+  right: 4%;
+  bottom: 6%;
+  width: auto;
+  height: 64%;
+  filter: drop-shadow(0 0 22px rgba(255, 212, 90, 0.85)) drop-shadow(0 8px 14px rgba(0, 0, 0, 0.8));
+  animation: cf-hist-flotar 2.4s ease-in-out infinite;
+}
+
+.cf-hist-campeon__nombre {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cf-texto);
+}
+
+.cf-hist-campeon__nombre b {
+  font-weight: 600;
+  color: #fff;
+}
+
+.cf-hist-campeon__final {
+  max-width: 38ch;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--cf-texto-2);
+  text-wrap: pretty;
+}
+
+.cf-hist-campeon__datos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 2px 0 0;
+}
+
+.cf-hist-campeon__datos div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 92px;
+  padding: 8px 14px 6px;
+  background: rgba(255, 255, 255, 0.07);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-hist-campeon__datos dt {
+  font-family: var(--cf-numeros);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cf-texto-3);
+}
+
+.cf-hist-campeon__datos dd {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1;
+  color: #fff;
+}
+
+.cf-hist-campeon__galeria {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.cf-hist-campeon__galeria ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-hist-campeon__galeria li {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 45%, #111), #09090c);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--cf-acento) 70%, transparent);
+}
+
+.cf-hist-campeon__galeria li[data-nuevo] {
+  box-shadow:
+    inset 0 0 0 2px #ffd45a,
+    inset 0 0 12px rgba(255, 212, 90, 0.7);
+}
+
+.cf-hist-campeon__botones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+/* ─── Horizontal (celular acostado) ───────────────────────────────────────── */
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .cf-inicio__historia {
+    position: absolute;
+    left: calc(var(--cf-sa-l) + 12px);
+    bottom: 0;
+    min-height: 50px;
+    padding: 6px 16px 6px 14px;
+    gap: 8px;
+  }
+
+  .cf-inicio__historia-texto b {
+    font-size: 21px;
+  }
+
+  .cf-inicio__historia-texto small {
+    font-size: 12px;
+  }
+
+  .cf-inicio__historia-corona {
+    width: 24px;
+    height: 24px;
+  }
+
+  .cf-inicio__historia-flecha {
+    display: none;
+  }
+
+  .cf-hist-intro__escena {
+    padding: calc(var(--cf-sa-t) + 12px) 46% 12px calc(var(--cf-sa-l) + 16px);
+  }
+
+  .cf-hist-intro {
+    justify-content: center;
+    align-items: flex-end;
+  }
+
+  .cf-hist-intro__vineta {
+    width: 50%;
+    margin: 0 calc(var(--cf-sa-r) + 14px) 0 0;
+  }
+
+  .cf-hist-intro__titulo {
+    font-size: clamp(26px, 8vh, 40px);
+  }
+
+  .cf-hist-intro__texto {
+    font-size: 15px;
+  }
+
+  .cf-hist-intro__pie {
+    width: 50%;
+    padding-top: 10px;
+  }
+
+  .cf-hist-mosaico {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .cf-hist-cuatro {
+    height: 74vh;
+  }
+
+  .cf-hist-premio__maquina {
+    height: 64vh;
+  }
+
+  .cf-hist-maqueta__piso {
+    height: 6.4vh;
+  }
+
+  .cf-hist-torre__cuerpo {
+    flex-direction: row;
+  }
+
+  .cf-hist-pisos {
+    flex: 0 0 48%;
+    padding-right: 8px;
+  }
+
+  .cf-hist-piso {
+    min-height: 44px;
+  }
+
+  .cf-hist-piso__cara {
+    width: 38px;
+    height: 38px;
+  }
+
+  .cf-hist-rival {
+    flex: 1;
+    grid-template-columns: minmax(110px, 38%) minmax(0, 1fr);
+    align-content: end;
+    padding-top: 0;
+    padding-left: 8px;
+    background: none;
+  }
+
+  .cf-hist-rival__retrato {
+    height: min(52vh, 210px);
+  }
+
+  .cf-hist-rival__nombre {
+    font-size: clamp(30px, 9vh, 46px);
+  }
+
+  .cf-hist-jefe__retrato {
+    top: calc(var(--cf-sa-t) + 8px);
+    bottom: 0;
+    right: 50%;
+  }
+
+  .cf-hist-jefe__placa {
+    top: calc(var(--cf-sa-t) + 16px);
+    bottom: auto;
+    left: 50%;
+  }
+
+  .cf-hist-jefe__nombre {
+    font-size: clamp(46px, 15vh, 84px);
+  }
+
+  .cf-hist-dialogo {
+    left: 48%;
+    min-height: 0;
+  }
+
+  .cf-hist-alarma__franja {
+    top: 8%;
+  }
+
+  .cf-hist-alarma__franja--abajo {
+    top: auto;
+    bottom: 8%;
+  }
+
+  .cf-hist-continuar {
+    justify-content: center;
+    align-items: flex-end;
+  }
+
+  .cf-hist-continuar__retrato {
+    right: 52%;
+    bottom: 0;
+  }
+
+  .cf-hist-continuar__contenido {
+    width: 56%;
+    padding-top: 8px;
+    gap: 6px;
+    background: none;
+  }
+
+  .cf-hist-continuar__titulo {
+    font-size: clamp(40px, 13vh, 64px);
+  }
+
+  .cf-hist-continuar__cuenta {
+    font-size: clamp(48px, 15vh, 80px);
+  }
+
+  .cf-hist-victoria {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr auto auto;
+    column-gap: 16px;
+    align-items: center;
+  }
+
+  .cf-hist-victoria__duelo {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    height: 78vh;
+  }
+
+  .cf-hist-victoria > :not(.cf-hist-victoria__duelo, .cf-hist-victoria__rayos) {
+    grid-column: 2;
+    justify-self: center;
+  }
+
+  .cf-hist-campeon__escena {
+    height: 62vh;
+  }
+}

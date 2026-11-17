@@ -17,6 +17,7 @@ import type {
   IdPersonaje,
   Lado,
   MetaAnimaciones,
+  ModificadorJefe,
   OpcionesRender,
   Partida,
   RecursosJuego,
@@ -149,6 +150,11 @@ interface Props {
    * va adentro para ubicarse con la disposición (debajo del HUD, sin tapar barras ni carga).
    */
   superpuesto?: ReactNode
+  /**
+   * Modo historia: el refuerzo del rival (ConfigPartida.jefes[1]; un Boss es más grande, tiene más
+   * vida y pega más) y si es un Boss (corona en el HUD). «Salir» de la pausa vuelve a la torre.
+   */
+  historia?: { refuerzo: ModificadorJefe; jefe: boolean }
 }
 
 export function PantallaPelea({
@@ -166,6 +172,7 @@ export function PantallaPelea({
   online,
   onAbandonarOnline,
   superpuesto,
+  historia,
 }: Props) {
   const { jugador, rival, arena, dificultad } = eleccion
   const { titulo: fuenteTitulo, numeros: fuenteNumeros } = fuentes
@@ -205,6 +212,15 @@ export function PantallaPelea({
   const fichasPorLado = [PERSONAJES[personajesPorLado[0]], PERSONAJES[personajesPorLado[1]]] as const
   const fichaJugador = fichasPorLado[ladoPropio]
   const nombreRival = online ? online.nombres[ladoPropio === 0 ? 1 : 0] : ''
+
+  // Modo historia: el refuerzo del rival en valores sueltos (la raíz arma el objeto en cada render y el
+  // montaje de la pelea no se puede volver a correr por eso).
+  const conRefuerzo = !online && historia !== undefined
+  const refEscala = historia?.refuerzo.escala ?? 1
+  const refVida = historia?.refuerzo.vida ?? 1
+  const refDanio = historia?.refuerzo.danio ?? 1
+  const refPericia = historia?.refuerzo.pericia ?? 0
+  const refArmadura = historia?.refuerzo.armadura === true
 
   const terminar = useEffectEvent((p: Partida) => {
     if (online) {
@@ -262,10 +278,16 @@ export function PantallaPelea({
     if (!raiz || !canvas) return
 
     let calidad = calidadInicial()
+    // Un Boss del modo historia se dibuja más grande (y el motor le agranda las cajas igual).
+    const escalaRival = conRefuerzo ? refEscala : 1
+    const refuerzo: ModificadorJefe | null = conRefuerzo
+      ? { escala: refEscala, vida: refVida, danio: refDanio, pericia: refPericia, armadura: refArmadura }
+      : null
     const opcionesRender = (c: Calidad): Partial<OpcionesRender> => ({
       calidad: c,
       fuentes: { titulo: fuenteTitulo, numeros: fuenteNumeros },
       numerosDeDanio: true,
+      ...(escalaRival !== 1 ? { escalas: { [rival]: escalaRival } } : {}),
     })
 
     const enLinea = online ?? null
@@ -285,6 +307,7 @@ export function PantallaPelea({
         segundosPorRound: SEGUNDOS_POR_ROUND,
         animaciones: [metaDe(recursos, personajes[0]), metaDe(recursos, personajes[1])],
         semilla: enLinea ? enLinea.arranque.semilla : Math.floor(Math.random() * 0x7fffffff),
+        ...(!enLinea && refuerzo ? { jefes: [null, refuerzo] as const } : {}),
       })
       render = crearRenderizador(canvas, recursos, opcionesRender(calidad))
     } catch (e) {
@@ -490,7 +513,24 @@ export function PantallaPelea({
         // Ya no importa: la pantalla se va.
       }
     }
-  }, [jugador, rival, arena, dificultad, recursos, fuenteTitulo, fuenteNumeros, audio, online, faltantes])
+  }, [
+    jugador,
+    rival,
+    arena,
+    dificultad,
+    recursos,
+    fuenteTitulo,
+    fuenteNumeros,
+    audio,
+    online,
+    faltantes,
+    conRefuerzo,
+    refEscala,
+    refVida,
+    refDanio,
+    refPericia,
+    refArmadura,
+  ])
 
   // Pausa, tutorial, avisos y errores congelan la pelea (y sueltan lo que estaba apretado).
   useEffect(() => {
@@ -570,6 +610,7 @@ export function PantallaPelea({
           rondasParaGanar={RONDAS_PARA_GANAR}
           segundos={SEGUNDOS_POR_ROUND}
           onPausa={pedirPausa}
+          jefe={historia?.jefe ?? false}
         />
       )}
       <ControlesPelea ficha={fichaJugador} />
@@ -581,6 +622,7 @@ export function PantallaPelea({
           turno={turno}
           tactil={tactil}
           herramienta={fichaJugador.herramientas[0]}
+          textoSalir={historia ? 'Volver a la torre' : undefined}
           onContinuar={() => {
             audio.ui('confirmar')
             setPausa(false)

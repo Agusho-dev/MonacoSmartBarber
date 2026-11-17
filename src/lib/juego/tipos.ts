@@ -748,6 +748,29 @@ export interface ConfigPartida {
   animaciones: [MetaAnimaciones, MetaAnimaciones]
   /** Semilla del azar (críticos, CPU): la partida es reproducible. */
   semilla: number
+  /**
+   * Modo historia (16/nov/2026): el lado que es un Boss del torneo viene reforzado (ver
+   * ModificadorJefe). Sólo lo pone el modo historia: sin esto (la pelea libre, el online, el
+   * simulador de siempre) la partida es idéntica a la de antes, tick por tick.
+   */
+  jefes?: readonly [ModificadorJefe | null, ModificadorJefe | null]
+}
+
+/**
+ * Un Boss del modo historia (src/lib/juego/historia/jefes.ts). Constante durante toda la partida:
+ * no entra en el hash del online porque el online nunca lo usa.
+ */
+export interface ModificadorJefe {
+  /** Tamaño (1 = normal): el sprite, la caja de daño, las cajas de golpe y de dónde salen sus tiros. */
+  escala: number
+  /** Vida máxima × esto. */
+  vida: number
+  /** El daño que hace × esto (golpes limpios, el chip al bloqueo y lo que entra contra armadura). */
+  danio: number
+  /** Se SUMA a la pericia de su CPU (EstiloCpu: corre los parámetros hacia la dificultad de arriba). */
+  pericia: number
+  /** Los golpes leves no lo frenan mientras ataca (la super armadura de Brian, en cualquier ataque). */
+  armadura?: boolean
 }
 
 export interface DesglosePuntaje {
@@ -793,6 +816,11 @@ export interface OpcionesRender {
   /** font-family CSS ya cargadas (next/font) para textos en el canvas. */
   fuentes: { titulo: string; numeros: string }
   numerosDeDanio: boolean
+  /**
+   * Modo historia: el tamaño de un Boss (ModificadorJefe.escala) por personaje. El atlas se prepara
+   * con la altura multiplicada, así el sprite y todo lo que se ubica con `alturaMundo` lo sigue.
+   */
+  escalas?: Partial<Record<IdPersonaje, number>>
 }
 
 export interface Renderizador {
@@ -803,7 +831,11 @@ export interface Renderizador {
   destruir(): void
 }
 
-export type SonidoUi = 'tocar' | 'confirmar' | 'atras' | 'elegir' | 'vs' | 'error' | 'puntos'
+/**
+ * Sonidos de la interfaz. Los tres últimos son del modo historia (16/nov/2026): la alarma de un Boss
+ * que se acerca, la torre que sube un piso y cada número de «¿Continuar?».
+ */
+export type SonidoUi = 'tocar' | 'confirmar' | 'atras' | 'elegir' | 'vs' | 'error' | 'puntos' | 'alarma' | 'subir' | 'cuenta'
 export type TemaMusica = 'menu' | 'pelea' | 'victoria' | 'derrota'
 
 export interface AudioJuego {

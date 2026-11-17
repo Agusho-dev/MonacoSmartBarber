@@ -1,6 +1,6 @@
 'use client'
 
-import { Pause, Zap } from 'lucide-react'
+import { Crown, Pause, Zap } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { espejarRetrato } from '@/lib/juego/personajes'
 import type { FichaPersonaje, Lado } from '@/lib/juego/tipos'
@@ -18,14 +18,21 @@ export function HudPelea({
   rondasParaGanar,
   segundos,
   onPausa,
+  jefe = false,
 }: {
   fichas: [FichaPersonaje, FichaPersonaje]
   rondasParaGanar: number
   segundos: number
   onPausa: () => void
+  /**
+   * Modo historia: el rival (lado 1) es un Boss. Lleva la corona y «Boss» en vez de «CPU», y la barra
+   * de vida dorada (juego.css, `[data-jefe]`). Sólo contra la CPU: online no hay Bosses reforzados, así
+   * que sala/hud-online.tsx no lo necesita.
+   */
+  jefe?: boolean
 }) {
   return (
-    <div className="cf-hud">
+    <div className="cf-hud" data-jefe={jefe ? '' : undefined}>
       <LadoHud lado={0} ficha={fichas[0]} rondas={rondasParaGanar} />
       <div className="cf-hud__centro">
         <div className="cf-reloj" data-hud="marco-reloj" aria-hidden="true">
@@ -42,12 +49,12 @@ export function HudPelea({
           <Pause />
         </button>
       </div>
-      <LadoHud lado={1} ficha={fichas[1]} rondas={rondasParaGanar} />
+      <LadoHud lado={1} ficha={fichas[1]} rondas={rondasParaGanar} jefe={jefe} />
     </div>
   )
 }
 
-function LadoHud({ lado, ficha, rondas }: { lado: Lado; ficha: FichaPersonaje; rondas: number }) {
+function LadoHud({ lado, ficha, rondas, jefe = false }: { lado: Lado; ficha: FichaPersonaje; rondas: number; jefe?: boolean }) {
   return (
     <div
       className="cf-hud__lado"
@@ -61,7 +68,15 @@ function LadoHud({ lado, ficha, rondas }: { lado: Lado; ficha: FichaPersonaje; r
       <div className="cf-hud__barras">
         <div className="cf-hud__fila">
           <span className="cf-hud__nombre">{ficha.nombre}</span>
-          {lado === 1 && <span className="cf-hud__cpu">CPU</span>}
+          {lado === 1 &&
+            (jefe ? (
+              <span className="cf-hud__cpu cf-hud__jefe">
+                <Crown aria-hidden="true" />
+                Boss
+              </span>
+            ) : (
+              <span className="cf-hud__cpu">CPU</span>
+            ))}
           <EstadosHud lado={lado} />
         </div>
         <div className="cf-vida" data-hud={`barra-vida-${lado}`} data-nivel="alta">

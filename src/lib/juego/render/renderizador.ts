@@ -202,10 +202,21 @@ export function crearRenderizadorImpl(
   let altoCss = 0
   let dprPedido = 1
 
+  /**
+   * La ficha con la que se dibuja: la del catálogo o, para un Boss del modo historia
+   * (`opciones.escalas`), la misma con la altura multiplicada. Así el sprite, la cabeza, el rapado y
+   * todo efecto que se ubica con `alturaMundo` crecen juntos.
+   */
+  function fichaDe(id: IdPersonaje) {
+    const ficha = PERSONAJES[id]
+    const k = opciones.escalas?.[id]
+    return ficha && k && k !== 1 ? { ...ficha, alturaMundo: ficha.alturaMundo * k } : ficha
+  }
+
   function atlasDe(id: IdPersonaje): AtlasPreparado | null {
     if (atlasPorId.has(id)) return atlasPorId.get(id) ?? null
     const r = recursos.atlas[id]
-    const ficha = PERSONAJES[id]
+    const ficha = fichaDe(id)
     let at: AtlasPreparado | null = null
     if (r && ficha) at = prepararAtlas(ficha, r.datos, r.imagen)
     if (!at) console.error(`[juego] falta el atlas de «${id}»: se dibuja una silueta`)
@@ -218,7 +229,7 @@ export function crearRenderizadorImpl(
     if (peladoPorId.has(id)) return peladoPorId.get(id)?.at ?? null
     const base = recursos.atlas[id]
     const rapado = rapados[id]
-    const ficha = PERSONAJES[id]
+    const ficha = fichaDe(id)
     let hecho: { at: AtlasPreparado; lienzo: HTMLCanvasElement } | null = null
     if (base && rapado && ficha) {
       try {
