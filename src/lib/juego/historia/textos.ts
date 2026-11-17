@@ -1,8 +1,9 @@
 /**
  * Los textos del modo historia (16/nov/2026): la intro, lo que dice cada Boss y el final de cada
- * barbero. Nacho NO es dueño: es el programador y admin del sistema («El Admin»); el que programó el
- * torneo. Los otros tres Bosses van por su apodo. Los barberos de los pisos de abajo hablan con las
- * `frases` de su ficha (personajes.ts): no hay texto nuevo para ellos.
+ * barbero. Nacho NO es dueño: es el programador y admin del sistema; el que programó el torneo. Los
+ * apodos de los Bosses los eligió el usuario (16/nov): el Admin, el Ghost, el Sabio y el Jefe (son los
+ * de su ficha, personajes.ts). Los barberos de los pisos de abajo hablan con las `frases` de su ficha:
+ * no hay texto nuevo para ellos.
  *
  * Sin `@/`: lo importan las pantallas y se puede revisar desde Node.
  */
@@ -31,7 +32,7 @@ export const INTRO: readonly Vineta[] = [
     escena: 'jefes',
     titulo: 'Los Bosses',
     texto:
-      'La Máquina de Oro no está sola. La cuidan los Bosses: Nacho, el que programó el torneo; Nehuen, el Fantasma; Nico, el Dorado; y arriba de todo, Tony, el Jefe.',
+      'La Máquina de Oro no está sola. La cuidan los Bosses: Nacho, el Admin; Nehuen, el Ghost; Nico, el Sabio; y arriba de todo, Tony, el Jefe.',
   },
   {
     escena: 'torre',
@@ -63,15 +64,15 @@ export const TEXTOS_JEFES: Readonly<Record<IdJefe, TextosJefe>> = {
   },
   nehuen: {
     titulo: 'Nadie lo ve llegar',
-    antes: ['¿Me viste llegar? Nadie me ve llegar.', 'En Caseros me dicen El Fantasma. Ya vas a entender por qué.'],
+    antes: ['¿Me viste llegar? Nadie me ve llegar.', 'En Caseros me dicen El Ghost. Ya vas a entender por qué.'],
     derrota: 'Me viste… Pocos me ven. Seguí, que lo que viene es peor.',
     victoria: 'Ni me viste pasar. Volvé cuando aprendas a mirar.',
   },
   nico_m: {
-    titulo: 'Todo lo que toca es oro',
-    antes: ['Llegaste lejos. Acá se te termina el brillo.', 'Todo lo que toco se vuelve oro. Vos vas a ser la excepción.'],
-    derrota: 'Brillás más de lo que pensaba. Arriba te espera el Jefe.',
-    victoria: 'El oro no se regala. Se gana.',
+    titulo: 'Siempre sabe qué vas a hacer',
+    antes: ['Llegaste lejos. Lástima que yo ya sé cómo termina esto.', 'Me dicen El Sabio: tu próximo golpe ya lo vi venir.'],
+    derrota: 'No lo vi venir… Primera vez que me pasa. Arriba te espera el Jefe.',
+    victoria: 'Te avisé que ya sabía cómo terminaba. Estudiá un poco y volvé.',
   },
   tony: {
     titulo: 'El dueño de la Máquina de Oro',

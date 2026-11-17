@@ -649,7 +649,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     retratoFijo: true,
     rutas: ruta('leo'),
   },
-  // ─── Quinta tanda (14/nov): los dueños (sólo los eligen los dueños; los apodos pueden cambiar) ───
+  // ─── Quinta tanda (14/nov): los dueños (sólo los eligen los dueños; apodos elegidos por el usuario el 16/nov) ───
   nacho: {
     id: 'nacho',
     nombre: 'Nacho',
@@ -691,7 +691,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
   nehuen: {
     id: 'nehuen',
     nombre: 'Nehuen',
-    apodo: 'El Fantasma',
+    apodo: 'El Ghost',
     staffId: '4d35842c-9eb4-4d78-9a0d-92cc4e4f8e60',
     sucursal: 'caseros',
     // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).
@@ -728,7 +728,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
   nico_m: {
     id: 'nico_m',
     nombre: 'Nico M.',
-    apodo: 'El Dorado',
+    apodo: 'El Sabio',
     staffId: '7608c22a-e8cb-43be-8017-319ccc8d8fff',
     sucursal: 'rondeau',
     // Sólo lo eligen los dueños, con su pase (los clientes no lo ven nunca).

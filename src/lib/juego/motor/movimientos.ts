@@ -2649,7 +2649,7 @@ const NACHO: KitPersonaje = {
   },
 }
 
-// ─── Nehuen «El Fantasma» (dueño): cruza intocable y devuelve lo que le tiran ──
+// ─── Nehuen «El Ghost» (dueño): cruza intocable y devuelve lo que le tiran ──
 
 const NEHUEN: KitPersonaje = {
   caminar: 4.2,
@@ -2744,7 +2744,7 @@ const NEHUEN: KitPersonaje = {
   },
 }
 
-// ─── Nico M. «El Dorado» (dueño): el zoner; anillos que cruzan la pantalla y púas que esperan en el piso ──
+// ─── Nico M. «El Sabio» (dueño): el zoner; anillos que cruzan la pantalla y púas que esperan en el piso ──
 
 const NICO_M: KitPersonaje = {
   caminar: 3.6,
